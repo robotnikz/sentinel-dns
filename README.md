@@ -1,31 +1,54 @@
 ﻿<div align="center">
-	<img src="./public/sentinel.svg" width="96" height="96" alt="Sentinel-DNS" />
+<img src="public/sentinel.svg" width="96" height="96" alt="Sentinel-DNS" />
 
-	<h1>Sentinel-DNS</h1>
+<h1>Sentinel-DNS</h1>
 
-	<p>
-		DNS blocker appliance (Pi-hole/AdGuard-style) with a Web UI + API and an embedded DNS stack.
-	</p>
+<p>
+	DNS blocker appliance (Pi-hole/AdGuard-style) with a Web UI + API and an embedded DNS stack.
+</p>
 
-	<p>
-		<a href="#quickstart">Quickstart</a>
-		· <a href="#configuration">Configuration</a>
-		· <a href="#architecture">Architecture</a>
-		· <a href="#development">Development</a>
-	</p>
+<p>
+	<a href="https://github.com/robotnikz/sentinel-dns/stargazers">
+		<img alt="Stars" src="https://img.shields.io/github/stars/robotnikz/sentinel-dns?style=flat-square" />
+	</a>
+	<a href="https://github.com/robotnikz/sentinel-dns/issues">
+		<img alt="Issues" src="https://img.shields.io/github/issues/robotnikz/sentinel-dns?style=flat-square" />
+	</a>
+	<a href="https://github.com/robotnikz/sentinel-dns/commits/main">
+		<img alt="Last Commit" src="https://img.shields.io/github/last-commit/robotnikz/sentinel-dns?style=flat-square" />
+	</a>
+	<a href="https://docs.docker.com/compose/">
+		<img alt="Docker Compose" src="https://img.shields.io/badge/docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white" />
+	</a>
+	<a href="https://nodejs.org/">
+		<img alt="Node" src="https://img.shields.io/badge/node-20%2B-339933?style=flat-square&logo=node.js&logoColor=white" />
+	</a>
+	<a href="https://www.typescriptlang.org/">
+		<img alt="TypeScript" src="https://img.shields.io/badge/typescript-3178C6?style=flat-square&logo=typescript&logoColor=white" />
+	</a>
+</p>
+
+<p>
+	<a href="#quickstart">Quickstart</a>
+	· <a href="#deploy-on-a-linux-server">Deploy (Linux)</a>
+	· <a href="#features">Features</a>
+	· <a href="#architecture">Architecture</a>
+	· <a href="#development">Development</a>
+</p>
 </div>
 
-## Highlights
+## Features
 
 - Single-container deployment (UI + API + Postgres + Unbound)
 - Upstream forwarding via UDP / DoT / DoH (presets + custom resolvers)
 - Blocklists + rewrite rules (local DNS records)
-- Query logs, metrics, and a client activity map
+- Query logs + metrics + DNS Activity Map (per-client view)
+- “Honest UI”: status indicators reflect actual backend behavior
 - Optional remote access via embedded Tailscale (exit node support)
 
 ## Quickstart
 
-Prerequisites: Docker Desktop
+Prerequisites: Docker + Docker Compose
 
 ```bash
 docker compose up -d --build
@@ -36,7 +59,24 @@ Endpoints:
 - Web UI + API: http://localhost:8080
 - DNS service: `127.0.0.1:53` (UDP/TCP)
 
-To use Sentinel as your network DNS, point your clients/router to the host running the container.
+## Deploy on a Linux server
+
+Typical flow (Ubuntu/Debian-style):
+
+1. Install Docker Engine + Compose plugin
+2. Open ports `53/tcp`, `53/udp`, `8080/tcp` (or put `8080` behind a reverse proxy)
+3. Deploy:
+
+```bash
+git clone https://github.com/robotnikz/sentinel-dns
+cd sentinel-dns
+docker compose up -d --build
+```
+
+Important: many Linux systems run a local DNS stub on port 53 (e.g. `systemd-resolved`).
+If port 53 is already in use, either disable the stub resolver or change the port mapping in `docker-compose.yml`.
+
+Persistent data is stored in the `sentinel-data` Docker volume (mounted at `/data` inside the container).
 
 ## First run
 
@@ -84,14 +124,17 @@ The dashboard world map uses a local MaxMind `.mmdb` database.
 
 Copy a database into the running container:
 
-```powershell
-docker cp .\GeoLite2-Country.mmdb sentinel-dns-sentinel-1:/data/GeoLite2-Country.mmdb
+```bash
+docker cp ./GeoLite2-Country.mmdb sentinel-dns-sentinel-1:/data/GeoLite2-Country.mmdb
+docker compose restart
 ```
 
-Then restart:
+## Troubleshooting
 
 ```bash
-docker compose restart
+docker compose ps
+docker compose logs -f
+curl -fsS http://localhost:8080/api/health
 ```
 
 ## DNS rewrite smoke test
