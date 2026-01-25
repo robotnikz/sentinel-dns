@@ -6,6 +6,7 @@ FROM node:22-bookworm
 
 # Build stage uses dev deps (Vite/TS). Runtime NODE_ENV is set later.
 ENV NODE_ENV=development
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV UPSTREAM_DNS=127.0.0.1:5335
 ENV FRONTEND_ORIGIN=http://localhost:8080
 
