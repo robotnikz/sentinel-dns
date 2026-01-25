@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Match in-app brand mark: white tile + black hexagon -->
+  <rect x="4" y="4" width="56" height="56" rx="12" fill="#ffffff" />
+  <path
+    d="M32 16 L44.5 23.2 V40.8 L32 48 L19.5 40.8 V23.2 Z"
+    fill="none"
+    stroke="#000000"
+    stroke-width="5"
+    stroke-linejoin="round"
+  />
+</svg>

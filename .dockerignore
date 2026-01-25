@@ -1,0 +1,19 @@
+# Ignore local dependencies (host OS)
+node_modules
+server/node_modules
+
+# Build outputs
+/dist
+server/dist
+
+# VCS / editor
+.git
+.vscode
+
+# Local env
+.env
+.env.*
+
+# OS cruft
+Thumbs.db
+.DS_Store

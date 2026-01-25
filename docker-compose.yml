@@ -1,0 +1,27 @@
+services:
+  sentinel:
+    build:
+      context: .
+      dockerfile: docker/single/Dockerfile
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+      - "8080:8080"
+    # Optional standard settings only.
+    environment:
+      - TZ=${TZ:-UTC}
+      - GEOIP_DB_PATH=${GEOIP_DB_PATH:-/data/GeoLite2-City.mmdb}
+      - SHADOW_RESOLVE_BLOCKED=${SHADOW_RESOLVE_BLOCKED:-true}
+    volumes:
+      - sentinel-data:/data
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv6.conf.all.forwarding: "1"
+    restart: unless-stopped
+
+volumes:
+  sentinel-data:

@@ -1,0 +1,5 @@
+{
+  "name": "SentinelDNS",
+  "description": "Next-generation DNS Blocker and Network Guardian dashboard. Features AI-powered threat analysis, parental controls, and real-time telemetry.",
+  "requestFramePermissions": []
+}

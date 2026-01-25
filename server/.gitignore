@@ -1,0 +1,13 @@
+node_modules/
+dist/
+
+# Logs
+*.log
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Coverage
+coverage/

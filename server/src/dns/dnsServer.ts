@@ -1,0 +1,1712 @@
+import dgram from 'node:dgram';
+import net from 'node:net';
+import tls from 'node:tls';
+import crypto from 'node:crypto';
+import dnsPacket from 'dns-packet';
+import ipaddr from 'ipaddr.js';
+
+import type { AppConfig } from '../config.js';
+import type { Db } from '../db.js';
+import { refreshBlocklist } from '../blocklists/refresh.js';
+
+type RuleMatchDecision = {
+  decision: 'ALLOWED' | 'BLOCKED' | 'SHADOW_BLOCKED' | 'NONE';
+  blocklistId?: string;
+};
+
+type RulesIndex = {
+  manualAllowed: Set<string>;
+  manualBlocked: Set<string>;
+  // Domain -> blocklist id(s) that contain it.
+  blockedByDomain: Map<string, string | string[]>;
+};
+
+type RulesCache = {
+  loadedAt: number;
+  maxId: number;
+  includedIdsKey: string;
+  index: RulesIndex;
+};
+
+type BlocklistStatus = {
+  enabled: boolean;
+  mode: 'ACTIVE' | 'SHADOW';
+  name: string;
+};
+
+type BlocklistsCache = {
+  loadedAt: number;
+  byId: Map<string, BlocklistStatus>;
+};
+
+type ContentCategory =
+  | 'adult'
+  | 'gambling'
+  | 'social'
+  | 'piracy'
+  | 'dating'
+  | 'crypto'
+  | 'shopping'
+  | 'news'
+  | 'game'
+  | 'video';
+
+type AppService =
+  | '9gag'
+  | 'amazon'
+  | 'bereal'
+  | 'blizzard'
+  | 'chatgpt'
+  | 'dailymotion'
+  | 'discord'
+  | 'disneyplus'
+  | 'ebay'
+  | 'facebook'
+  | 'fortnite'
+  | 'google-chat'
+  | 'hbomax'
+  | 'hulu'
+  | 'imgur'
+  | 'instagram'
+  | 'leagueoflegends'
+  | 'mastodon'
+  | 'messenger'
+  | 'minecraft'
+  | 'netflix'
+  | 'pinterest'
+  | 'playstation-network'
+  | 'primevideo'
+  | 'reddit'
+  | 'roblox'
+  | 'signal'
+  | 'skype'
+  | 'snapchat'
+  | 'spotify'
+  | 'steam'
+  | 'telegram'
+  | 'tiktok'
+  | 'tinder'
+  | 'tumblr'
+  | 'twitch'
+  | 'twitter'
+  | 'vimeo'
+  | 'vk'
+  | 'whatsapp'
+  | 'xboxlive'
+  | 'youtube'
+  | 'zoom';
+
+type ScheduleModeType = 'sleep' | 'homework' | 'total_block' | 'custom';
+
+type Schedule = {
+  id: string;
+  name: string;
+  days: Array<'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat' | 'Sun'>;
+  startTime: string;
+  endTime: string;
+  active: boolean;
+  mode: ScheduleModeType;
+  blockedCategories: ContentCategory[];
+  blockedApps: AppService[];
+  blockAll?: boolean;
+};
+
+type ClientProfile = {
+  id: string;
+  name: string;
+  ip?: string;
+  cidr?: string;
+  useGlobalSettings?: boolean;
+  useGlobalCategories?: boolean;
+  useGlobalApps?: boolean;
+  assignedBlocklists?: string[];
+  isInternetPaused?: boolean;
+  blockedCategories?: ContentCategory[];
+  blockedApps?: AppService[];
+  schedules?: Schedule[];
+};
+
+function normalizeScheduleMode(value: any): ScheduleModeType {
+  const mode = String(value ?? '').trim();
+  if (mode === 'sleep') return 'sleep';
+  if (mode === 'homework') return 'homework';
+  if (mode === 'total_block') return 'total_block';
+  return 'custom';
+}
+
+type ClientsCache = {
+  loadedAt: number;
+  clients: ClientProfile[];
+};
+
+type CategoryBlocklistsCache = {
+  loadedAt: number;
+  byCategory: Map<ContentCategory, string[]>;
+};
+
+type AppBlocklistsCache = {
+  loadedAt: number;
+  byApp: Map<AppService, string[]>;
+};
+
+type RewriteEntry = {
+  id: string;
+  domain: string;
+  target: string;
+};
+
+type RewritesCache = {
+  loadedAt: number;
+  byDomain: Map<string, RewriteEntry>;
+};
+
+type UpstreamCache = {
+  loadedAt: number;
+  upstream:
+    | { transport: 'udp' | 'tcp' | 'dot'; host: string; port: number }
+    | { transport: 'doh'; dohUrl: string };
+};
+
+type ProtectionPauseState =
+  | { mode: 'OFF' }
+  | { mode: 'FOREVER' }
+  | { mode: 'UNTIL'; untilMs: number };
+
+function parseProtectionPauseSetting(value: any): ProtectionPauseState {
+  if (!value || typeof value !== 'object') return { mode: 'OFF' };
+  const mode = value.mode === 'FOREVER' ? 'FOREVER' : value.mode === 'UNTIL' ? 'UNTIL' : 'OFF';
+  if (mode === 'FOREVER') return { mode: 'FOREVER' };
+  if (mode === 'UNTIL') {
+    const untilIso = typeof value.until === 'string' ? value.until : '';
+    const untilMs = untilIso ? Date.parse(untilIso) : NaN;
+    if (Number.isFinite(untilMs)) return { mode: 'UNTIL', untilMs };
+  }
+  return { mode: 'OFF' };
+}
+
+function isProtectionPaused(state: ProtectionPauseState): boolean {
+  if (state.mode === 'FOREVER') return true;
+  if (state.mode === 'UNTIL') return Date.now() < state.untilMs;
+  return false;
+}
+
+function parseGlobalBlockedAppsSetting(value: any): AppService[] {
+  if (Array.isArray(value)) return value.map((x: any) => String(x)).filter(Boolean) as any;
+  if (!value || typeof value !== 'object') return [];
+  const raw = (value as any).blockedApps;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x: any) => String(x)).filter(Boolean) as any;
+}
+
+function parseGlobalShadowAppsSetting(value: any): AppService[] {
+  if (!value || typeof value !== 'object') return [];
+  const raw = (value as any).shadowApps;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((x: any) => String(x)).filter(Boolean) as any;
+}
+
+function parseHostPort(value: string): { host: string; port: number } {
+  const trimmed = value.trim();
+  const idx = trimmed.lastIndexOf(':');
+  if (idx <= 0) return { host: trimmed, port: 53 };
+  const host = trimmed.slice(0, idx);
+  const port = Number(trimmed.slice(idx + 1));
+  return { host, port: Number.isFinite(port) ? port : 53 };
+}
+
+function normalizeName(name: string): string {
+  const n = String(name || '').trim().toLowerCase();
+  return n.endsWith('.') ? n.slice(0, -1) : n;
+}
+
+function matchesDomain(ruleDomain: string, queryName: string): boolean {
+  const r = normalizeName(ruleDomain);
+  const q = normalizeName(queryName);
+  return q === r || q.endsWith(`.${r}`);
+}
+
+function extractBlocklistId(category?: string): string | null {
+  if (!category) return null;
+  if (!category.startsWith('Blocklist:')) return null;
+  const rest = category.slice('Blocklist:'.length);
+  const idx = rest.indexOf(':');
+  if (idx <= 0) return null;
+  const id = rest.slice(0, idx).trim();
+  return id ? id : null;
+}
+
+function formatBlocklistCategory(id: string, name?: string): string {
+  const safeId = String(id ?? '').trim();
+  const safeName = String(name ?? '').trim();
+  if (!safeId) return 'Blocklist:unknown';
+  return safeName ? `Blocklist:${safeId}:${safeName}` : `Blocklist:${safeId}`;
+}
+
+function buildCandidateDomains(queryName: string): string[] {
+  const q = normalizeName(queryName);
+  if (!q) return [];
+  const parts = q.split('.').filter(Boolean);
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    out.push(parts.slice(i).join('.'));
+  }
+  return out;
+}
+
+function decideRuleIndexed(
+  index: RulesIndex,
+  queryName: string,
+  blocklistsById: Map<string, BlocklistStatus>,
+  selectedBlocklists: Set<string>
+): RuleMatchDecision {
+  const candidates = buildCandidateDomains(queryName);
+  if (!candidates.length) return { decision: 'NONE' };
+
+  // Allow should win over block.
+  for (const c of candidates) {
+    if (index.manualAllowed.has(c)) return { decision: 'ALLOWED' };
+  }
+
+  for (const c of candidates) {
+    if (index.manualBlocked.has(c)) return { decision: 'BLOCKED' };
+
+    const hit = index.blockedByDomain.get(c);
+    if (!hit) continue;
+
+    const ids = typeof hit === 'string' ? [hit] : hit;
+    let shadowId: string | undefined;
+
+    for (const id of ids) {
+      if (!selectedBlocklists.has(id)) continue;
+      const st = blocklistsById.get(id);
+      if (!st) continue;
+
+      if (st.mode === 'SHADOW') {
+        shadowId ??= id;
+        continue;
+      }
+
+      return { decision: 'BLOCKED', blocklistId: id };
+    }
+
+    if (shadowId) return { decision: 'SHADOW_BLOCKED', blocklistId: shadowId };
+  }
+
+  return { decision: 'NONE' };
+}
+
+const CATEGORY_BLOCKLIST_URLS: Record<ContentCategory, string[]> = {
+  adult: [
+    'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts',
+    'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/nsfw.txt'
+  ],
+  gambling: [
+    'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts',
+    'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/gambling.txt'
+  ],
+  social: [
+    'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts',
+    'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt'
+  ],
+  piracy: [
+    'https://blocklistproject.github.io/Lists/alt-version/piracy-nl.txt',
+    'https://blocklistproject.github.io/Lists/alt-version/torrent-nl.txt',
+    'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt'
+  ],
+  dating: ['https://raw.githubusercontent.com/nextdns/services/main/services/tinder'],
+  crypto: [],
+  shopping: [],
+  news: [],
+  game: [],
+  video: []
+};
+
+const APP_BLOCKLIST_URLS: Record<AppService, string[]> = {
+  '9gag': ['https://raw.githubusercontent.com/nextdns/services/main/services/9gag'],
+  amazon: ['https://raw.githubusercontent.com/nextdns/services/main/services/amazon'],
+  bereal: ['https://raw.githubusercontent.com/nextdns/services/main/services/bereal'],
+  blizzard: ['https://raw.githubusercontent.com/nextdns/services/main/services/blizzard'],
+  chatgpt: ['https://raw.githubusercontent.com/nextdns/services/main/services/chatgpt'],
+  dailymotion: ['https://raw.githubusercontent.com/nextdns/services/main/services/dailymotion'],
+  discord: ['https://raw.githubusercontent.com/nextdns/services/main/services/discord'],
+  disneyplus: ['https://raw.githubusercontent.com/nextdns/services/main/services/disneyplus'],
+  ebay: ['https://raw.githubusercontent.com/nextdns/services/main/services/ebay'],
+  facebook: ['https://raw.githubusercontent.com/nextdns/services/main/services/facebook'],
+  fortnite: ['https://raw.githubusercontent.com/nextdns/services/main/services/fortnite'],
+  'google-chat': ['https://raw.githubusercontent.com/nextdns/services/main/services/google-chat'],
+  hbomax: ['https://raw.githubusercontent.com/nextdns/services/main/services/hbomax'],
+  hulu: ['https://raw.githubusercontent.com/nextdns/services/main/services/hulu'],
+  imgur: ['https://raw.githubusercontent.com/nextdns/services/main/services/imgur'],
+  instagram: ['https://raw.githubusercontent.com/nextdns/services/main/services/instagram'],
+  leagueoflegends: ['https://raw.githubusercontent.com/nextdns/services/main/services/leagueoflegends'],
+  mastodon: ['https://raw.githubusercontent.com/nextdns/services/main/services/mastodon'],
+  messenger: ['https://raw.githubusercontent.com/nextdns/services/main/services/messenger'],
+  minecraft: ['https://raw.githubusercontent.com/nextdns/services/main/services/minecraft'],
+  netflix: ['https://raw.githubusercontent.com/nextdns/services/main/services/netflix'],
+  pinterest: ['https://raw.githubusercontent.com/nextdns/services/main/services/pinterest'],
+  'playstation-network': ['https://raw.githubusercontent.com/nextdns/services/main/services/playstation-network'],
+  primevideo: ['https://raw.githubusercontent.com/nextdns/services/main/services/primevideo'],
+  reddit: ['https://raw.githubusercontent.com/nextdns/services/main/services/reddit'],
+  roblox: ['https://raw.githubusercontent.com/nextdns/services/main/services/roblox'],
+  signal: ['https://raw.githubusercontent.com/nextdns/services/main/services/signal'],
+  skype: ['https://raw.githubusercontent.com/nextdns/services/main/services/skype'],
+  snapchat: ['https://raw.githubusercontent.com/nextdns/services/main/services/snapchat'],
+  spotify: ['https://raw.githubusercontent.com/nextdns/services/main/services/spotify'],
+  steam: ['https://raw.githubusercontent.com/nextdns/services/main/services/steam'],
+  telegram: ['https://raw.githubusercontent.com/nextdns/services/main/services/telegram'],
+  tiktok: ['https://raw.githubusercontent.com/nextdns/services/main/services/tiktok'],
+  tinder: ['https://raw.githubusercontent.com/nextdns/services/main/services/tinder'],
+  tumblr: ['https://raw.githubusercontent.com/nextdns/services/main/services/tumblr'],
+  twitch: ['https://raw.githubusercontent.com/nextdns/services/main/services/twitch'],
+  twitter: ['https://raw.githubusercontent.com/nextdns/services/main/services/twitter'],
+  vimeo: ['https://raw.githubusercontent.com/nextdns/services/main/services/vimeo'],
+  vk: ['https://raw.githubusercontent.com/nextdns/services/main/services/vk'],
+  whatsapp: ['https://raw.githubusercontent.com/nextdns/services/main/services/whatsapp'],
+  xboxlive: ['https://raw.githubusercontent.com/nextdns/services/main/services/xboxlive'],
+  youtube: ['https://raw.githubusercontent.com/nextdns/services/main/services/youtube'],
+  zoom: ['https://raw.githubusercontent.com/nextdns/services/main/services/zoom']
+};
+
+const APP_DOMAIN_SUFFIXES: Record<AppService, string[]> = {
+  '9gag': ['9gag.com'],
+  amazon: ['amazon.com', 'amazon.de', 'amazon.co.uk'],
+  bereal: ['bereal.com', 'bere.al'],
+  blizzard: ['blizzard.com', 'battle.net'],
+  chatgpt: ['chatgpt.com', 'openai.com', 'oaistatic.com', 'oaiusercontent.com'],
+  dailymotion: ['dailymotion.com', 'dmcdn.net'],
+  discord: ['discord.com', 'discord.gg', 'discordapp.com', 'discordapp.net', 'discord.media'],
+  disneyplus: ['disneyplus.com', 'dssott.com'],
+  ebay: ['ebay.com', 'ebay.de', 'ebayimg.com', 'ebaystatic.com'],
+  facebook: ['facebook.com', 'fbcdn.net', 'facebook.net', 'fb.com', 'messenger.com', 'm.me'],
+  fortnite: ['fortnite.com', 'epicgames.com', 'epicgamescdn.com'],
+  'google-chat': ['chat.google.com', 'googlechat.com'],
+  hbomax: ['hbomax.com', 'max.com'],
+  hulu: ['hulu.com', 'huluim.com'],
+  imgur: ['imgur.com'],
+  instagram: ['instagram.com', 'cdninstagram.com'],
+  leagueoflegends: ['leagueoflegends.com', 'riotgames.com', 'riotcdn.net'],
+  mastodon: ['mastodon.social'],
+  messenger: ['messenger.com', 'm.me'],
+  minecraft: ['minecraft.net', 'mojang.com', 'minecraftservices.com'],
+  netflix: ['netflix.com', 'nflximg.net', 'nflxvideo.net', 'nflxso.net', 'nflxext.com'],
+  pinterest: ['pinterest.com', 'pinimg.com'],
+  'playstation-network': ['playstation.com', 'playstation.net', 'sonyentertainmentnetwork.com'],
+  primevideo: ['primevideo.com', 'amazonvideo.com'],
+  reddit: ['reddit.com', 'redd.it', 'redditstatic.com', 'redditmedia.com'],
+  roblox: ['roblox.com', 'rbxcdn.com'],
+  signal: ['signal.org'],
+  skype: ['skype.com', 'skypeassets.com', 'skype.net'],
+  snapchat: ['snapchat.com', 'sc-cdn.net', 'sc-gw.com', 'snapkit.com'],
+  spotify: ['spotify.com', 'scdn.co'],
+  steam: ['steampowered.com', 'steamcommunity.com', 'steamstatic.com', 'steamcontent.com'],
+  telegram: ['telegram.org', 't.me', 'telegram.me', 'telesco.pe'],
+  tiktok: ['tiktok.com', 'tiktokcdn.com', 'tiktokv.com', 'tiktokcdn-us.com', 'byteoversea.com', 'ibyteimg.com'],
+  tinder: ['tinder.com', 'gotinder.com'],
+  tumblr: ['tumblr.com'],
+  twitch: ['twitch.tv', 'ttvnw.net', 'jtvnw.net', 'twitchcdn.net'],
+  twitter: ['twitter.com', 'x.com', 't.co', 'twimg.com'],
+  vimeo: ['vimeo.com', 'vimeocdn.com'],
+  vk: ['vk.com', 'vk.me'],
+  whatsapp: ['whatsapp.com', 'whatsapp.net'],
+  xboxlive: ['xboxlive.com', 'xbox.com'],
+  youtube: ['youtube.com', 'youtu.be', 'ytimg.com', 'googlevideo.com', 'youtubei.googleapis.com'],
+  zoom: ['zoom.us', 'zoom.com']
+};
+
+function parseTimeToMinutes(value: string): number | null {
+  const m = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(String(value || ''));
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
+  if (hh < 0 || hh > 23) return null;
+  if (mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function isScheduleActiveNow(schedule: Schedule, now: Date): boolean {
+  if (!schedule.active) return false;
+  const start = parseTimeToMinutes(schedule.startTime);
+  const end = parseTimeToMinutes(schedule.endTime);
+  if (start == null || end == null) return false;
+
+  const dayKey = (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const)[now.getDay()];
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  if (start === end) return false;
+
+  if (start < end) {
+    if (!schedule.days.includes(dayKey)) return false;
+    return nowMin >= start && nowMin < end;
+  }
+
+  // Spans midnight: treat schedule.days as the start-day.
+  if (nowMin >= start) {
+    return schedule.days.includes(dayKey);
+  }
+
+  const yesterdayKey = (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const)[(now.getDay() + 6) % 7];
+  return schedule.days.includes(yesterdayKey);
+}
+
+function isAppBlockedByPolicy(queryName: string, apps: AppService[]): AppService | null {
+  for (const app of apps) {
+    const suffixes = APP_DOMAIN_SUFFIXES[app] ?? [];
+    for (const s of suffixes) {
+      if (matchesDomain(s, queryName)) return app;
+    }
+  }
+  return null;
+}
+
+function findClient(clients: ClientProfile[], clientIp: string): ClientProfile | null {
+  let addr: ipaddr.IPv4 | ipaddr.IPv6 | null = null;
+  try {
+    addr = ipaddr.parse(clientIp);
+  } catch {
+    addr = null;
+  }
+
+  // Prefer an exact IP match over any CIDR match.
+  for (const c of clients) {
+    if (c.ip && c.ip === clientIp) return c;
+  }
+
+  // If no exact match exists, use the most-specific CIDR match.
+  let best: ClientProfile | null = null;
+  let bestPrefixLen = -1;
+
+  for (const c of clients) {
+    if (!addr) continue;
+    if (!c.cidr) continue;
+    try {
+      const [range, prefixLen] = ipaddr.parseCIDR(c.cidr);
+      if (addr.kind() !== range.kind()) continue;
+      if (!addr.match([range, prefixLen])) continue;
+      if (prefixLen > bestPrefixLen) {
+        best = c;
+        bestPrefixLen = prefixLen;
+      }
+    } catch {
+      // ignore invalid CIDR
+    }
+  }
+
+  return best;
+}
+
+async function getRulesMaxId(db: Db): Promise<number> {
+  const res = await db.pool.query('SELECT COALESCE(MAX(id), 0) AS max_id FROM rules');
+  const v = Number(res.rows?.[0]?.max_id ?? 0);
+  return Number.isFinite(v) ? v : 0;
+}
+
+function normalizeRuleDomain(value: any): string {
+  return normalizeName(String(value ?? ''));
+}
+
+async function loadRulesIndex(db: Db, neededBlocklistIds: number[]): Promise<RulesIndex> {
+  const manualAllowed = new Set<string>();
+  const manualBlocked = new Set<string>();
+
+  // Manual rules (Allow/Block tab) are not tied to a blocklist selection.
+  const manualRes = await db.pool.query(
+    `
+    SELECT domain, type
+    FROM rules
+    WHERE category NOT LIKE 'Blocklist:%'
+    `
+  );
+
+  for (const r of manualRes.rows) {
+    const domain = normalizeRuleDomain(r?.domain);
+    if (!domain) continue;
+    const type = r?.type === 'ALLOWED' ? 'ALLOWED' : 'BLOCKED';
+    if (type === 'ALLOWED') manualAllowed.add(domain);
+    else manualBlocked.add(domain);
+  }
+
+  const blockedByDomain = new Map<string, string | string[]>();
+  const ids = neededBlocklistIds.filter((n) => Number.isFinite(n));
+  if (!ids.length) return { manualAllowed, manualBlocked, blockedByDomain };
+
+  const blocklistRes = await db.pool.query(
+    `
+    SELECT domain, category
+    FROM rules
+    WHERE category LIKE 'Blocklist:%'
+      AND split_part(category, ':', 2)::int = ANY($1::int[])
+    `,
+    [ids]
+  );
+
+  for (const r of blocklistRes.rows) {
+    const domain = normalizeRuleDomain(r?.domain);
+    if (!domain) continue;
+    const id = extractBlocklistId(typeof r?.category === 'string' ? r.category : undefined);
+    if (!id) continue;
+
+    const cur = blockedByDomain.get(domain);
+    if (!cur) {
+      blockedByDomain.set(domain, id);
+      continue;
+    }
+
+    if (typeof cur === 'string') {
+      if (cur !== id) blockedByDomain.set(domain, [cur, id]);
+      continue;
+    }
+
+    if (!cur.includes(id)) cur.push(id);
+  }
+
+  return { manualAllowed, manualBlocked, blockedByDomain };
+}
+
+async function loadClients(db: Db): Promise<ClientProfile[]> {
+  // Keep ordering deterministic so ties (e.g. multiple matching CIDRs with same prefix)
+  // resolve consistently.
+  const res = await db.pool.query('SELECT profile FROM clients ORDER BY updated_at DESC, id ASC');
+  return res.rows
+    .map((r) => r.profile)
+    .filter(Boolean)
+    .map((p: any) => ({
+      id: String(p.id ?? ''),
+      name: String(p.name ?? 'Unknown'),
+      ip: typeof p.ip === 'string' ? p.ip : undefined,
+      cidr: typeof p.cidr === 'string' ? p.cidr : undefined,
+      useGlobalSettings: p.useGlobalSettings !== false,
+      useGlobalCategories: p.useGlobalCategories !== false,
+      useGlobalApps: p.useGlobalApps !== false,
+      assignedBlocklists: Array.isArray(p.assignedBlocklists)
+        ? p.assignedBlocklists.map((x: any) => String(x)).filter(Boolean)
+        : [],
+      isInternetPaused: p.isInternetPaused === true,
+      blockedCategories: Array.isArray(p.blockedCategories)
+        ? p.blockedCategories.map((x: any) => String(x)).filter(Boolean)
+        : [],
+      blockedApps: Array.isArray(p.blockedApps) ? p.blockedApps.map((x: any) => String(x)).filter(Boolean) : [],
+      schedules: Array.isArray(p.schedules)
+        ? p.schedules
+            .filter((s: any) => s && typeof s === 'object')
+            .map(
+              (s: any): Schedule => ({
+                id: String(s.id ?? ''),
+                name: String(s.name ?? 'Schedule'),
+                days: Array.isArray(s.days) ? s.days.map((d: any) => String(d)).filter(Boolean) : [],
+                startTime: String(s.startTime ?? ''),
+                endTime: String(s.endTime ?? ''),
+                active: s.active === true,
+                mode: normalizeScheduleMode(s.mode),
+                blockedCategories: Array.isArray(s.blockedCategories)
+                  ? s.blockedCategories.map((x: any) => String(x)).filter(Boolean)
+                  : [],
+                blockedApps: Array.isArray(s.blockedApps) ? s.blockedApps.map((x: any) => String(x)).filter(Boolean) : [],
+                blockAll: s.blockAll === true
+              })
+            )
+            .filter((s: Schedule) => !!s.id)
+        : []
+    }))
+    .filter((c) => c.id && c.name);
+}
+
+async function loadCategoryBlocklists(db: Db): Promise<Map<ContentCategory, string[]>> {
+  const urls: Array<{ category: ContentCategory; url: string }> = [];
+  for (const [category, categoryUrls] of Object.entries(CATEGORY_BLOCKLIST_URLS) as Array<
+    [ContentCategory, string[]]
+  >) {
+    for (const url of categoryUrls) {
+      if (url) urls.push({ category, url });
+    }
+  }
+
+  if (!urls.length) return new Map();
+
+  const res = await db.pool.query('SELECT id, url, enabled FROM blocklists WHERE url = ANY($1::text[])', [
+    urls.map((x) => x.url)
+  ]);
+
+  const idByUrl = new Map<string, { id: string; enabled: boolean }>();
+  for (const row of res.rows) {
+    const url = String(row?.url ?? '');
+    const id = String(row?.id ?? '').trim();
+    if (!url || !id) continue;
+    idByUrl.set(url, { id, enabled: row?.enabled !== false });
+  }
+
+  const out = new Map<ContentCategory, string[]>();
+  for (const { category, url } of urls) {
+    const hit = idByUrl.get(url);
+    if (!hit) continue;
+    const cur = out.get(category) ?? [];
+    if (!cur.includes(hit.id)) cur.push(hit.id);
+    out.set(category, cur);
+  }
+  return out;
+}
+
+async function loadAppBlocklists(db: Db): Promise<Map<AppService, string[]>> {
+  const urls: Array<{ app: AppService; url: string }> = [];
+  for (const [app, appUrls] of Object.entries(APP_BLOCKLIST_URLS) as Array<[AppService, string[]]>) {
+    for (const url of appUrls) {
+      if (url) urls.push({ app, url });
+    }
+  }
+
+  if (!urls.length) return new Map();
+
+  const res = await db.pool.query('SELECT id, url, enabled FROM blocklists WHERE url = ANY($1::text[])', [
+    urls.map((x) => x.url)
+  ]);
+
+  const idByUrl = new Map<string, { id: string; enabled: boolean }>();
+  for (const row of res.rows) {
+    const url = String(row?.url ?? '');
+    const id = String(row?.id ?? '').trim();
+    if (!url || !id) continue;
+    idByUrl.set(url, { id, enabled: row?.enabled !== false });
+  }
+
+  const out = new Map<AppService, string[]>();
+  for (const { app, url } of urls) {
+    const hit = idByUrl.get(url);
+    if (!hit) continue;
+    const cur = out.get(app) ?? [];
+    if (!cur.includes(hit.id)) cur.push(hit.id);
+    out.set(app, cur);
+  }
+  return out;
+}
+
+async function loadBlocklists(db: Db): Promise<Map<string, BlocklistStatus>> {
+  const res = await db.pool.query('SELECT id, enabled, mode, name FROM blocklists');
+  const map = new Map<string, BlocklistStatus>();
+  for (const row of res.rows) {
+    const id = String(row?.id ?? '').trim();
+    if (!id) continue;
+    const enabled = row?.enabled !== false;
+    const mode = row?.mode === 'SHADOW' ? 'SHADOW' : 'ACTIVE';
+    const name = String(row?.name ?? '').trim();
+    map.set(id, { enabled, mode, name });
+  }
+  return map;
+}
+
+function loadRewritesFromSettings(value: any): RewriteEntry[] {
+  const raw = Array.isArray(value?.items) ? value.items : Array.isArray(value) ? value : [];
+  const out: RewriteEntry[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== 'object') continue;
+    const id = String(r.id ?? '').trim();
+    const domain = normalizeName(String(r.domain ?? ''));
+    const target = String(r.target ?? '').trim();
+    if (!id || !domain || !target) continue;
+    out.push({ id, domain, target });
+  }
+  return out;
+}
+
+function buildLocalAnswerResponse(query: any, answerName: string, qtype: string, target: string): Buffer | null {
+  const ttl = 60;
+  const answers: any[] = [];
+
+  const isIpv4 = (() => {
+    try {
+      const a = ipaddr.parse(target);
+      return a.kind() === 'ipv4';
+    } catch {
+      return false;
+    }
+  })();
+
+  const isIpv6 = (() => {
+    try {
+      const a = ipaddr.parse(target);
+      return a.kind() === 'ipv6';
+    } catch {
+      return false;
+    }
+  })();
+
+  if (qtype === 'A') {
+    if (isIpv4) answers.push({ type: 'A', name: answerName, ttl, data: target });
+    else answers.push({ type: 'CNAME', name: answerName, ttl, data: normalizeName(target) });
+  } else if (qtype === 'AAAA') {
+    if (isIpv6) answers.push({ type: 'AAAA', name: answerName, ttl, data: target });
+    else answers.push({ type: 'CNAME', name: answerName, ttl, data: normalizeName(target) });
+  } else if (qtype === 'CNAME') {
+    answers.push({ type: 'CNAME', name: answerName, ttl, data: normalizeName(target) });
+  } else if (qtype === 'ANY') {
+    if (isIpv4) answers.push({ type: 'A', name: answerName, ttl, data: target });
+    else if (isIpv6) answers.push({ type: 'AAAA', name: answerName, ttl, data: target });
+    else answers.push({ type: 'CNAME', name: answerName, ttl, data: normalizeName(target) });
+  } else {
+    return null;
+  }
+
+  const response = {
+    type: 'response',
+    id: query.id,
+    flags: query.flags,
+    questions: query.questions,
+    answers,
+    authorities: [],
+    additionals: [],
+    rcode: 'NOERROR'
+  };
+  return dnsPacket.encode(response as any);
+}
+
+async function insertQueryLog(
+  db: Db,
+  entry: {
+    id: string;
+    timestamp: string;
+    domain: string;
+    client: string;
+    clientIp: string;
+    status: string;
+    type: string;
+    durationMs: number;
+    blocklistId?: string;
+    answerIps?: string[];
+    protectionPaused?: boolean;
+  }
+): Promise<void> {
+  // Fire-and-forget; DNS latency must be minimal.
+  void db.pool.query('INSERT INTO query_logs(entry) VALUES ($1)', [entry]).catch(() => {});
+}
+
+function extractAnswerIpsFromDnsResponse(resp: Buffer): string[] {
+  try {
+    const decoded: any = dnsPacket.decode(resp);
+    const answers: any[] = Array.isArray(decoded?.answers) ? decoded.answers : [];
+    const ips: string[] = [];
+    for (const a of answers) {
+      const t = typeof a?.type === 'string' ? a.type : '';
+      if (t !== 'A' && t !== 'AAAA') continue;
+      const d = a?.data;
+      if (typeof d === 'string' && d.length > 0) ips.push(d);
+    }
+    // de-dupe and cap to keep logs small
+    return Array.from(new Set(ips)).slice(0, 8);
+  } catch {
+    return [];
+  }
+}
+
+async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer): Promise<Buffer> {
+  return await new Promise<Buffer>((resolve, reject) => {
+    const socket = dgram.createSocket('udp4');
+    const timer = setTimeout(() => {
+      try {
+        socket.close();
+      } catch {
+        // ignore
+      }
+      reject(new Error('UPSTREAM_TIMEOUT'));
+    }, 2000);
+
+    socket.once('message', (data) => {
+      clearTimeout(timer);
+      try {
+        socket.close();
+      } catch {
+        // ignore
+      }
+      resolve(data);
+    });
+
+    socket.send(msg, upstream.port, upstream.host, (err) => {
+      if (err) {
+        clearTimeout(timer);
+        try {
+          socket.close();
+        } catch {
+          // ignore
+        }
+        reject(err);
+      }
+    });
+  });
+}
+
+async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer): Promise<Buffer> {
+  return await new Promise<Buffer>((resolve, reject) => {
+    const socket = net.createConnection({ host: upstream.host, port: upstream.port });
+    const timer = setTimeout(() => {
+      socket.destroy(new Error('UPSTREAM_TIMEOUT'));
+    }, 4000);
+
+    let chunks: Buffer[] = [];
+    let expected: number | null = null;
+
+    socket.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+
+    socket.on('data', (data) => {
+      chunks.push(data);
+      const all = Buffer.concat(chunks);
+      if (expected == null) {
+        if (all.length < 2) return;
+        expected = all.readUInt16BE(0);
+      }
+      if (expected != null && all.length >= expected + 2) {
+        clearTimeout(timer);
+        socket.end();
+        resolve(all.subarray(2, 2 + expected));
+      }
+    });
+
+    socket.on('connect', () => {
+      const len = Buffer.alloc(2);
+      len.writeUInt16BE(msg.length, 0);
+      socket.write(Buffer.concat([len, msg]));
+    });
+  });
+}
+
+async function forwardDot(upstream: { host: string; port: number }, msg: Buffer): Promise<Buffer> {
+  return await new Promise<Buffer>((resolve, reject) => {
+    const socket = tls.connect({
+      host: upstream.host,
+      port: upstream.port,
+      servername: upstream.host,
+      timeout: 4000
+    });
+
+    const timer = setTimeout(() => {
+      socket.destroy(new Error('UPSTREAM_TIMEOUT'));
+    }, 4000);
+
+    let chunks: Buffer[] = [];
+    let expected: number | null = null;
+
+    socket.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+
+    socket.on('data', (data) => {
+      chunks.push(data);
+      const all = Buffer.concat(chunks);
+      if (expected == null) {
+        if (all.length < 2) return;
+        expected = all.readUInt16BE(0);
+      }
+      if (expected != null && all.length >= expected + 2) {
+        clearTimeout(timer);
+        socket.end();
+        resolve(all.subarray(2, 2 + expected));
+      }
+    });
+
+    socket.on('secureConnect', () => {
+      const len = Buffer.alloc(2);
+      len.writeUInt16BE(msg.length, 0);
+      socket.write(Buffer.concat([len, msg]));
+    });
+  });
+}
+
+async function forwardDoh(dohUrl: string, msg: Buffer): Promise<Buffer> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 4000);
+  try {
+    const res = await fetch(dohUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/dns-message',
+        accept: 'application/dns-message',
+        'user-agent': 'sentinel-dns/0.1'
+      },
+      body: msg,
+      signal: ac.signal
+    });
+    if (!res.ok) throw new Error(`HTTP_${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function buildNxDomainResponse(query: any): Buffer {
+  const response = {
+    type: 'response',
+    id: query.id,
+    flags: query.flags,
+    questions: query.questions,
+    answers: [],
+    authorities: [],
+    additionals: [],
+    rcode: 'NXDOMAIN'
+  };
+  return dnsPacket.encode(response as any);
+}
+
+function buildServFailResponse(query: any): Buffer {
+  const response = {
+    type: 'response',
+    id: query.id,
+    flags: query.flags,
+    questions: query.questions,
+    answers: [],
+    authorities: [],
+    additionals: [],
+    rcode: 'SERVFAIL'
+  };
+  return dnsPacket.encode(response as any);
+}
+
+export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close: () => Promise<void> }> {
+  if (!config.ENABLE_DNS) {
+    return { close: async () => {} };
+  }
+
+  function logRulesIndexReload(stats: {
+    selectedBlocklistCount: number;
+    maxId: number;
+    durationMs: number;
+    index: RulesIndex;
+  }): void {
+    try {
+      const loadedAtIso = new Date().toISOString();
+      console.info(
+        `[dns] rules-index reloaded at=${loadedAtIso} maxId=${stats.maxId} ` +
+          `selectedBlocklists=${stats.selectedBlocklistCount} ` +
+          `domains=${stats.index.blockedByDomain.size} ` +
+          `manualAllowed=${stats.index.manualAllowed.size} manualBlocked=${stats.index.manualBlocked.size} ` +
+          `durationMs=${stats.durationMs}`
+      );
+    } catch {
+      // best-effort logging only
+    }
+  }
+
+  const upstreamCache: UpstreamCache = {
+    loadedAt: 0,
+    upstream: { ...parseHostPort(config.UPSTREAM_DNS), transport: 'udp' }
+  };
+
+  const rulesCache: RulesCache = {
+    loadedAt: 0,
+    maxId: 0,
+    includedIdsKey: '',
+    index: { manualAllowed: new Set(), manualBlocked: new Set(), blockedByDomain: new Map() }
+  };
+  const clientsCache: ClientsCache = { loadedAt: 0, clients: [] };
+  const rewritesCache: RewritesCache = { loadedAt: 0, byDomain: new Map() };
+  const blocklistsCache: BlocklistsCache = { loadedAt: 0, byId: new Map() };
+  const categoryBlocklistsCache: CategoryBlocklistsCache = { loadedAt: 0, byCategory: new Map() };
+  const appBlocklistsCache: AppBlocklistsCache = { loadedAt: 0, byApp: new Map() };
+  const categoryBlocklistIdsCache: { loadedAt: number; ids: Set<string> } = { loadedAt: 0, ids: new Set() };
+  const appBlocklistIdsCache: { loadedAt: number; ids: Set<string> } = { loadedAt: 0, ids: new Set() };
+  const globalAppsCache: { loadedAt: number; activeApps: AppService[]; shadowApps: AppService[] } = {
+    loadedAt: 0,
+    activeApps: [],
+    shadowApps: []
+  };
+
+  const appBlocklistWarmup = {
+    inFlight: new Set<string>(),
+    lastAttemptMsById: new Map<string, number>()
+  };
+
+  const APP_BLOCKLIST_WARMUP_COOLDOWN_MS = 5 * 60_000;
+
+  let protectionPause: ProtectionPauseState = { mode: 'OFF' };
+
+  async function refreshProtectionPause(): Promise<void> {
+    try {
+      const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['protection_pause']);
+      protectionPause = parseProtectionPauseSetting(res.rows?.[0]?.value);
+    } catch {
+      // keep last known
+    }
+  }
+
+  function collectReferencedAppsForWarmup(): Set<AppService> {
+    const out = new Set<AppService>();
+
+    for (const a of globalAppsCache.activeApps) out.add(a);
+    for (const a of globalAppsCache.shadowApps) out.add(a);
+
+    for (const client of clientsCache.clients) {
+      if (client.useGlobalApps === false) {
+        for (const a of client.blockedApps ?? []) out.add(a);
+      }
+
+      for (const s of client.schedules ?? []) {
+        for (const a of s.blockedApps ?? []) out.add(a);
+      }
+    }
+
+    return out;
+  }
+
+  async function warmAppBlocklistsIfNeeded(): Promise<void> {
+    const apps = collectReferencedAppsForWarmup();
+    if (!apps.size) return;
+
+    const wantedIds = new Set<string>();
+    for (const app of apps) {
+      const ids = appBlocklistsCache.byApp.get(app) ?? [];
+      for (const id of ids) {
+        const sid = String(id).trim();
+        if (sid) wantedIds.add(sid);
+      }
+    }
+
+    const numericIds = Array.from(wantedIds)
+      .map((x) => Number(x))
+      .filter((n) => Number.isFinite(n));
+
+    if (!numericIds.length) return;
+
+    const res = await db.pool.query(
+      'SELECT id, name, url, last_updated_at, last_rule_count FROM blocklists WHERE id = ANY($1::int[])',
+      [numericIds]
+    );
+
+    const now = Date.now();
+    for (const row of res.rows) {
+      const idNum = Number(row?.id);
+      if (!Number.isFinite(idNum)) continue;
+      const id = String(idNum);
+
+      const lastUpdatedAt = row?.last_updated_at as string | null | undefined;
+      const lastRuleCount = Number(row?.last_rule_count ?? 0);
+      const shouldRefresh = !lastUpdatedAt || !Number.isFinite(lastRuleCount) || lastRuleCount <= 0;
+      if (!shouldRefresh) continue;
+
+      if (appBlocklistWarmup.inFlight.has(id)) continue;
+      const lastAttempt = appBlocklistWarmup.lastAttemptMsById.get(id) ?? 0;
+      if (now - lastAttempt < APP_BLOCKLIST_WARMUP_COOLDOWN_MS) continue;
+      appBlocklistWarmup.lastAttemptMsById.set(id, now);
+
+      const name = String(row?.name ?? '').trim();
+      const url = String(row?.url ?? '').trim();
+      if (!name || !url) continue;
+
+      appBlocklistWarmup.inFlight.add(id);
+      void refreshBlocklist(db, { id: idNum, name, url })
+        .catch(() => undefined)
+        .finally(() => {
+          appBlocklistWarmup.inFlight.delete(id);
+        });
+    }
+  }
+
+  async function refreshCaches(): Promise<void> {
+    try {
+      const [clients, blocklists, categoryBlocklists, appBlocklists, globalBlockedApps, dnsSettings, dnsRewrites, maxRulesId] =
+        await Promise.all([
+          loadClients(db),
+          loadBlocklists(db),
+          loadCategoryBlocklists(db),
+          loadAppBlocklists(db),
+          db.pool.query('SELECT value FROM settings WHERE key = $1', ['global_blocked_apps']),
+          db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_settings']),
+          db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_rewrites']),
+          getRulesMaxId(db)
+        ]);
+
+      clientsCache.clients = clients;
+      clientsCache.loadedAt = Date.now();
+      blocklistsCache.byId = blocklists;
+      blocklistsCache.loadedAt = Date.now();
+      categoryBlocklistsCache.byCategory = categoryBlocklists;
+      categoryBlocklistsCache.loadedAt = Date.now();
+
+      // Precompute union sets so query-time filtering is cheap.
+      const catIds = new Set<string>();
+      for (const ids of categoryBlocklists.values()) {
+        for (const id of ids) catIds.add(String(id));
+      }
+      categoryBlocklistIdsCache.ids = catIds;
+      categoryBlocklistIdsCache.loadedAt = Date.now();
+
+      appBlocklistsCache.byApp = appBlocklists;
+      appBlocklistsCache.loadedAt = Date.now();
+
+      const appIds = new Set<string>();
+      for (const ids of appBlocklists.values()) {
+        for (const id of ids) appIds.add(String(id));
+      }
+      appBlocklistIdsCache.ids = appIds;
+      appBlocklistIdsCache.loadedAt = Date.now();
+
+      const globalAppsValue = globalBlockedApps.rows?.[0]?.value;
+      globalAppsCache.activeApps = parseGlobalBlockedAppsSetting(globalAppsValue);
+      globalAppsCache.shadowApps = parseGlobalShadowAppsSetting(globalAppsValue).filter(
+        (a) => !globalAppsCache.activeApps.includes(a)
+      );
+      globalAppsCache.loadedAt = Date.now();
+
+      // Make app blocking reliable: app-specific blocklists are seeded as disabled and may not have
+      // any rules until refreshed at least once. Warm up referenced app blocklists automatically.
+      void warmAppBlocklistsIfNeeded().catch(() => undefined);
+
+      // Rules can be large (millions of rows). Avoid reloading them every 5 seconds.
+      // Instead: track MAX(id) and rebuild the in-memory index only when it changes,
+      // with a cooldown to avoid thrashing during refresh imports.
+      const nowMs = Date.now();
+      const RULES_RELOAD_COOLDOWN_MS = 30_000;
+      const RULES_SELECTION_RELOAD_COOLDOWN_MS = 2_000;
+
+      const shouldReloadByRules = maxRulesId !== rulesCache.maxId;
+
+      // Build the full "needed ids" set first so we can also detect selection changes.
+      const neededIds = new Set<number>();
+
+      // Include all globally enabled lists (includes enabled category/app lists).
+      for (const [id, st] of blocklists.entries()) {
+        if (!st.enabled) continue;
+        const n = Number(id);
+        if (Number.isFinite(n)) neededIds.add(n);
+      }
+
+      // Include per-client override blocklists even when globally disabled.
+      for (const c of clients) {
+        if (c.useGlobalSettings !== false) continue;
+        for (const id of c.assignedBlocklists ?? []) {
+          const sid = String(id).trim();
+          if (!sid) continue;
+          // Category/App lists are managed separately.
+          if (categoryBlocklistIdsCache.ids.has(sid) || appBlocklistIdsCache.ids.has(sid)) continue;
+          const n = Number(sid);
+          if (Number.isFinite(n)) neededIds.add(n);
+        }
+      }
+
+      // Include Category/App lists referenced by per-client policies and schedules,
+      // even when those blocklists are globally disabled.
+      const referencedCategories = new Set<ContentCategory>();
+      const referencedApps = new Set<AppService>();
+
+      for (const c of clients) {
+        if (c.useGlobalCategories === false) {
+          for (const cat of c.blockedCategories ?? []) referencedCategories.add(cat);
+        }
+
+        if (c.useGlobalApps === false) {
+          for (const app of c.blockedApps ?? []) referencedApps.add(app);
+        }
+
+        for (const s of c.schedules ?? []) {
+          for (const cat of s.blockedCategories ?? []) referencedCategories.add(cat);
+          for (const app of s.blockedApps ?? []) referencedApps.add(app);
+        }
+      }
+
+      // Global app lists can apply to clients using global apps.
+      for (const app of globalAppsCache.activeApps) referencedApps.add(app);
+      for (const app of globalAppsCache.shadowApps) referencedApps.add(app);
+
+      for (const cat of referencedCategories) {
+        const ids = categoryBlocklists.get(cat) ?? [];
+        for (const id of ids) {
+          const n = Number(id);
+          if (Number.isFinite(n)) neededIds.add(n);
+        }
+      }
+
+      for (const app of referencedApps) {
+        const ids = appBlocklists.get(app) ?? [];
+        for (const id of ids) {
+          const n = Number(id);
+          if (Number.isFinite(n)) neededIds.add(n);
+        }
+      }
+
+      const neededIdsKey = Array.from(neededIds).sort((a, b) => a - b).join(',');
+      const shouldReloadBySelection = neededIdsKey !== rulesCache.includedIdsKey;
+
+      const selectionCooldownOk = nowMs - rulesCache.loadedAt >= RULES_SELECTION_RELOAD_COOLDOWN_MS;
+      const rulesCooldownOk = nowMs - rulesCache.loadedAt >= RULES_RELOAD_COOLDOWN_MS;
+
+      if ((shouldReloadByRules && rulesCooldownOk) || (!shouldReloadByRules && shouldReloadBySelection && selectionCooldownOk)) {
+        const t0 = Date.now();
+        const nextIndex = await loadRulesIndex(db, Array.from(neededIds));
+        const durationMs = Date.now() - t0;
+
+        rulesCache.index = nextIndex;
+        rulesCache.maxId = maxRulesId;
+        rulesCache.loadedAt = nowMs;
+        rulesCache.includedIdsKey = neededIdsKey;
+
+        logRulesIndexReload({
+          selectedBlocklistCount: neededIds.size,
+          maxId: maxRulesId,
+          durationMs,
+          index: nextIndex
+        });
+      }
+
+      const rewrites = loadRewritesFromSettings(dnsRewrites.rows?.[0]?.value);
+      const byDomain = new Map<string, RewriteEntry>();
+      for (const r of rewrites) byDomain.set(normalizeName(r.domain), r);
+      rewritesCache.byDomain = byDomain;
+      rewritesCache.loadedAt = Date.now();
+
+      const value = dnsSettings.rows?.[0]?.value;
+      const mode = value?.upstreamMode === 'forward' ? 'forward' : 'unbound';
+      if (mode === 'forward') {
+        const transport =
+          value?.forward?.transport === 'tcp'
+            ? 'tcp'
+            : value?.forward?.transport === 'dot'
+              ? 'dot'
+              : value?.forward?.transport === 'doh'
+                ? 'doh'
+                : 'udp';
+
+        if (transport === 'doh') {
+          const dohUrl = typeof value?.forward?.dohUrl === 'string' ? String(value.forward.dohUrl) : '';
+          if (dohUrl) {
+            upstreamCache.upstream = { transport: 'doh', dohUrl };
+          }
+        } else {
+          const host = typeof value?.forward?.host === 'string' ? String(value.forward.host) : '';
+          const port = Number(value?.forward?.port);
+          if (host && Number.isFinite(port) && port > 0) {
+            upstreamCache.upstream = { host, port: Math.min(65535, Math.floor(port)), transport };
+          }
+        }
+      } else {
+        const parsed = parseHostPort(config.UPSTREAM_DNS);
+        upstreamCache.upstream = { host: parsed.host, port: parsed.port, transport: 'udp' };
+      }
+
+      upstreamCache.loadedAt = Date.now();
+    } catch {
+      // keep last good caches
+    }
+  }
+
+  await refreshCaches();
+  await refreshProtectionPause();
+  const refreshTimer = setInterval(refreshCaches, 5000);
+  const pauseTimer = setInterval(refreshProtectionPause, 1000);
+
+  const udp = dgram.createSocket('udp4');
+
+  async function handleQuery(msg: Buffer, clientIp: string): Promise<Buffer> {
+    const start = Date.now();
+    let query: any;
+    try {
+      query = dnsPacket.decode(msg);
+      const q = query.questions?.[0];
+      const name = q?.name ? String(q.name) : '';
+      const qtype = q?.type ? String(q.type) : 'A';
+
+      // Exact-match local rewrites (handled before block/allow evaluation).
+      const rewrite = rewritesCache.byDomain.get(normalizeName(name));
+      if (rewrite) {
+        const localResp = buildLocalAnswerResponse(query, name, qtype, rewrite.target);
+        if (localResp) {
+          const client = findClient(clientsCache.clients, clientIp);
+          const clientName = client?.name ?? 'Unknown';
+          const answerIps = extractAnswerIpsFromDnsResponse(localResp);
+          await insertQueryLog(db, {
+            id: crypto.randomUUID(),
+            timestamp: new Date().toISOString(),
+            domain: name,
+            client: clientName,
+            clientIp,
+            status: 'PERMITTED',
+            type: qtype,
+            durationMs: Date.now() - start,
+            answerIps
+          });
+          return localResp;
+        }
+      }
+
+      const client = findClient(clientsCache.clients, clientIp);
+      const clientName = client?.name ?? 'Unknown';
+
+      // Client kill-switch: blocks *all* DNS for this client/subnet.
+      if (client?.isInternetPaused) {
+        const resp = buildNxDomainResponse(query);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: 'ClientPolicy:InternetPaused'
+        });
+        return resp;
+      }
+
+      // Compute effective policy (base + schedules).
+      const now = new Date();
+      const effectiveBlockedCategories = new Set<ContentCategory>(
+        client?.useGlobalCategories === false ? (client?.blockedCategories ?? []) : []
+      );
+      const effectiveActiveApps = new Set<AppService>(client?.useGlobalApps === false ? [] : globalAppsCache.activeApps);
+      const effectiveShadowApps = new Set<AppService>(client?.useGlobalApps === false ? [] : globalAppsCache.shadowApps);
+
+      if (client?.useGlobalApps === false) {
+        for (const a of client?.blockedApps ?? []) effectiveActiveApps.add(a);
+      }
+
+      // Ensure active always wins if both are present.
+      for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
+      let blockAll = false;
+
+      for (const s of client?.schedules ?? []) {
+        if (!isScheduleActiveNow(s, now)) continue;
+        if (s.blockAll) blockAll = true;
+        for (const c of s.blockedCategories ?? []) effectiveBlockedCategories.add(c);
+        for (const a of s.blockedApps ?? []) effectiveActiveApps.add(a);
+      }
+
+      for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
+
+      if (blockAll) {
+        const resp = buildNxDomainResponse(query);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: 'ClientPolicy:BlockAll'
+        });
+        return resp;
+      }
+
+      const blockedApp = isAppBlockedByPolicy(name, Array.from(effectiveActiveApps));
+      if (blockedApp) {
+        const resp = buildNxDomainResponse(query);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: `ClientPolicy:App:${blockedApp}`
+        });
+        return resp;
+      }
+
+      let appShadowHit: string | undefined;
+      const shadowApp = isAppBlockedByPolicy(name, Array.from(effectiveShadowApps));
+      if (shadowApp) {
+        appShadowHit = `ClientPolicy:AppShadow:${shadowApp}`;
+      }
+
+      // Global protection pause: bypass all blocking and allow queries through.
+      if (isProtectionPaused(protectionPause)) {
+        const upstream = upstreamCache.upstream;
+        const upstreamResp =
+          upstream.transport === 'tcp'
+            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
+            : upstream.transport === 'dot'
+              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
+              : upstream.transport === 'doh'
+                ? await forwardDoh(upstream.dohUrl, msg)
+                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+
+        const answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps,
+          protectionPaused: true
+        });
+
+        return upstreamResp;
+      }
+
+      // Determine which blocklists are active for this client.
+      const selectedBlocklists = new Set<string>();
+
+      const categoryIds = categoryBlocklistIdsCache.ids;
+      const appIds = appBlocklistIdsCache.ids;
+
+      if (client && client.useGlobalSettings === false) {
+        for (const id of client.assignedBlocklists ?? []) {
+          // Per-client overrides should work even when globally disabled.
+          const sid = String(id);
+          // Category/App lists are managed separately.
+          if (categoryIds.has(sid) || appIds.has(sid)) continue;
+          selectedBlocklists.add(sid);
+        }
+      } else {
+        for (const [id, st] of blocklistsCache.byId.entries()) {
+          // Category/App lists are managed separately.
+          if (categoryIds.has(id) || appIds.has(id)) continue;
+          if (st.enabled) selectedBlocklists.add(id);
+        }
+      }
+
+      // Global categories: include enabled category lists only when allowed for this client.
+      if (client?.useGlobalCategories !== false) {
+        for (const id of categoryIds) {
+          const st = blocklistsCache.byId.get(id);
+          if (st?.enabled) selectedBlocklists.add(id);
+        }
+      }
+
+      for (const cat of effectiveBlockedCategories) {
+        const ids = categoryBlocklistsCache.byCategory.get(cat) ?? [];
+        for (const id of ids) {
+          selectedBlocklists.add(String(id));
+        }
+      }
+
+      // App-blocklists are evaluated independently from normal blocklists.
+      if (effectiveActiveApps.size || effectiveShadowApps.size) {
+        const selectedActiveAppBlocklists = new Set<string>();
+        const selectedShadowAppBlocklists = new Set<string>();
+        const blocklistIdToApp = new Map<string, AppService>();
+
+        for (const app of effectiveActiveApps) {
+          const ids = appBlocklistsCache.byApp.get(app) ?? [];
+          for (const id of ids) {
+            const sid = String(id);
+            selectedActiveAppBlocklists.add(sid);
+            if (!blocklistIdToApp.has(sid)) blocklistIdToApp.set(sid, app);
+          }
+        }
+
+        for (const app of effectiveShadowApps) {
+          const ids = appBlocklistsCache.byApp.get(app) ?? [];
+          for (const id of ids) {
+            const sid = String(id);
+            selectedShadowAppBlocklists.add(sid);
+            if (!blocklistIdToApp.has(sid)) blocklistIdToApp.set(sid, app);
+          }
+        }
+
+        if (selectedActiveAppBlocklists.size) {
+          const appDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedActiveAppBlocklists);
+          if (appDecision.decision === 'BLOCKED') {
+            const resp = buildNxDomainResponse(query);
+            const id = appDecision.blocklistId ?? '';
+            const app = id ? blocklistIdToApp.get(id) : undefined;
+            await insertQueryLog(db, {
+              id: crypto.randomUUID(),
+              timestamp: new Date().toISOString(),
+              domain: name,
+              client: clientName,
+              clientIp,
+              status: 'BLOCKED',
+              type: qtype,
+              durationMs: Date.now() - start,
+              blocklistId: app
+                ? `ClientPolicy:AppList:${app}`
+                : id
+                  ? formatBlocklistCategory(id, blocklistsCache.byId.get(id)?.name)
+                  : undefined
+            });
+            return resp;
+          }
+
+          if (appDecision.decision === 'SHADOW_BLOCKED' && !appShadowHit) {
+            const id = appDecision.blocklistId ?? '';
+            const app = id ? blocklistIdToApp.get(id) : undefined;
+            appShadowHit = app
+              ? `ClientPolicy:AppListShadow:${app}`
+              : id
+                ? formatBlocklistCategory(id, blocklistsCache.byId.get(id)?.name)
+                : undefined;
+          }
+        }
+
+        if (selectedShadowAppBlocklists.size) {
+          const shadowDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedShadowAppBlocklists);
+          if ((shadowDecision.decision === 'BLOCKED' || shadowDecision.decision === 'SHADOW_BLOCKED') && !appShadowHit) {
+            const id = shadowDecision.blocklistId ?? '';
+            const app = id ? blocklistIdToApp.get(id) : undefined;
+            appShadowHit = app
+              ? `ClientPolicy:AppListShadow:${app}`
+              : id
+                ? formatBlocklistCategory(id, blocklistsCache.byId.get(id)?.name)
+                : undefined;
+          }
+        }
+      }
+
+      const { decision, blocklistId } = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedBlocklists);
+
+      if (decision === 'BLOCKED') {
+        const resp = buildNxDomainResponse(query);
+
+        let answerIps: string[] | undefined;
+        if (config.SHADOW_RESOLVE_BLOCKED) {
+          try {
+            const upstream = upstreamCache.upstream;
+            const upstreamResp =
+              upstream.transport === 'tcp'
+                ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
+                : upstream.transport === 'dot'
+                  ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
+                  : upstream.transport === 'doh'
+                    ? await forwardDoh(upstream.dohUrl, msg)
+                    : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+            answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
+          } catch {
+            // ignore: blocked response should still be fast/reliable
+          }
+        }
+
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: blocklistId ? formatBlocklistCategory(blocklistId, blocklistsCache.byId.get(blocklistId)?.name) : undefined,
+          answerIps
+        });
+        return resp;
+      }
+
+      const upstream = upstreamCache.upstream;
+      const upstreamResp =
+        upstream.transport === 'tcp'
+          ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
+          : upstream.transport === 'dot'
+            ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
+            : upstream.transport === 'doh'
+              ? await forwardDoh(upstream.dohUrl, msg)
+              : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+
+      const finalStatus: 'SHADOW_BLOCKED' | 'PERMITTED' =
+        decision === 'SHADOW_BLOCKED' || !!appShadowHit ? 'SHADOW_BLOCKED' : 'PERMITTED';
+      const finalBlocklistId =
+        finalStatus === 'SHADOW_BLOCKED'
+          ? appShadowHit ??
+            (decision === 'SHADOW_BLOCKED' && blocklistId
+              ? formatBlocklistCategory(blocklistId, blocklistsCache.byId.get(blocklistId)?.name)
+              : undefined)
+          : undefined;
+
+      await insertQueryLog(db, {
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        domain: name,
+        client: clientName,
+        clientIp,
+        status: finalStatus,
+        type: qtype,
+        durationMs: Date.now() - start,
+        blocklistId: finalBlocklistId,
+        answerIps: extractAnswerIpsFromDnsResponse(upstreamResp)
+      });
+      return upstreamResp;
+    } catch {
+      if (query) return buildServFailResponse(query);
+      // Best effort: create SERVFAIL without ID/flags is not possible
+      throw new Error('DECODE_FAILED');
+    }
+  }
+
+  udp.on('message', async (msg, rinfo) => {
+    try {
+      const resp = await handleQuery(msg, rinfo.address);
+      udp.send(resp, rinfo.port, rinfo.address);
+    } catch {
+      // ignore
+    }
+  });
+
+  const tcp = net.createServer((socket) => {
+    socket.setTimeout(5000);
+    socket.setNoDelay(true);
+
+    let buf = Buffer.alloc(0);
+
+    socket.on('data', async (data) => {
+      buf = Buffer.concat([buf, data]);
+      while (buf.length >= 2) {
+        const len = buf.readUInt16BE(0);
+        if (buf.length < 2 + len) return;
+        const msg = buf.subarray(2, 2 + len);
+        buf = buf.subarray(2 + len);
+
+        try {
+          const ipRaw = socket.remoteAddress ?? '0.0.0.0';
+          const ip = ipRaw.startsWith('::ffff:') ? ipRaw.slice('::ffff:'.length) : ipRaw;
+          const resp = await handleQuery(msg, ip);
+          const outLen = Buffer.alloc(2);
+          outLen.writeUInt16BE(resp.length, 0);
+          socket.write(Buffer.concat([outLen, resp]));
+        } catch {
+          // ignore
+        }
+      }
+    });
+
+    socket.on('timeout', () => {
+      try {
+        socket.end();
+      } catch {
+        // ignore
+      }
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    udp.once('error', reject);
+    udp.bind(config.DNS_PORT, config.DNS_HOST, () => {
+      udp.off('error', reject);
+      resolve();
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    tcp.once('error', reject);
+    tcp.listen(config.DNS_PORT, config.DNS_HOST, () => {
+      tcp.off('error', reject);
+      resolve();
+    });
+  });
+
+  async function close(): Promise<void> {
+    clearInterval(refreshTimer);
+    clearInterval(pauseTimer);
+    await new Promise<void>((resolve) => {
+      try {
+        udp.close(() => resolve());
+      } catch {
+        resolve();
+      }
+    });
+    await new Promise<void>((resolve) => {
+      try {
+        tcp.close(() => resolve());
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  return { close };
+}
