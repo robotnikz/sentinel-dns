@@ -104,13 +104,14 @@ export async function registerTailscaleRoutes(app: FastifyInstance, config: AppC
 
     const statusRes = await runTailscale(['status', '--json']);
     if (!statusRes.ok) {
-      // Common when tailscaled isn't running yet, or no permissions (/dev/net/tun, NET_ADMIN).
+      // Common when tailscaled isn't running yet, or lacks permissions.
+      // In Docker, tailscaled typically requires /dev/net/tun and NET_ADMIN.
       reply.code(200);
       return {
         supported: true,
         running: false,
         error: 'TAILSCALE_UNAVAILABLE',
-        message: 'tailscale status failed. Is tailscaled running with /dev/net/tun and NET_ADMIN?',
+        message: 'tailscale status failed. Is tailscaled running with /dev/net/tun and NET_ADMIN? Check container logs for details.',
         details: statusRes.stderr.slice(0, 500),
         hasAuthKey
       };
