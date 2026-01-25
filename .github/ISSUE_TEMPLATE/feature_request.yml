@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest an idea or enhancement
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please explain the user problem and what success looks like.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Use case
+      description: What are you trying to achieve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Sentinel-DNS do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches or tools you evaluated?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Quick checks
+      options:
+        - label: I searched existing issues
+          required: true

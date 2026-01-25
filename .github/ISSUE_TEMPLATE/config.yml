@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions / Support
+    url: https://github.com/robotnikz/sentinel-dns/discussions
+    about: Please use Discussions for questions and setup help.
+  - name: Security reports
+    url: https://github.com/robotnikz/sentinel-dns/security/advisories/new
+    about: Please report vulnerabilities privately (if enabled).

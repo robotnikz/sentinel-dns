@@ -1,0 +1,69 @@
+name: Bug report
+description: Something is broken or not working as expected
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail to reproduce.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / Image tag
+      description: What are you running? (e.g. ghcr.io/robotnikz/sentinel-dns:0.1.1)
+      placeholder: ghcr.io/robotnikz/sentinel-dns:latest
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Host environment
+      description: OS + architecture (e.g. Debian 12 amd64, Raspberry Pi OS arm64)
+      placeholder: Debian 12 amd64
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect to happen, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest steps needed to reproduce the problem
+      placeholder: |
+        1. Start container
+        2. Open Settings -> ...
+        3. Click ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (redact secrets)
+      description: Paste relevant logs. Please remove any auth keys, passwords, or tokens.
+      render: shell
+      placeholder: |
+        docker compose logs -f --tail=200
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Quick checks
+      options:
+        - label: I searched existing issues
+          required: true
+        - label: I am not posting credentials or private keys
+          required: true

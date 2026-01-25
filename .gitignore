@@ -16,6 +16,11 @@ dist-ssr
 !.env.example
 !server/.env.example
 
+# Server env files
+server/.env
+server/.env.*
+!server/.env.example
+
 # Server build output (should not be committed)
 server/node_modules
 server/dist
@@ -24,6 +29,10 @@ server/dist
 coverage
 .vite
 .cache
+
+# Playwright artifacts
+playwright-report
+test-results
 
 # Local scratch / auth cookies
 .tmp_*
