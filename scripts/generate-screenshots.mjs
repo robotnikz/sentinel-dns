@@ -6,7 +6,7 @@ const DEFAULT_BASE_URL = process.env.SENTINEL_BASE_URL || 'http://localhost:8080
 const DEFAULT_OUT_DIR = 'docs/screenshots';
 
 function parseArgs(argv) {
-  const args = { baseUrl: DEFAULT_BASE_URL, outDir: DEFAULT_OUT_DIR };
+  const args = { baseUrl: DEFAULT_BASE_URL, outDir: DEFAULT_OUT_DIR, fullPage: false };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if ((a === '--base' || a === '--baseUrl') && argv[i + 1]) {
@@ -15,6 +15,10 @@ function parseArgs(argv) {
     }
     if ((a === '--out' || a === '--outDir') && argv[i + 1]) {
       args.outDir = argv[++i];
+      continue;
+    }
+    if (a === '--fullPage') {
+      args.fullPage = true;
       continue;
     }
   }
@@ -26,7 +30,7 @@ async function ensureDir(p) {
 }
 
 async function main() {
-  const { baseUrl, outDir } = parseArgs(process.argv);
+  const { baseUrl, outDir, fullPage } = parseArgs(process.argv);
 
   const { chromium, request } = await import('playwright');
 
@@ -77,7 +81,8 @@ async function main() {
     await page.waitForTimeout(1500);
     await page.screenshot({
       path: path.join(absOutDir, fileName),
-      fullPage: true
+      // For README previews we want consistent sizes; fullPage is opt-in.
+      fullPage
     });
   }
 
