@@ -1,0 +1,37 @@
+title: "[Announcement] "
+labels: ["announcement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Maintainers: use this for release notes, breaking changes, and important updates.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: |
+        What changed? Who is affected?
+    validations:
+      required: true
+
+  - type: textarea
+    id: upgrade
+    attributes:
+      label: Upgrade notes
+      placeholder: |
+        - Recommended tag to upgrade to
+        - Any migrations or manual steps
+        - Rollback advice
+    validations:
+      required: false
+
+  - type: textarea
+    id: links
+    attributes:
+      label: Links
+      placeholder: |
+        - Release: 
+        - Docs:
+    validations:
+      required: false

@@ -1,0 +1,51 @@
+title: "[Q&A] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask anything about setup, usage, or troubleshooting.
+
+        Please redact secrets (passwords, API keys, auth keys).
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      placeholder: |
+        Example: How do I set Sentinel-DNS as DNS for my whole home network?
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-tried
+    attributes:
+      label: What you tried (optional)
+      placeholder: |
+        Example: I set my router DNS to 192.168.1.10 but clients still use the ISP DNS.
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: This helps reproduce your setup.
+      placeholder: |
+        - Image tag: ghcr.io/robotnikz/sentinel-dns:latest
+        - Host OS/arch:
+        - Router model (optional):
+        - Are you using Tailscale? (yes/no)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: Paste relevant logs (redact secrets).
+      render: shell
+      placeholder: |
+        docker compose logs -f --tail=200
+    validations:
+      required: false

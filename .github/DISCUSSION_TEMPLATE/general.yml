@@ -1,0 +1,31 @@
+title: "[General] "
+labels: ["discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for starting a discussion.
+
+        Tip: If you have a reproducible bug, please open an Issue instead.
+
+  - type: textarea
+    id: topic
+    attributes:
+      label: What would you like to talk about?
+      description: Ask a question, share context, or propose an improvement.
+      placeholder: |
+        Example: I'm new to DNS blockers and want to understand...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Setup (optional)
+      description: Helpful context if this is about running Sentinel-DNS.
+      placeholder: |
+        - Host OS / device (e.g. Debian 12, Raspberry Pi)
+        - Docker (compose / run)
+        - Version tag (e.g. ghcr.io/robotnikz/sentinel-dns:0.1.1)
+    validations:
+      required: false

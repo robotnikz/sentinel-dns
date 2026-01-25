@@ -1,0 +1,37 @@
+title: "[Show & Tell] "
+labels: ["community"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Show your setup, share tips, dashboards, blocklist strategies, router configs, etc.
+
+  - type: textarea
+    id: setup
+    attributes:
+      label: Your setup
+      placeholder: |
+        Example:
+        - Hardware: Raspberry Pi 5
+        - Router: Fritz!Box
+        - Upstream: Unbound (Local)
+        - Tailscale: enabled (Exit Node)
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: What worked well / lessons learned
+      placeholder: |
+        Example: Port 53 conflicts, client naming, allow rules for streaming apps...
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (optional)
+      description: Drag and drop images into the editor.
+    validations:
+      required: false

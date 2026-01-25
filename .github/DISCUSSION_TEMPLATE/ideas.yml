@@ -1,0 +1,47 @@
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Share an idea or improvement.
+
+        If this is a confirmed bug, please open an Issue instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Use case
+      description: What are you trying to achieve?
+      placeholder: |
+        Example: I'd like to set different blocking profiles per client and schedule them.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should Sentinel-DNS do?
+      placeholder: |
+        Example: Add a "Profile" concept per client with time-based rules.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / Workarounds
+      placeholder: |
+        Example: I currently maintain two separate DNS instances.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      placeholder: |
+        Screenshots, mockups, or links that help.
+    validations:
+      required: false
