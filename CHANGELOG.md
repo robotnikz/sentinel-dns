@@ -1,3 +1,7 @@
+## <small>0.2.3 (2026-01-25)</small>
+
+* fix(ui): don't force https via CSP/HSTS ([c9ae9c3](https://github.com/robotnikz/sentinel-dns/commit/c9ae9c3))
+
 ## <small>0.2.2 (2026-01-25)</small>
 
 * fix(ui): avoid SPA fallback for missing assets ([d7e0767](https://github.com/robotnikz/sentinel-dns/commit/d7e0767))
