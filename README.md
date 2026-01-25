@@ -114,6 +114,9 @@ services:
     environment:
       # Timezone used for logs/UI timestamps.
       - TZ=Europe/Berlin
+			# Ensure the Web UI/API is reachable via Docker port publishing.
+			- HOST=0.0.0.0
+			- PORT=8080
     volumes:
       # Persistent storage for data, settings, secrets, and the GeoIP database.
       - sentinel-data:/data
