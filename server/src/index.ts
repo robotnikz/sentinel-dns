@@ -45,7 +45,13 @@ async function main(): Promise<void> {
     trustProxy: true
   });
 
-  await app.register(helmet, { global: true });
+  // IMPORTANT:
+  // We serve plain HTTP by default (typical LAN/VPS + optional reverse proxy).
+  // Helmet defaults currently include a CSP with `upgrade-insecure-requests`, which
+  // causes browsers (notably Firefox) to upgrade our `/assets/*` requests to HTTPS.
+  // If TLS is not terminated in front, that results in a white page.
+  // For this appliance-style deployment, disable CSP+HSTS by default.
+  await app.register(helmet, { global: true, contentSecurityPolicy: false, hsts: false });
   await app.register(cookie);
   await app.register(cors, {
     origin: config.FRONTEND_ORIGIN,
