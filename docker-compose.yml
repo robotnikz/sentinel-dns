@@ -1,6 +1,8 @@
 services:
   sentinel:
     # Single-container build: Web UI + API + Postgres + Unbound (+ optional Tailscale)
+    image: ghcr.io/robotnikz/sentinel-dns:latest
+    container_name: sentinel-dns
     build:
       context: .
       dockerfile: docker/single/Dockerfile

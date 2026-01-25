@@ -57,6 +57,14 @@
 Prerequisites: Docker + Docker Compose
 
 ```bash
+docker compose up -d
+```
+
+This will pull the prebuilt image from GHCR (`ghcr.io/robotnikz/sentinel-dns:latest`).
+
+To build locally from source instead:
+
+```bash
 docker compose up -d --build
 ```
 
