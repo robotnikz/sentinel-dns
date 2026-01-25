@@ -9,7 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@fastify/cors": "^10.1.0",
+    "@fastify/cors": "^11.2.0",
     "@fastify/cookie": "^11.0.2",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
