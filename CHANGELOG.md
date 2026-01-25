@@ -1,3 +1,8 @@
+## <small>0.2.1 (2026-01-25)</small>
+
+* fix(compose): ensure UI binds on all interfaces ([42bf21f](https://github.com/robotnikz/sentinel-dns/commit/42bf21f))
+* chore(repo): add discussion templates ([396024d](https://github.com/robotnikz/sentinel-dns/commit/396024d))
+
 ## 0.2.0 (2026-01-25)
 
 * chore(repo): add community health files ([aaa124e](https://github.com/robotnikz/sentinel-dns/commit/aaa124e))
