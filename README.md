@@ -1,10 +1,19 @@
 ﻿<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+	<img src="./public/sentinel.svg" width="96" height="96" alt="Sentinel-DNS" />
+
+	<h1>Sentinel-DNS</h1>
+
+	<p>
+		DNS blocker appliance (Pi-hole/AdGuard-style) with a Web UI + API and an embedded DNS stack.
+	</p>
+
+	<p>
+		<a href="#quickstart">Quickstart</a>
+		· <a href="#configuration">Configuration</a>
+		· <a href="#architecture">Architecture</a>
+		· <a href="#development">Development</a>
+	</p>
 </div>
-
-# Sentinel-DNS
-
-DNS blocker appliance (Pi-hole/AdGuard-style) with a Web UI + API and an embedded DNS stack.
 
 ## Highlights
 
@@ -14,7 +23,7 @@ DNS blocker appliance (Pi-hole/AdGuard-style) with a Web UI + API and an embedde
 - Query logs, metrics, and a client activity map
 - Optional remote access via embedded Tailscale (exit node support)
 
-## Quickstart (Docker)
+## Quickstart
 
 Prerequisites: Docker Desktop
 
@@ -22,18 +31,20 @@ Prerequisites: Docker Desktop
 docker compose up -d --build
 ```
 
-After startup:
+Endpoints:
 
 - Web UI + API: http://localhost:8080
-- DNS: 127.0.0.1:53 (UDP/TCP)
+- DNS service: `127.0.0.1:53` (UDP/TCP)
+
+To use Sentinel as your network DNS, point your clients/router to the host running the container.
 
 ## First run
 
-On first start, create an admin user directly in the Web UI.
+On first start, create an admin user directly in the Web UI:
 
-- Open http://localhost:8080
-- Create username + password (min 8 chars)
-- Log in (session cookie)
+1. Open http://localhost:8080
+2. Create username + password (min 8 chars)
+3. Log in (session cookie)
 
 AI provider keys (Gemini/OpenAI) are stored encrypted server-side and can be entered via the UI.
 
@@ -46,6 +57,23 @@ The default `docker-compose.yml` supports a few optional env vars:
 - `SHADOW_RESOLVE_BLOCKED` (default `true`)
 
 For local development, see `.env.example` and `server/.env.example`.
+
+## Architecture
+
+Inside the single container:
+
+- **Web UI** (Vite build) served on `:8080`
+- **API** (Fastify) on `:8080/api/*`
+- **Postgres** for query logs and persisted settings
+- **Unbound** as the embedded DNS engine (local recursion / forwarding)
+
+Flow (high-level):
+
+1. Client sends DNS query -> Sentinel
+2. Rewrite rules apply (local DNS records)
+3. Blocklists/rules apply
+4. Allowed queries resolve via Unbound (local recursion or upstream forward)
+5. Results + stats land in Postgres and show up in the UI
 
 ## GeoIP database
 
@@ -104,3 +132,7 @@ Sentinel can run an embedded `tailscaled` and advertise itself as an exit node.
 3. Approve exit-node advertisement in the Tailscale admin console (if enabled)
 
 To route DNS through Sentinel for your tailnet devices, set your tailnet DNS nameserver(s) to Sentinel's Tailscale IP.
+
+## Limitations
+
+- Some upstream endpoints require HTTP/2 for DoH. If an upstream DoH endpoint is not compatible with the current client implementation, use DoT instead.
