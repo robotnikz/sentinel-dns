@@ -1,23 +1,35 @@
 services:
   sentinel:
+    # Single-container build: Web UI + API + Postgres + Unbound (+ optional Tailscale)
     build:
       context: .
       dockerfile: docker/single/Dockerfile
     ports:
+      # DNS service (UDP/TCP). If port 53 is already in use (e.g. systemd-resolved),
+      # adjust the host-side port mapping or disable the stub resolver.
       - "53:53/udp"
       - "53:53/tcp"
+      # Web UI + API
       - "8080:8080"
-    # Optional standard settings only.
     environment:
+      # Timezone used for logs/UI timestamps.
       - TZ=${TZ:-UTC}
+      # GeoIP database path inside the container.
+      # The UI can download/update GeoLite2 (City) into /data when you provide a MaxMind license key.
       - GEOIP_DB_PATH=${GEOIP_DB_PATH:-/data/GeoLite2-City.mmdb}
+      # When enabled, blocked domains can still be resolved upstream (for UX/telemetry) while blocking the client.
       - SHADOW_RESOLVE_BLOCKED=${SHADOW_RESOLVE_BLOCKED:-true}
     volumes:
+      # Persistent storage for Postgres data, settings, secrets, and optional GeoIP database.
       - sentinel-data:/data
+    # --- Optional (Tailscale / exit-node support) ---
+    # If you do NOT use Tailscale features, you can remove the following sections.
+    # They are required when running an embedded tailscaled with tunnel device access.
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
+    # Required for exit-node / forwarding scenarios.
     sysctls:
       net.ipv4.ip_forward: "1"
       net.ipv6.conf.all.forwarding: "1"
