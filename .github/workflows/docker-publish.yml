@@ -71,6 +71,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Force ISO commit dates
+        run: git config --global log.date iso-strict
+
       - name: Semantic Release
         id: semantic
         uses: cycjimmy/semantic-release-action@v6
