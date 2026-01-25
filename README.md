@@ -56,8 +56,8 @@ docker compose up -d --build
 
 Endpoints:
 
-- Web UI + API: http://localhost:8080
-- DNS service: `127.0.0.1:53` (UDP/TCP)
+- Web UI + API: `http://<server-ip>:8080`
+- DNS service: `<server-ip>:53` (UDP/TCP)
 
 ## Deploy on a Linux server
 
@@ -82,7 +82,7 @@ Persistent data is stored in the `sentinel-data` Docker volume (mounted at `/dat
 
 On first start, create an admin user directly in the Web UI:
 
-1. Open http://localhost:8080
+1. Open `http://<server-ip>:8080`
 2. Create username + password (min 8 chars)
 3. Log in (session cookie)
 
@@ -117,24 +117,22 @@ Flow (high-level):
 
 ## GeoIP database
 
-The dashboard world map uses a local MaxMind `.mmdb` database.
+The dashboard world map uses a local MaxMind GeoLite2 database.
 
-- Country aggregation: GeoLite2 Country
-- Point markers require a City database (GeoLite2 City)
+Recommended setup (no manual file copying):
 
-Copy a database into the running container:
+1. In the Web UI: Settings -> GeoIP / World Map
+2. Enter your MaxMind license key
+3. Click update/download
 
-```bash
-docker cp ./GeoLite2-Country.mmdb sentinel-dns-sentinel-1:/data/GeoLite2-Country.mmdb
-docker compose restart
-```
+Sentinel will download and refresh the GeoLite2 City database inside the persistent `/data` volume.
 
 ## Troubleshooting
 
 ```bash
 docker compose ps
 docker compose logs -f
-curl -fsS http://localhost:8080/api/health
+curl -fsS http://<server-ip>:8080/api/health
 ```
 
 ## DNS rewrite smoke test
@@ -170,9 +168,10 @@ If you want DNSSEC validation locally inside the appliance, use `Unbound (Local)
 
 Sentinel can run an embedded `tailscaled` and advertise itself as an exit node.
 
-1. Create a reusable auth key in the Tailscale admin console.
-2. In the Web UI: Settings -> Remote Access (Tailscale)
-3. Approve exit-node advertisement in the Tailscale admin console (if enabled)
+1. In the Web UI: Settings -> Remote Access (Tailscale)
+2. Click the sign-in/connect flow (browser auth) and complete the login
+3. Optional: instead of browser auth, you can paste a reusable auth key from the Tailscale admin console
+4. Approve exit-node advertisement in the Tailscale admin console (if enabled)
 
 To route DNS through Sentinel for your tailnet devices, set your tailnet DNS nameserver(s) to Sentinel's Tailscale IP.
 
