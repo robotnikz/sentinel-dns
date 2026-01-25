@@ -1,3 +1,13 @@
+## 0.2.0 (2026-01-25)
+
+* chore(repo): add community health files ([aaa124e](https://github.com/robotnikz/sentinel-dns/commit/aaa124e))
+* chore(screenshots): default to viewport captures ([f878912](https://github.com/robotnikz/sentinel-dns/commit/f878912))
+* docs(readme): highlight key features ([d95a873](https://github.com/robotnikz/sentinel-dns/commit/d95a873))
+* docs(readme): sunflow-style quickstart + screenshots ([9ccb9d6](https://github.com/robotnikz/sentinel-dns/commit/9ccb9d6))
+* docs(screenshots): normalize preview sizes ([56563b9](https://github.com/robotnikz/sentinel-dns/commit/56563b9))
+* feat(geoip): keep blocked-domain map points ([595d959](https://github.com/robotnikz/sentinel-dns/commit/595d959))
+* feat(tailscale): support exit-node mode ([051e3e7](https://github.com/robotnikz/sentinel-dns/commit/051e3e7))
+
 ## <small>0.1.1 (2026-01-25)</small>
 
 * fix(docker): install rollup package per arch ([56058d0](https://github.com/robotnikz/sentinel-dns/commit/56058d0))
