@@ -16,7 +16,7 @@
     "@fastify/static": "^8.3.0",
     "@google/genai": "^1.38.0",
     "dns-packet": "^5.6.1",
-    "dotenv": "^16.4.7",
+    "dotenv": "^17.2.3",
     "fastify": "^5.2.1",
     "ipaddr.js": "^2.2.0",
     "maxmind": "^4.3.24",
