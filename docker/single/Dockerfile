@@ -2,7 +2,7 @@
 # This is intentionally similar to the "appliance" style of Pi-hole / AdGuard Home.
 # For production hardening you may later split DB out again.
 
-FROM node:22-bookworm
+FROM node:25-bookworm
 
 # Build stage uses dev deps (Vite/TS). Runtime NODE_ENV is set later.
 ENV NODE_ENV=development
