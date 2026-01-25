@@ -17,6 +17,12 @@
 	<a href="https://github.com/robotnikz/sentinel-dns/commits/main">
 		<img alt="Last Commit" src="https://img.shields.io/github/last-commit/robotnikz/sentinel-dns?style=flat-square" />
 	</a>
+	<a href="https://github.com/robotnikz/sentinel-dns/actions/workflows/docker-publish.yml">
+		<img alt="CI/CD Pipeline" src="https://github.com/robotnikz/sentinel-dns/actions/workflows/docker-publish.yml/badge.svg?branch=main" />
+	</a>
+	<a href="https://github.com/robotnikz/sentinel-dns/pkgs/container/sentinel-dns">
+		<img alt="GitHub Release" src="https://img.shields.io/github/v/release/robotnikz/sentinel-dns?logo=docker&label=ghcr.io&style=flat-square" />
+	</a>
 	<a href="https://docs.docker.com/compose/">
 		<img alt="Docker Compose" src="https://img.shields.io/badge/docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white" />
 	</a>
