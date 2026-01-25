@@ -1,3 +1,7 @@
+## <small>0.1.1 (2026-01-25)</small>
+
+* fix(docker): install rollup package per arch ([56058d0](https://github.com/robotnikz/sentinel-dns/commit/56058d0))
+
 ## 0.1.0 (2026-01-25)
 
 * fix(ci): add conventionalcommits preset for semantic-release ([0a971a7](https://github.com/robotnikz/sentinel-dns/commit/0a971a7))
