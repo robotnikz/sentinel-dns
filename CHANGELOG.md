@@ -1,3 +1,7 @@
+## <small>0.2.2 (2026-01-25)</small>
+
+* fix(ui): avoid SPA fallback for missing assets ([d7e0767](https://github.com/robotnikz/sentinel-dns/commit/d7e0767))
+
 ## <small>0.2.1 (2026-01-25)</small>
 
 * fix(compose): ensure UI binds on all interfaces ([42bf21f](https://github.com/robotnikz/sentinel-dns/commit/42bf21f))
