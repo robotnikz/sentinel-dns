@@ -100,36 +100,36 @@ Use the included `docker-compose.yml` in this repository (or create your own):
 
 ```yaml
 services:
-	sentinel:
-		# Single-container build: Web UI + API + embedded DNS stack
-		image: ghcr.io/robotnikz/sentinel-dns:latest
-		container_name: sentinel-dns
-		ports:
-			# DNS service (UDP/TCP). If port 53 is already in use (e.g. systemd-resolved),
-			# adjust the host-side port mapping or disable the stub resolver.
-			- "53:53/udp"
-			- "53:53/tcp"
-			# Web UI + API
-			- "8080:8080"
-		environment:
-			# Timezone used for logs/UI timestamps.
-			- TZ=Europe/Berlin
-		volumes:
-			# Persistent storage for data, settings, secrets, and the GeoIP database.
-			- sentinel-data:/data
-		# Required for embedded Tailscale (VPN / exit-node mode).
-		cap_add:
-			- NET_ADMIN
-		devices:
-			- /dev/net/tun:/dev/net/tun
-		# Required for forwarding traffic when tailscale is acting as an exit node. (full traffic via Tailscale VPN)
-		sysctls:
-			net.ipv4.ip_forward: "1"
-			net.ipv6.conf.all.forwarding: "1"
-		restart: unless-stopped
+  sentinel:
+    # Single-container build: Web UI + API + embedded DNS stack
+    image: ghcr.io/robotnikz/sentinel-dns:latest
+    container_name: sentinel-dns
+    ports:
+      # DNS service (UDP/TCP). If port 53 is already in use (e.g. systemd-resolved),
+      # adjust the host-side port mapping or disable the stub resolver.
+      - "53:53/udp"
+      - "53:53/tcp"
+      # Web UI + API
+      - "8080:8080"
+    environment:
+      # Timezone used for logs/UI timestamps.
+      - TZ=Europe/Berlin
+    volumes:
+      # Persistent storage for data, settings, secrets, and the GeoIP database.
+      - sentinel-data:/data
+    # Required for embedded Tailscale (VPN / exit-node mode).
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    # Required for forwarding traffic when tailscale is acting as an exit node. (full traffic via Tailscale VPN)
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv6.conf.all.forwarding: "1"
+    restart: unless-stopped
 
 volumes:
-	sentinel-data:
+  sentinel-data:
 ```
 
 Run it:
