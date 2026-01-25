@@ -49,7 +49,14 @@ COPY server/package.json ./server/
 # Note: we intentionally avoid copying host-generated package-lock.json here.
 # Cross-platform lockfiles can break optional native deps (e.g. Rollup) in Linux builds.
 RUN npm install --include=optional --no-audit --no-fund \
-  && npm install --no-save @rollup/rollup-linux-x64-gnu \
+  && set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) rollup_pkg='@rollup/rollup-linux-x64-gnu' ;; \
+      arm64) rollup_pkg='@rollup/rollup-linux-arm64-gnu' ;; \
+      *) echo "Unsupported architecture for Rollup: $arch"; exit 1 ;; \
+    esac; \
+    npm install --no-save "$rollup_pkg" \
   && npm --prefix server install --include=optional --no-audit --no-fund
 
 # Copy sources
