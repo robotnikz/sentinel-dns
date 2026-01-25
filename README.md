@@ -68,7 +68,7 @@ docker compose restart
 
 ## DNS rewrite smoke test
 
-Validates the full path (Web login â†’ create rewrite via API â†’ DNS answers â†’ cleanup).
+Validates the full path (Web login -> create rewrite via API -> DNS answers -> cleanup).
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $c = Get-Credential; & (Join-Path $PWD 'scripts\\test-rewrite.ps1') -Credential $c }"
@@ -100,7 +100,7 @@ If you want DNSSEC validation locally inside the appliance, use `Unbound (Local)
 Sentinel can run an embedded `tailscaled` and advertise itself as an exit node.
 
 1. Create a reusable auth key in the Tailscale admin console.
-2. In the Web UI: Settings â†’ Remote Access (Tailscale)
+2. In the Web UI: Settings -> Remote Access (Tailscale)
 3. Approve exit-node advertisement in the Tailscale admin console (if enabled)
 
-To route DNS through Sentinel for your tailnet devices, set your tailnet DNS nameserver(s) to Sentinelâ€™s Tailscale IP.
+To route DNS through Sentinel for your tailnet devices, set your tailnet DNS nameserver(s) to Sentinel's Tailscale IP.
