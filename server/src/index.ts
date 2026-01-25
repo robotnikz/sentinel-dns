@@ -95,14 +95,61 @@ async function main(): Promise<void> {
   // Serve built frontend (single-port mode) if `dist/` exists.
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const distDir = path.resolve(__dirname, '../../dist');
+
+  // Diagnostics: helps debug "white page" reports in production without shell access.
+  app.get('/api/ui/status', async (req, reply) => {
+    const distExists = fs.existsSync(distDir);
+    const indexPath = path.join(distDir, 'index.html');
+    const indexExists = distExists && fs.existsSync(indexPath);
+
+    let assetUrls: string[] = [];
+    if (indexExists) {
+      try {
+        const html = fs.readFileSync(indexPath, 'utf8');
+        const urls = new Set<string>();
+        for (const match of html.matchAll(/\b(?:src|href)="(\/assets\/[^"]+)"/g)) {
+          if (match[1]) urls.add(String(match[1]));
+        }
+        assetUrls = Array.from(urls).slice(0, 20);
+      } catch {
+        // ignore
+      }
+    }
+
+    // Prevent caching so troubleshooting is accurate.
+    reply.header('cache-control', 'no-store');
+    return {
+      ok: true,
+      distDir,
+      distExists,
+      indexExists,
+      assetUrls
+    };
+  });
+
   if (fs.existsSync(distDir)) {
     await app.register(fastifyStatic, { root: distDir });
+
+    // SPA fallback for browser navigations:
+    // - never intercept /api
+    // - only serve index.html for requests that look like HTML navigation
+    //   (prevents returning HTML for missing JS/CSS, which causes white screens)
     app.setNotFoundHandler(async (req, reply) => {
-      if (req.raw.url?.startsWith('/api/')) {
+      const url = req.raw.url || '';
+      if (url.startsWith('/api/')) {
         reply.code(404);
         return { error: 'NOT_FOUND' };
       }
-      return reply.sendFile('index.html');
+
+      const accept = String(req.headers.accept || '');
+      const wantsHtml = accept.includes('text/html') || accept.includes('*/*');
+      const looksLikeFile = /\.[a-z0-9]+($|\?)/i.test(url);
+      if (req.method === 'GET' && wantsHtml && !looksLikeFile) {
+        return reply.sendFile('index.html');
+      }
+
+      reply.code(404);
+      return 'NOT_FOUND';
     });
   }
 
