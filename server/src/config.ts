@@ -22,7 +22,7 @@ const schema = z.object({
   // Optional: when a query is BLOCKED (we return NXDOMAIN), also resolve it upstream
   // only for analytics/logging so the World Map can show blocked destinations.
   // This will contact the upstream resolver for blocked domains.
-  SHADOW_RESOLVE_BLOCKED: z.coerce.boolean().optional().default(false),
+  SHADOW_RESOLVE_BLOCKED: z.coerce.boolean().optional().default(true),
 
   FRONTEND_ORIGIN: z.string().optional().default('http://localhost:3000'),
 
