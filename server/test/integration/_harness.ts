@@ -20,7 +20,7 @@ export async function hasDocker(): Promise<boolean> {
 }
 
 function randomPassword(): string {
-  return `pw-${crypto.randomBytes(16).toString('hex')}-${Date.now()}`;
+  return `pw-${crypto.randomBytes(24).toString('hex')}`;
 }
 
 async function waitForPostgres(url: string, timeoutMs = 60_000): Promise<void> {

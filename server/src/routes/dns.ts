@@ -57,7 +57,9 @@ export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig,
   app.get(
     '/api/dns/settings',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      }
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -70,7 +72,9 @@ export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig,
   app.put(
     '/api/dns/settings',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' }),
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
       schema: {
         body: {
           type: 'object',

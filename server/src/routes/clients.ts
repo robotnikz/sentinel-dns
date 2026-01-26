@@ -12,7 +12,9 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
   app.get(
     '/api/clients',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      }
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -24,7 +26,9 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
   app.put(
     '/api/clients/:id',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' }),
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
       schema: {
         body: {
           type: 'object',
@@ -85,7 +89,9 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
   app.delete(
     '/api/clients/:id',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      }
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);

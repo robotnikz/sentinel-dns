@@ -250,7 +250,8 @@ async function main() {
 
   if (args.assertBlocking) {
     const baseUrl = `http://${args.host}:${args.httpPort}`;
-    const username = `smoke-${Date.now()}`;
+    const runId = crypto.randomUUID();
+    const username = `smoke-${runId}`;
     const password = `smoke-pass-${crypto.randomBytes(16).toString('hex')}`;
 
     // First run in an isolated project should always be unconfigured, but handle both.
@@ -271,7 +272,7 @@ async function main() {
     }
 
     // Deterministic DNS rewrite assertion (does not require WAN/internet).
-    const rewriteDomain = `smoke-${Date.now()}.lan`;
+    const rewriteDomain = `smoke-${runId}.lan`;
     const rewriteTarget = '1.2.3.4';
     const addRewrite = await postJson(`${baseUrl}/api/dns/rewrites`, { domain: rewriteDomain, target: rewriteTarget }, { cookie });
     if (!addRewrite.res.ok) {

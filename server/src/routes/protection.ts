@@ -36,7 +36,9 @@ export async function registerProtectionRoutes(app: FastifyInstance, config: App
   app.get(
     '/api/protection/pause',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      }
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -49,7 +51,9 @@ export async function registerProtectionRoutes(app: FastifyInstance, config: App
   app.put(
     '/api/protection/pause',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' }),
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
       schema: {
         body: {
           type: 'object',
