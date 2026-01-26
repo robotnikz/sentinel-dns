@@ -1,3 +1,12 @@
+## 0.4.0 (2026-01-26)
+
+* Merge pull request #33 from robotnikz/ui-fixes ([d5eca3b](https://github.com/robotnikz/sentinel-dns/commit/d5eca3b)), closes [#33](https://github.com/robotnikz/sentinel-dns/issues/33)
+* test(server): cover ignore retention and upstream filtering ([41c4f0d](https://github.com/robotnikz/sentinel-dns/commit/41c4f0d))
+* fix(web): improve modal UX ([3f5c4d7](https://github.com/robotnikz/sentinel-dns/commit/3f5c4d7))
+* feat(server): increase metrics granularity ([b97ac58](https://github.com/robotnikz/sentinel-dns/commit/b97ac58))
+* feat(server): persist ignored suspicious signatures ([72be73c](https://github.com/robotnikz/sentinel-dns/commit/72be73c))
+* feat(web): persist suspicious ignores ([a928fbe](https://github.com/robotnikz/sentinel-dns/commit/a928fbe))
+
 ## <small>0.3.5 (2026-01-26)</small>
 
 * Merge pull request #32 from robotnikz/fix/misc-fixes-2 ([480631b](https://github.com/robotnikz/sentinel-dns/commit/480631b)), closes [#32](https://github.com/robotnikz/sentinel-dns/issues/32)
