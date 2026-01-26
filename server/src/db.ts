@@ -56,6 +56,15 @@ export function createDb(config: AppConfig): Db {
         );
       `);
 
+      // Suspicious activity ignores (signature-based) with retention.
+      // UI uses this to suppress known-false-positive anomaly signatures across pages.
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ignored_anomalies (
+          signature TEXT PRIMARY KEY,
+          ignored_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `);
+
       await client.query(`
         CREATE TABLE IF NOT EXISTS notifications (
           id BIGSERIAL PRIMARY KEY,
@@ -87,6 +96,7 @@ export function createDb(config: AppConfig): Db {
       await client.query('CREATE INDEX IF NOT EXISTS query_logs_ts_idx ON query_logs (ts DESC)');
       await client.query('CREATE INDEX IF NOT EXISTS notifications_ts_idx ON notifications (ts DESC)');
       await client.query('CREATE INDEX IF NOT EXISTS notifications_unread_ts_idx ON notifications (read, ts DESC)');
+      await client.query('CREATE INDEX IF NOT EXISTS ignored_anomalies_ignored_at_idx ON ignored_anomalies (ignored_at DESC)');
     } finally {
       client.release();
     }

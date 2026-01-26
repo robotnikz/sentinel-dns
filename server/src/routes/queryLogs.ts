@@ -11,7 +11,101 @@ type QueryLogsGetQuerystring = {
   limit?: string;
 };
 
+type IgnoredAnomaliesPutBody = {
+  signature: string;
+};
+
+type IgnoredAnomaliesDeleteQuerystring = {
+  signature?: string;
+};
+
 export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
+  const purgeExpiredIgnored = async () => {
+    // Best-effort retention cleanup. Called on access so we don't need a cron.
+    await db.pool.query("DELETE FROM ignored_anomalies WHERE ignored_at < NOW() - interval '30 days'");
+  };
+
+  app.get(
+    '/api/suspicious/ignored',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      await purgeExpiredIgnored();
+
+      const res = await db.pool.query(
+        'SELECT signature, ignored_at FROM ignored_anomalies ORDER BY ignored_at DESC'
+      );
+
+      return {
+        items: res.rows.map((r) => ({
+          signature: String(r.signature ?? ''),
+          ignoredAt: r.ignored_at ? new Date(r.ignored_at).toISOString() : null
+        }))
+      };
+    }
+  );
+
+  app.put(
+    '/api/suspicious/ignored',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['signature'],
+          properties: {
+            signature: { type: 'string', minLength: 1, maxLength: 500 }
+          }
+        }
+      }
+    },
+    async (request: FastifyRequest<{ Body: IgnoredAnomaliesPutBody }>) => {
+      await requireAdmin(db, request);
+      await purgeExpiredIgnored();
+
+      const signature = String(request.body.signature || '').trim();
+      if (!signature) return { error: 'INVALID_SIGNATURE' };
+
+      await db.pool.query(
+        'INSERT INTO ignored_anomalies(signature, ignored_at) VALUES ($1, NOW()) ON CONFLICT (signature) DO UPDATE SET ignored_at = NOW()',
+        [signature]
+      );
+
+      return { ok: true };
+    }
+  );
+
+  app.delete(
+    '/api/suspicious/ignored',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request: FastifyRequest<{ Querystring: IgnoredAnomaliesDeleteQuerystring }>, reply: FastifyReply) => {
+      await requireAdmin(db, request);
+      const signature = String(request.query.signature || '').trim();
+      if (!signature) {
+        reply.code(400);
+        return { error: 'INVALID_SIGNATURE' };
+      }
+
+      await db.pool.query('DELETE FROM ignored_anomalies WHERE signature = $1', [signature]);
+      reply.code(204);
+      return null;
+    }
+  );
+
   app.get(
     '/api/query-logs',
     {
@@ -97,4 +191,6 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
       return { ok: true, ingested: entries.length };
     }
   );
+
+  void config;
 }
