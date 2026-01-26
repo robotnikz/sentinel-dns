@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Share2, Search, ShieldCheck, BarChart3, Table2, Network, Clock, ArrowRight, ChevronDown } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Share2, Search, ShieldCheck, BarChart3, Clock, ArrowRight, ChevronDown } from 'lucide-react';
 import { useClients } from '../contexts/ClientsContext';
 
 type ClientActivity = {
@@ -38,26 +38,6 @@ function formatAgo(iso: string | null): string {
    if (hr < 48) return `${hr}h ago`;
    const d = Math.floor(hr / 24);
    return `${d}d ago`;
-}
-
-function useElementSize<T extends HTMLElement>() {
-   const ref = useRef<T | null>(null);
-   const [size, setSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
-
-   useEffect(() => {
-      const el = ref.current;
-      if (!el) return;
-      const ro = new ResizeObserver((entries) => {
-         const entry = entries[0];
-         const cr = entry?.contentRect;
-         if (!cr) return;
-         setSize({ width: cr.width, height: cr.height });
-      });
-      ro.observe(el);
-      return () => ro.disconnect();
-   }, []);
-
-   return { ref, size };
 }
 
 type MenuOption<T extends string | number> = { value: T; label: string };
@@ -149,7 +129,6 @@ function MenuSelect<T extends string | number>(props: {
 
 const NetworkMap: React.FC = () => {
    const [windowHours, setWindowHours] = useState<number>(24);
-   const [viewMode, setViewMode] = useState<'graph' | 'table'>('table');
    const [sortBy, setSortBy] = useState<'queries' | 'blockedPct' | 'lastSeen'>('queries');
    const [search, setSearch] = useState('');
    const [loading, setLoading] = useState(true);
@@ -161,8 +140,6 @@ const NetworkMap: React.FC = () => {
 
    const { clients } = useClients();
    const [discoveredHostnamesByIp, setDiscoveredHostnamesByIp] = useState<Record<string, string>>({});
-
-   const { ref: graphRef, size: graphSize } = useElementSize<HTMLDivElement>();
 
    useEffect(() => {
       let cancelled = false;
@@ -338,36 +315,6 @@ const NetworkMap: React.FC = () => {
       };
    }, [selectedClient, windowHours]);
 
-   const graphLayout = useMemo(() => {
-      const width = graphSize.width || 1;
-      const height = graphSize.height || 1;
-      const cx = width / 2;
-      const cy = height / 2;
-      const maxR = Math.max(120, Math.min(width, height) * 0.4);
-
-      const clients = filtered.slice(0, 48);
-      const positions: Array<{ client: string; x: number; y: number; ring: number; idx: number }> = [];
-
-      let placed = 0;
-      let ring = 0;
-      while (placed < clients.length) {
-         const capacity = 10 + ring * 6;
-         const ringClients = clients.slice(placed, placed + capacity);
-         const radius = maxR * (0.45 + ring * 0.22);
-         ringClients.forEach((c, idx) => {
-            const angle = (idx / ringClients.length) * Math.PI * 2 - Math.PI / 2;
-            const x = cx + Math.cos(angle) * radius;
-            const y = cy + Math.sin(angle) * radius;
-            positions.push({ client: c.client, x, y, ring, idx });
-         });
-         placed += ringClients.length;
-         ring += 1;
-         if (ring > 4) break;
-      }
-
-      return { cx, cy, width, height, nodes: positions };
-   }, [filtered, graphSize.height, graphSize.width]);
-
    const blockedPct = (i: ClientActivity | null) => {
       if (!i) return 0;
       const total = i.totalQueries || 0;
@@ -395,9 +342,9 @@ const NetworkMap: React.FC = () => {
             <div className="flex justify-between items-end">
                <div>
                   <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-                     <Share2 className="w-5 h-5 text-zinc-500" /> Network Map
+                     <Share2 className="w-5 h-5 text-zinc-500" /> Clients
                   </h2>
-                  <p className="text-zinc-500 text-sm mt-1">DNS activity map of clients talking through Sentinel.</p>
+                  <p className="text-zinc-500 text-sm mt-1">DNS activity across clients talking through Sentinel.</p>
                </div>
             </div>
 
@@ -418,22 +365,6 @@ const NetworkMap: React.FC = () => {
                      />
                   </div>
 
-                  <div className="flex gap-1 border-b border-[#27272a]">
-                     {[{ id: 'table', label: 'Table', icon: Table2 }, { id: 'graph', label: 'Graph', icon: Network }].map((t) => (
-                        <button
-                           key={t.id}
-                           onClick={() => setViewMode(t.id as any)}
-                           className={`flex items-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-all ${
-                              viewMode === (t.id as any)
-                                 ? 'border-emerald-500 text-white bg-[#18181b]'
-                                 : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-[#18181b]/50'
-                           }`}
-                        >
-                           <t.icon className="w-3.5 h-3.5" />
-                           {t.label}
-                        </button>
-                     ))}
-                  </div>
                </div>
 
                <div className="flex items-center gap-2">
@@ -486,142 +417,57 @@ const NetworkMap: React.FC = () => {
                   ) : null}
                </div>
 
-               {viewMode === 'table' ? (
-                  <div className="absolute inset-0 pt-12">
-                     <div className="px-4 pb-3 text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
-                        Clients ({filtered.length})
-                     </div>
-                     <div className="overflow-auto h-full">
-                        <table className="w-full text-xs">
-                           <thead className="sticky top-0 bg-[#09090b]">
-                              <tr className="text-zinc-500">
-                                 <th className="text-left font-mono px-4 py-2 border-b border-[#27272a]">Client</th>
-                                 <th className="text-right font-mono px-3 py-2 border-b border-[#27272a]">Queries</th>
-                                 <th className="text-right font-mono px-3 py-2 border-b border-[#27272a]">Blocked</th>
-                                 <th className="text-right font-mono px-3 py-2 border-b border-[#27272a]">Unique</th>
-                                 <th className="text-right font-mono px-4 py-2 border-b border-[#27272a]">Last seen</th>
-                              </tr>
-                           </thead>
-                           <tbody>
-                              {filtered.map((i) => {
-                                 const pct = blockedPct(i);
-                                 const active = selectedClient === i.client;
-                                 const tone = nodeTone(i);
-                                 const toneText =
-                                    tone === 'rose' ? 'text-rose-400' : tone === 'orange' ? 'text-orange-400' : 'text-emerald-400';
-                                 const display = displayFor(i.client);
-                                 return (
-                                    <tr
-                                       key={i.client}
-                                       className={`cursor-pointer ${active ? 'bg-[#18181b]' : 'hover:bg-[#121214]'}`}
-                                       onClick={() => setSelectedClient(i.client)}
+               <div className="absolute inset-0 pt-12">
+                  <div className="px-4 pb-3 text-[10px] font-mono text-zinc-500 uppercase tracking-widest">
+                     Clients ({filtered.length})
+                  </div>
+                  <div className="overflow-auto h-full">
+                     <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-[#09090b]">
+                           <tr className="text-zinc-500">
+                              <th className="text-left font-mono px-4 py-2 border-b border-[#27272a]">Client</th>
+                              <th className="text-right font-mono px-3 py-2 border-b border-[#27272a]">Queries</th>
+                              <th className="text-right font-mono px-3 py-2 border-b border-[#27272a]">Blocked</th>
+                              <th className="text-right font-mono px-3 py-2 border-b border-[#27272a]">Unique</th>
+                              <th className="text-right font-mono px-4 py-2 border-b border-[#27272a]">Last seen</th>
+                           </tr>
+                        </thead>
+                        <tbody>
+                           {filtered.map((i) => {
+                              const pct = blockedPct(i);
+                              const active = selectedClient === i.client;
+                              const tone = nodeTone(i);
+                              const toneText =
+                                 tone === 'rose' ? 'text-rose-400' : tone === 'orange' ? 'text-orange-400' : 'text-emerald-400';
+                              const display = displayFor(i.client);
+                              return (
+                                 <tr
+                                    key={i.client}
+                                    className={`cursor-pointer ${active ? 'bg-[#18181b]' : 'hover:bg-[#121214]'}`}
+                                    onClick={() => setSelectedClient(i.client)}
+                                 >
+                                    <td className="px-4 py-2 text-zinc-200 border-b border-[#121214]">
+                                       <div className="font-medium text-zinc-200 truncate max-w-[320px]">{display.primary}</div>
+                                       {display.secondary ? (
+                                          <div className="text-[10px] font-mono text-zinc-500 truncate max-w-[320px]">{display.secondary}</div>
+                                       ) : null}
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-zinc-300 font-mono border-b border-[#121214]">{i.totalQueries.toLocaleString()}</td>
+                                    <td
+                                       className={`px-3 py-2 text-right font-mono border-b border-[#121214] ${toneText}`}
+                                       title="Blocked percentage"
                                     >
-                                       <td className="px-4 py-2 text-zinc-200 border-b border-[#121214]">
-                                          <div className="font-medium text-zinc-200 truncate max-w-[320px]">{display.primary}</div>
-                                          {display.secondary ? (
-                                             <div className="text-[10px] font-mono text-zinc-500 truncate max-w-[320px]">{display.secondary}</div>
-                                          ) : null}
-                                       </td>
-                                       <td className="px-3 py-2 text-right text-zinc-300 font-mono border-b border-[#121214]">{i.totalQueries.toLocaleString()}</td>
-                                       <td className={`px-3 py-2 text-right font-mono border-b border-[#121214] ${toneText}`}
-                                          title="Blocked percentage"
-                                       >
-                                          {i.blockedQueries.toLocaleString()} ({pct}%)
-                                       </td>
-                                       <td className="px-3 py-2 text-right text-zinc-400 font-mono border-b border-[#121214]">{i.uniqueDomains.toLocaleString()}</td>
-                                       <td className="px-4 py-2 text-right text-zinc-400 font-mono border-b border-[#121214]">{formatAgo(i.lastSeen)}</td>
-                                    </tr>
-                                 );
-                              })}
-                           </tbody>
-                        </table>
-                     </div>
+                                       {i.blockedQueries.toLocaleString()} ({pct}%)
+                                    </td>
+                                    <td className="px-3 py-2 text-right text-zinc-400 font-mono border-b border-[#121214]">{i.uniqueDomains.toLocaleString()}</td>
+                                    <td className="px-4 py-2 text-right text-zinc-400 font-mono border-b border-[#121214]">{formatAgo(i.lastSeen)}</td>
+                                 </tr>
+                              );
+                           })}
+                        </tbody>
+                     </table>
                   </div>
-               ) : (
-                  <div ref={graphRef} className="absolute inset-0">
-                     <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                        {graphLayout.nodes.map((n) => {
-                           const isSelected = selectedClient === n.client;
-                           return (
-                              <line
-                                 key={n.client}
-                                 x1={graphLayout.cx}
-                                 y1={graphLayout.cy}
-                                 x2={n.x}
-                                 y2={n.y}
-                                 stroke={isSelected ? '#10b981' : '#27272a'}
-                                 strokeWidth={isSelected ? 2.5 : 1}
-                                 opacity={isSelected ? 0.9 : 0.55}
-                              />
-                           );
-                        })}
-                     </svg>
-
-                     <div
-                        className="absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center"
-                        style={{ left: graphLayout.cx, top: graphLayout.cy }}
-                     >
-                        <div className="absolute w-28 h-28 bg-emerald-500/8 rounded-full animate-pulse"></div>
-                        <div className="w-14 h-14 rounded-lg flex items-center justify-center border border-[#27272a] bg-[#09090b] shadow-lg relative">
-                           <ShieldCheck className="w-7 h-7 text-emerald-500" />
-                        </div>
-                        <div className="mt-2 text-center opacity-90">
-                           <div className="text-xs font-bold text-white bg-[#09090b]/80 px-2 py-0.5 rounded backdrop-blur-sm border border-[#27272a]">
-                              Sentinel
-                           </div>
-                           <div className="text-[10px] font-mono text-zinc-500 mt-0.5">DNS gateway</div>
-                        </div>
-                     </div>
-
-                     {graphLayout.nodes.map((n) => {
-                        const item = filtered.find((i) => i.client === n.client);
-                        if (!item) return null;
-
-                        const display = displayFor(item.client);
-
-                        const pct = blockedPct(item);
-                        const tone = nodeTone(item);
-                        const dot = tone === 'rose' ? 'bg-rose-500' : tone === 'orange' ? 'bg-orange-500' : 'bg-emerald-500';
-                        const border =
-                           selectedClient === item.client ? 'border-white' : 'border-[#27272a] group-hover:border-zinc-500';
-
-                        const activity = item.totalQueries / Math.max(1, windowHours);
-                        const size = clamp(44 + Math.log10(Math.max(1, activity)) * 10, 44, 68);
-
-                        return (
-                           <div
-                              key={item.client}
-                              className={`absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center cursor-pointer group transition-all duration-200 ${
-                                 selectedClient === item.client ? 'scale-105 z-10' : 'z-0'
-                              }`}
-                              style={{ left: n.x, top: n.y }}
-                              onClick={() => setSelectedClient(item.client)}
-                              title={`${display.primary}${display.secondary ? `\nIP: ${display.secondary}` : ''}\nQueries: ${item.totalQueries}\nBlocked: ${pct}%`}
-                           >
-                              <div
-                                 className={`rounded-lg flex items-center justify-center border transition-colors shadow-lg relative bg-[#09090b] ${border}`}
-                                 style={{ width: size, height: size }}
-                              >
-                                 <div className={`absolute -top-1 -right-1 w-2.5 h-2.5 ${dot} rounded-full border-2 border-[#09090b]`}></div>
-                                 <div className="w-7 h-7 rounded-md bg-[#18181b] border border-[#27272a] flex items-center justify-center">
-                                    <span className="text-[10px] font-bold text-zinc-200">DNS</span>
-                                 </div>
-                              </div>
-
-                              <div className={`mt-2 text-center transition-opacity ${selectedClient === item.client ? 'opacity-100' : 'opacity-60 group-hover:opacity-100'}`}>
-                                 <div className="text-xs font-bold text-white bg-[#09090b]/80 px-2 py-0.5 rounded backdrop-blur-sm border border-[#27272a] max-w-[160px] truncate">
-                                    {display.primary}
-                                 </div>
-                                 {display.secondary ? (
-                                    <div className="text-[9px] font-mono text-zinc-500 mt-0.5 max-w-[160px] truncate">{display.secondary}</div>
-                                 ) : null}
-                                 <div className="text-[9px] font-mono text-zinc-400 mt-0.5">{Math.round(activity)} q/h · {pct}% blocked</div>
-                              </div>
-                           </div>
-                        );
-                     })}
-                  </div>
-               )}
+               </div>
             </div>
 
             <div className="w-[360px] border-l border-[#27272a] bg-[#09090b]">

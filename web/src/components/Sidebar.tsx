@@ -84,7 +84,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
   const monitorItems = [
     { id: 'dashboard', label: 'Overview', icon: LayoutDashboard },
     { id: 'logs', label: 'Query Log', icon: Activity },
-    { id: 'topology', label: 'Network Map', icon: Share2 }, 
+    { id: 'topology', label: 'Clients', icon: Share2 }, 
   ];
 
   // Group 2: Controls (Write/Configure)
