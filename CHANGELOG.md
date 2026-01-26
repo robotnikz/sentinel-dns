@@ -1,3 +1,8 @@
+## <small>0.3.4 (2026-01-26)</small>
+
+* Merge pull request #31 from robotnikz/fix/query-logs-hostnames ([d4556b2](https://github.com/robotnikz/sentinel-dns/commit/d4556b2)), closes [#31](https://github.com/robotnikz/sentinel-dns/issues/31)
+* fix: show discovered hostnames in query logs ([5cc7ebe](https://github.com/robotnikz/sentinel-dns/commit/5cc7ebe))
+
 ## <small>0.3.3 (2026-01-26)</small>
 
 * Merge pull request #30 from robotnikz/fix/doh-upstream-headers ([df04523](https://github.com/robotnikz/sentinel-dns/commit/df04523)), closes [#30](https://github.com/robotnikz/sentinel-dns/issues/30)
