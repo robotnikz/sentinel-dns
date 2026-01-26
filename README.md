@@ -106,15 +106,21 @@ Use the included compose file at `deploy/compose/docker-compose.yml` (or create 
 ```yaml
 services:
   sentinel:
-    # Single-container build: Web UI + API + embedded DNS stack
     image: ghcr.io/robotnikz/sentinel-dns:latest
     container_name: sentinel-dns
     ports:
       # DNS service (UDP/TCP). If port 53 is already in use (e.g. systemd-resolved),
       # adjust the host-side port mapping or disable the stub resolver.
+      # By default this is published on all host interfaces (0.0.0.0).
+      # To keep it reachable for all devices in your LAN while avoiding WAN exposure,
+      # bind explicitly to your LAN interface IP (example 192.168.1.10):
+      # - "192.168.1.10:53:53/udp"
+      # - "192.168.1.10:53:53/tcp"
       - "53:53/udp"
       - "53:53/tcp"
       # Web UI + API
+      # Same idea for the UI/API:
+      # - "192.168.1.10:8080:8080"
       - "8080:8080"
     environment:
       # Timezone used for logs/UI timestamps.
@@ -122,8 +128,11 @@ services:
       # Ensure the Web UI/API is reachable via Docker port publishing.
       - HOST=0.0.0.0
       - PORT=8080
+      # Optional: HA/VIP role override file (written by keepalived sidecar).
+      # If you never configure HA in the UI, this file won't exist and Sentinel runs normally.
+      - CLUSTER_ROLE_FILE=/data/sentinel/cluster_role
     volumes:
-      # Persistent storage for data, settings, secrets, and the GeoIP database.
+      # Persistent storage for Postgres data, settings, secrets, and the GeoIP database.
       - sentinel-data:/data
     # Required for embedded Tailscale (VPN / exit-node mode).
     cap_add:
@@ -135,6 +144,30 @@ services:
       net.ipv4.ip_forward: "1"
       net.ipv6.conf.all.forwarding: "1"
     restart: unless-stopped
+
+  # Optional HA sidecar (VRRP/VIP via keepalived)
+  # - Always included so users can enable HA from the UI without editing compose files.
+  # - Does nothing until the UI writes /data/sentinel/ha/config.json (enabled=true).
+  # - Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
+  keepalived:
+    build:
+      context: ../..
+      dockerfile: docker/keepalived/Dockerfile
+    container_name: sentinel-keepalived
+    network_mode: host
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BROADCAST
+    environment:
+      - DATA_DIR=/data
+      - HA_CONFIG_FILE=/data/sentinel/ha/config.json
+      - HA_ROLE_FILE=/data/sentinel/cluster_role
+      - HA_NETINFO_FILE=/data/sentinel/ha/netinfo.json
+      - HA_READY_URL=http://127.0.0.1:8080/api/cluster/ready
+    volumes:
+      - sentinel-data:/data
 
 volumes:
   sentinel-data:
