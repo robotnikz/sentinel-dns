@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Smartphone, Laptop, Tv, Gamepad2, Tablet, Search, Shield, GlobeLock, MoreVertical, X, Filter, Lock, Skull, Heart, MessageCircle, Play, ShoppingCart, Ban, Grid, HelpCircle, Info, Moon, Clock, Calendar, Check, Pause, ChevronDown, ChevronUp, WifiOff, Power, Youtube, Network, Router, Sliders, Plus, Save, Fingerprint, RefreshCw } from 'lucide-react';
+import { Smartphone, Laptop, Tv, Gamepad2, Tablet, Search, Shield, GlobeLock, X, Filter, Lock, Skull, Heart, MessageCircle, Play, ShoppingCart, Ban, Grid, HelpCircle, Info, Moon, Clock, Calendar, Check, Pause, ChevronDown, ChevronUp, WifiOff, Power, Youtube, Network, Router, Sliders, Plus, Save, Fingerprint, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import { ClientProfile, ContentCategory, AppService, ScheduleModeType, BlocklistMode } from '../types';
 import { AppLogo } from '../components/AppLogo';
 import { useClients } from '../contexts/ClientsContext';
@@ -8,7 +8,7 @@ import { getAuthHeaders } from '../services/apiClient';
 
 const Clients: React.FC = () => {
   // Use global client context
-  const { clients, addClient, updateClient } = useClients();
+    const { clients, addClient, updateClient, removeClient } = useClients();
   
   const [activeView, setActiveView] = useState<'devices' | 'networks'>('devices');
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,6 +24,7 @@ const Clients: React.FC = () => {
     const [modalSection, setModalSection] = useState<'overview' | 'rules' | 'schedules'>('overview');
   const [showAddModal, setShowAddModal] = useState(false);
   const [addMode, setAddMode] = useState<'manual' | 'scan'>('manual'); // New: Switch between manual and scan
+    const [editingClient, setEditingClient] = useState<ClientProfile | null>(null);
 
     // Discovered clients (best-effort from DNS logs + optional reverse DNS)
     const [discovered, setDiscovered] = useState<Array<{ ip: string; hostname: string | null; lastSeen?: string | null }>>([]);
@@ -168,23 +169,10 @@ const Clients: React.FC = () => {
     });
 
   const CATEGORY_LIST_URLS: Partial<Record<ContentCategory, string[]>> = {
-      adult: [
-          'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts',
-          'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/nsfw.txt'
-      ],
-      gambling: [
-          'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts',
-          'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/gambling.txt'
-      ],
-      social: [
-          'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts',
-          'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt'
-      ],
-      piracy: [
-          'https://blocklistproject.github.io/Lists/alt-version/piracy-nl.txt',
-          'https://blocklistproject.github.io/Lists/alt-version/torrent-nl.txt',
-          'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt'
-      ],
+      adult: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/nsfw.txt'],
+      gambling: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/gambling.txt'],
+      social: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt'],
+      piracy: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt'],
       dating: ['https://raw.githubusercontent.com/nextdns/services/main/services/tinder']
   };
 
@@ -427,10 +415,60 @@ const Clients: React.FC = () => {
       // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAddModal, activeView, addMode]);
 
+  const resetNewNodeData = () => {
+      setNewNodeData({ name: '', mac: '', ip: '', cidr: '', deviceIcon: 'smartphone' });
+  };
+
+  const openCreateModal = () => {
+      setEditingClient(null);
+      setAddMode('manual');
+      resetNewNodeData();
+      setShowAddModal(true);
+  };
+
+  const openEditClient = (client: ClientProfile) => {
+      const isSubnet = client.isSubnet || client.type === 'subnet';
+      setEditingClient(client);
+      setAddMode('manual');
+      setActiveView(isSubnet ? 'networks' : 'devices');
+      setNewNodeData({
+          name: client.name || '',
+          mac: client.mac || '',
+          ip: client.ip || '',
+          cidr: client.cidr || '',
+          deviceIcon: isSubnet ? 'smartphone' : client.type || 'smartphone'
+      });
+      setShowAddModal(true);
+  };
+
+  const closeAddModal = () => {
+      setShowAddModal(false);
+      setEditingClient(null);
+      setAddMode('manual');
+      resetNewNodeData();
+  };
+
     const handleAddNode = () => {
       if(!newNodeData.name) return;
 
-      const isNetworkCreation = activeView === 'networks';
+      const isNetworkCreation = editingClient
+          ? editingClient.isSubnet || editingClient.type === 'subnet'
+          : activeView === 'networks';
+
+      if (editingClient) {
+          const updatedProfile: ClientProfile = {
+              ...editingClient,
+              name: newNodeData.name,
+              type: isNetworkCreation ? 'subnet' : (newNodeData.deviceIcon as any),
+              isSubnet: isNetworkCreation,
+              cidr: isNetworkCreation ? newNodeData.cidr : undefined,
+              mac: !isNetworkCreation ? newNodeData.mac : undefined,
+              ip: !isNetworkCreation ? newNodeData.ip : undefined
+          };
+          void updateClient(updatedProfile);
+          closeAddModal();
+          return;
+      }
 
       const newProfile: ClientProfile = {
           id: Date.now().toString(),
@@ -458,9 +496,15 @@ const Clients: React.FC = () => {
 
       // Best-effort persist; show feedback in the modal when editing, not on creation.
       void addClient(newProfile);
-      setShowAddModal(false);
-      setNewNodeData({ name: '', mac: '', ip: '', cidr: '', deviceIcon: 'smartphone' });
-      setAddMode('manual');
+      closeAddModal();
+  };
+
+  const handleDeleteClient = (client: ClientProfile) => {
+      if (!window.confirm(`Delete ${client.name}?`)) return;
+      void removeClient(client.id);
+      if (selectedClient?.id === client.id) {
+          setSelectedClient(null);
+      }
   };
 
   // Wrapper for updating client that updates both local view state and global state
@@ -778,7 +822,7 @@ const Clients: React.FC = () => {
            </div>
            {/* Context-Aware Add Button */}
            <button 
-             onClick={() => setShowAddModal(true)}
+                         onClick={openCreateModal}
              className="btn-primary flex items-center gap-2 px-4 py-2 rounded text-xs shadow-lg transition-transform hover:scale-105"
            >
                <Plus className="w-3.5 h-3.5" /> 
@@ -872,12 +916,31 @@ const Clients: React.FC = () => {
                 </div>
               </div>
               
-              <div className="flex flex-col items-end gap-2">
-                  <button className="text-zinc-600 hover:text-zinc-300">
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
+                            <div className="flex flex-col items-end gap-2">
+                                    <div className="flex items-center gap-1">
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                openEditClient(client);
+                                            }}
+                                            className="p-1.5 rounded text-zinc-500 hover:text-white hover:bg-[#18181b]"
+                                            title="Edit policy"
+                                        >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDeleteClient(client);
+                                            }}
+                                            className="p-1.5 rounded text-zinc-500 hover:text-rose-300 hover:bg-[#18181b]"
+                                            title="Delete policy"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
                                     {getStatusBadge(client)}
-              </div>
+                            </div>
             </div>
 
             <div className="bg-[#121214] border-t border-[#27272a] p-3 grid grid-cols-2 gap-px">
@@ -915,14 +978,20 @@ const Clients: React.FC = () => {
       </div>
 
       {/* ADD NODE MODAL */}
-      <Modal open={showAddModal} onClose={() => setShowAddModal(false)} zIndex={1000}>
+            <Modal open={showAddModal} onClose={closeAddModal} zIndex={1000}>
               <div className="w-full max-w-md bg-[#09090b] border border-[#27272a] rounded-lg overflow-hidden shadow-2xl animate-fade-in">
                   <div className="p-5 border-b border-[#27272a] flex justify-between items-center bg-[#121214]">
                       <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
                           <Plus className="w-4 h-4 text-emerald-500" /> 
-                          {activeView === 'devices' ? 'Add New Device' : 'Add Network Segment'}
+                                                    {editingClient
+                                                        ? activeView === 'devices'
+                                                            ? 'Edit Device'
+                                                            : 'Edit Network Segment'
+                                                        : activeView === 'devices'
+                                                            ? 'Add New Device'
+                                                            : 'Add Network Segment'}
                       </h3>
-                      <button onClick={() => setShowAddModal(false)} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
+                                            <button onClick={closeAddModal} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
                   </div>
                   <div className="p-6 space-y-4">
                       
@@ -942,28 +1011,34 @@ const Clients: React.FC = () => {
                       {activeView === 'devices' ? (
                           <>
                              {/* Tabs for Add Method */}
-                             <div className="flex gap-1 border-b border-[#27272a] mb-4">
-                                <button
-                                    onClick={() => setAddMode('manual')}
-                                    className={`flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-all ${
-                                        addMode === 'manual'
-                                            ? 'border-emerald-500 text-white bg-[#18181b]'
-                                            : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-[#18181b]/50'
-                                    }`}
-                                >
-                                    MANUAL ENTRY
-                                </button>
-                                <button
-                                    onClick={() => setAddMode('scan')}
-                                    className={`flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-all ${
-                                        addMode === 'scan'
-                                            ? 'border-emerald-500 text-white bg-[#18181b]'
-                                            : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-[#18181b]/50'
-                                    }`}
-                                >
-                                    DISCOVERED
-                                </button>
-                             </div>
+                             {!editingClient ? (
+                               <div className="flex gap-1 border-b border-[#27272a] mb-4">
+                                  <button
+                                      onClick={() => setAddMode('manual')}
+                                      className={`flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-all ${
+                                          addMode === 'manual'
+                                              ? 'border-emerald-500 text-white bg-[#18181b]'
+                                              : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-[#18181b]/50'
+                                      }`}
+                                  >
+                                      MANUAL ENTRY
+                                  </button>
+                                  <button
+                                      onClick={() => setAddMode('scan')}
+                                      className={`flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-medium border-b-2 transition-all ${
+                                          addMode === 'scan'
+                                              ? 'border-emerald-500 text-white bg-[#18181b]'
+                                              : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-[#18181b]/50'
+                                      }`}
+                                  >
+                                      DISCOVERED
+                                  </button>
+                               </div>
+                             ) : (
+                               <div className="text-[10px] font-bold text-zinc-500 uppercase mb-4">
+                                 Manual Entry
+                               </div>
+                             )}
 
                              {addMode === 'manual' && (
                                  <div className="bg-[#18181b] border border-[#27272a] rounded p-4 space-y-4 animate-fade-in">
@@ -1084,13 +1159,13 @@ const Clients: React.FC = () => {
                       )}
                   </div>
                   <div className="p-5 border-t border-[#27272a] bg-[#121214] flex justify-end gap-3">
-                      <button onClick={() => setShowAddModal(false)} className="px-4 py-2 rounded text-xs font-bold text-zinc-400 hover:text-white">CANCEL</button>
+                      <button onClick={closeAddModal} className="px-4 py-2 rounded text-xs font-bold text-zinc-400 hover:text-white">CANCEL</button>
                       <button 
                         onClick={handleAddNode}
                                                 disabled={!newNodeData.name || (activeView === 'networks' && !newNodeData.cidr.trim())}
                         className="btn-primary px-6 py-2 rounded text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                          <Save className="w-3.5 h-3.5" /> SAVE
+                          <Save className="w-3.5 h-3.5" /> {editingClient ? 'SAVE CHANGES' : 'SAVE'}
                       </button>
                   </div>
               </div>

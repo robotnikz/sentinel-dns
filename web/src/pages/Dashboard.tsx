@@ -109,7 +109,7 @@ function mapQueryLogRow(row: any): DnsQuery | null {
   };
 }
 
-function openLogsPreset(preset: { searchTerm?: string; statusFilter?: string; typeFilter?: string; clientFilter?: string; pageSize?: number }) {
+function openLogsPreset(preset: { tab?: 'queries' | 'suspicious'; searchTerm?: string; statusFilter?: string; typeFilter?: string; clientFilter?: string; pageSize?: number }) {
   window.dispatchEvent(new CustomEvent('sentinel:navigate', { detail: { page: 'logs', logsPreset: preset } }));
 }
 
@@ -127,6 +127,7 @@ const Dashboard: React.FC = () => {
 
   const [summary, setSummary] = useState<{ totalQueries: number; blockedQueries: number; activeClients: number } | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [trafficWindowHours, setTrafficWindowHours] = useState(24);
   const [topDomains, setTopDomains] = useState<Array<{ domain: string; count: number; pct: number }>>([]);
   const [blockedTargets, setBlockedTargets] = useState<Array<{ domain: string; count: number; pct: number }>>([]);
 
@@ -161,7 +162,7 @@ const Dashboard: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
+  const loadIgnoredSignatures = () => {
     try {
       const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
@@ -171,20 +172,48 @@ const Dashboard: React.FC = () => {
     } catch {
       // ignore
     }
+  };
+
+  useEffect(() => {
+    loadIgnoredSignatures();
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === IGNORED_ANOMALY_KEY) loadIgnoredSignatures();
+    };
+    const onIgnored = () => loadIgnoredSignatures();
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('sentinel:ignored-anomalies', onIgnored as any);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('sentinel:ignored-anomalies', onIgnored as any);
+    };
   }, []);
+
+  const formatTrafficTick = (ts: string): string => {
+    if (!ts) return '';
+    const date = new Date(ts);
+    if (Number.isNaN(date.getTime())) return '';
+    if (trafficWindowHours <= 6) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    if (trafficWindowHours <= 24) {
+      return date.toLocaleTimeString([], { hour: '2-digit' });
+    }
+    return date.toLocaleDateString([], { month: 'short', day: '2-digit' });
+  };
 
   useEffect(() => {
     let cancelled = false;
 
     Promise.all([
       fetch('/api/metrics/summary?hours=24').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/metrics/timeseries?hours=24').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/metrics/top-domains?hours=24&limit=20').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/metrics/top-blocked?hours=24&limit=20').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/geo/countries?hours=24&limit=40').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/query-logs?limit=500').then((r) => (r.ok ? r.json() : null)).catch(() => null)
     ])
-      .then(([summaryRes, tsRes, topRes, blockedRes, geoRes, logsRes]) => {
+      .then(([summaryRes, topRes, blockedRes, geoRes, logsRes]) => {
         if (cancelled) return;
 
         if (summaryRes && typeof summaryRes === 'object') {
@@ -196,18 +225,6 @@ const Dashboard: React.FC = () => {
         } else {
           setSummary(null);
         }
-
-        const tsItems = Array.isArray(tsRes?.items) ? tsRes.items : [];
-        const mappedTs: ChartDataPoint[] = tsItems.map((it: any) => {
-          const ts = typeof it?.ts === 'string' ? it.ts : '';
-          const time = ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-          return {
-            time,
-            queries: Number(it?.queries ?? 0),
-            ads: Number(it?.ads ?? 0)
-          };
-        });
-        setChartData(mappedTs);
 
         const blockedItemsRaw = Array.isArray(blockedRes?.items) ? blockedRes.items : [];
         const blockedItems = blockedItemsRaw
@@ -255,7 +272,6 @@ const Dashboard: React.FC = () => {
       .catch(() => {
         if (cancelled) return;
         setSummary(null);
-        setChartData([]);
         setTopDomains([]);
         setBlockedTargets([]);
           setGeoData([]);
@@ -268,6 +284,34 @@ const Dashboard: React.FC = () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch(`/api/metrics/timeseries?hours=${encodeURIComponent(String(trafficWindowHours))}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((tsRes) => {
+        if (cancelled) return;
+        const tsItems = Array.isArray(tsRes?.items) ? tsRes.items : [];
+        const mappedTs: ChartDataPoint[] = tsItems.map((it: any) => {
+          const ts = typeof it?.ts === 'string' ? it.ts : '';
+          const time = ts ? formatTrafficTick(ts) : '';
+          return {
+            time,
+            queries: Number(it?.queries ?? 0),
+            ads: Number(it?.ads ?? 0)
+          };
+        });
+        setChartData(mappedTs);
+      })
+      .catch(() => {
+        if (!cancelled) setChartData([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [trafficWindowHours]);
 
   useEffect(() => {
     const all = detectAnomalies(queries);
@@ -363,6 +407,7 @@ const Dashboard: React.FC = () => {
     } catch {
       // ignore
     }
+    window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
 
     setSelectedAnomaly(null);
   };
@@ -416,7 +461,28 @@ const Dashboard: React.FC = () => {
               <h2 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-indigo-400" /> Traffic Analysis
               </h2>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1 bg-[#18181b] border border-[#27272a] rounded-lg p-1">
+                  {[
+                    { label: '1h', hours: 1 },
+                    { label: '6h', hours: 6 },
+                    { label: '24h', hours: 24 },
+                    { label: '7d', hours: 168 }
+                  ].map((opt) => (
+                    <button
+                      key={opt.hours}
+                      type="button"
+                      onClick={() => setTrafficWindowHours(opt.hours)}
+                      className={`px-2.5 py-1 rounded text-[10px] font-bold transition-all ${
+                        trafficWindowHours === opt.hours
+                          ? 'bg-zinc-200 text-zinc-900'
+                          : 'text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
                 <span className="flex items-center gap-1.5 text-xs text-zinc-400">
                   <span className="w-2 h-2 rounded-full bg-indigo-500"></span> Total
                 </span>
@@ -478,13 +544,13 @@ const Dashboard: React.FC = () => {
                 />
               </div>
               <div className="flex gap-2 items-center">
-                <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div> Permitted
+                <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+                  <span className="w-2 h-2 rounded-full bg-blue-500"></span> Permitted
                 </span>
-                <span className="text-[10px] font-mono text-zinc-500 flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div> Blocked
+                <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+                  <span className="w-2 h-2 rounded-full bg-rose-500"></span> Blocked
                 </span>
-                <span className="text-[10px] font-mono text-zinc-600">Scroll to zoom · drag to pan</span>
+                <span className="text-xs text-zinc-500">Scroll to zoom · drag to pan</span>
               </div>
             </div>
             <div className="p-4 bg-[#09090b]">
@@ -596,7 +662,13 @@ const Dashboard: React.FC = () => {
               <h2 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
                 <Zap className="w-4 h-4 text-amber-500" /> Suspicious Activity
               </h2>
-              <span className="text-[10px] font-mono text-zinc-500">HEURISTIC</span>
+              <button
+                onClick={() => openLogsPreset({ tab: 'suspicious', pageSize: 100 })}
+                className="text-[10px] font-mono text-zinc-500 hover:text-zinc-300 border border-[#27272a] px-2 py-1 rounded"
+                title="Open full Suspicious Activity list"
+              >
+                VIEW ALL
+              </button>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto">
               {anomaliesForUi.length > 0 ? (
