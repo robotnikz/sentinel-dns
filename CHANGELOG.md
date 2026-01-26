@@ -1,3 +1,8 @@
+## <small>0.4.3 (2026-01-26)</small>
+
+* Merge pull request #37 from robotnikz/fix/top-domains-resolver-noise ([eb64321](https://github.com/robotnikz/sentinel-dns/commit/eb64321)), closes [#37](https://github.com/robotnikz/sentinel-dns/issues/37)
+* fix(metrics): exclude resolver noise domains ([e446dd2](https://github.com/robotnikz/sentinel-dns/commit/e446dd2))
+
 ## <small>0.4.2 (2026-01-26)</small>
 
 * Merge pull request #36 from robotnikz/fix/top-domains-upstreams ([ec33686](https://github.com/robotnikz/sentinel-dns/commit/ec33686)), closes [#36](https://github.com/robotnikz/sentinel-dns/issues/36)
