@@ -12,13 +12,31 @@ export type DnsRewrite = {
 };
 
 function normalizeDomain(input: unknown): string {
-  const d = String(input ?? '').trim().toLowerCase();
-  return d.endsWith('.') ? d.slice(0, -1) : d;
+  const raw = String(input ?? '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw.startsWith('*.')) {
+    const base = raw.slice(2);
+    const cleaned = base.endsWith('.') ? base.slice(0, -1) : base;
+    return cleaned ? `*.${cleaned}` : '';
+  }
+  return raw.endsWith('.') ? raw.slice(0, -1) : raw;
+}
+
+function splitWildcardDomain(input: string): { domain: string; wildcard: boolean } | null {
+  const norm = normalizeDomain(input);
+  if (!norm) return null;
+  if (norm.startsWith('*.')) {
+    const base = norm.slice(2);
+    return base ? { domain: base, wildcard: true } : null;
+  }
+  return { domain: norm, wildcard: false };
 }
 
 function validateRewrite(r: DnsRewrite): { ok: true } | { ok: false; error: string } {
   if (!r.id || r.id.length > 128) return { ok: false, error: 'INVALID_ID' };
-  const domain = normalizeDomain(r.domain);
+  const parsed = splitWildcardDomain(r.domain);
+  if (!parsed) return { ok: false, error: 'INVALID_DOMAIN' };
+  const domain = parsed.domain;
   if (!domain || domain.length > 253 || !domain.includes('.')) return { ok: false, error: 'INVALID_DOMAIN' };
   if (!/^[a-z0-9.-]+$/.test(domain)) return { ok: false, error: 'INVALID_DOMAIN' };
   const target = String(r.target ?? '').trim();

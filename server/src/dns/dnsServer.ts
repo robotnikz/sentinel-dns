@@ -154,11 +154,13 @@ type RewriteEntry = {
   id: string;
   domain: string;
   target: string;
+  wildcard?: boolean;
 };
 
 type RewritesCache = {
   loadedAt: number;
   byDomain: Map<string, RewriteEntry>;
+  wildcards: RewriteEntry[];
 };
 
 type UpstreamCache = {
@@ -697,16 +699,29 @@ async function loadBlocklists(db: Db): Promise<Map<string, BlocklistStatus>> {
   return map;
 }
 
+function parseRewriteDomain(input: string): { domain: string; wildcard: boolean } | null {
+  const raw = String(input ?? '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('*.')) {
+    const base = normalizeName(raw.slice(2));
+    if (!base) return null;
+    return { domain: base, wildcard: true };
+  }
+  const domain = normalizeName(raw);
+  if (!domain) return null;
+  return { domain, wildcard: false };
+}
+
 function loadRewritesFromSettings(value: any): RewriteEntry[] {
   const raw = Array.isArray(value?.items) ? value.items : Array.isArray(value) ? value : [];
   const out: RewriteEntry[] = [];
   for (const r of raw) {
     if (!r || typeof r !== 'object') continue;
     const id = String(r.id ?? '').trim();
-    const domain = normalizeName(String(r.domain ?? ''));
+    const parsed = parseRewriteDomain(String(r.domain ?? ''));
     const target = String(r.target ?? '').trim();
-    if (!id || !domain || !target) continue;
-    out.push({ id, domain, target });
+    if (!id || !parsed || !target) continue;
+    out.push({ id, domain: parsed.domain, target, wildcard: parsed.wildcard });
   }
   return out;
 }
@@ -1074,7 +1089,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     index: { manualAllowed: new Set(), manualBlocked: new Set(), blockedByDomain: new Map() }
   };
   const clientsCache: ClientsCache = { loadedAt: 0, clients: [] };
-  const rewritesCache: RewritesCache = { loadedAt: 0, byDomain: new Map() };
+  const rewritesCache: RewritesCache = { loadedAt: 0, byDomain: new Map(), wildcards: [] };
   const blocklistsCache: BlocklistsCache = { loadedAt: 0, byId: new Map() };
   const categoryBlocklistsCache: CategoryBlocklistsCache = { loadedAt: 0, byCategory: new Map() };
   const appBlocklistsCache: AppBlocklistsCache = { loadedAt: 0, byApp: new Map() };
@@ -1324,8 +1339,15 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       const rewrites = loadRewritesFromSettings(dnsRewrites.rows?.[0]?.value);
       const byDomain = new Map<string, RewriteEntry>();
-      for (const r of rewrites) byDomain.set(normalizeName(r.domain), r);
+      const wildcards: RewriteEntry[] = [];
+      for (const r of rewrites) {
+        if (r.wildcard) wildcards.push(r);
+        else byDomain.set(normalizeName(r.domain), r);
+      }
+      // Prefer most specific wildcard first (longest domain).
+      wildcards.sort((a, b) => b.domain.length - a.domain.length);
       rewritesCache.byDomain = byDomain;
+      rewritesCache.wildcards = wildcards;
       rewritesCache.loadedAt = Date.now();
 
       const value = dnsSettings.rows?.[0]?.value;
@@ -1379,8 +1401,19 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const name = q?.name ? String(q.name) : '';
       const qtype = q?.type ? String(q.type) : 'A';
 
-      // Exact-match local rewrites (handled before block/allow evaluation).
-      const rewrite = rewritesCache.byDomain.get(normalizeName(name));
+      // Local rewrites (exact + wildcard) handled before block/allow evaluation.
+      const normalizedName = normalizeName(name);
+      let rewrite = rewritesCache.byDomain.get(normalizedName);
+
+      if (!rewrite && rewritesCache.wildcards.length) {
+        for (const candidate of rewritesCache.wildcards) {
+          if (normalizedName !== candidate.domain && normalizedName.endsWith(`.${candidate.domain}`)) {
+            rewrite = candidate;
+            break;
+          }
+        }
+      }
+
       if (rewrite) {
         const localResp = buildLocalAnswerResponse(query, name, qtype, rewrite.target);
         if (localResp) {
