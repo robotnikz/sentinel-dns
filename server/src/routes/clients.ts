@@ -8,15 +8,34 @@ import ipaddr from 'ipaddr.js';
 type ClientProfile = Record<string, unknown> & { id: string };
 
 export async function registerClientsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/clients', async (request) => {
-    await requireAdmin(db, request);
-    const res = await db.pool.query('SELECT profile FROM clients ORDER BY updated_at DESC LIMIT 2000');
-    return { items: res.rows.map((r) => r.profile) };
-  });
+  app.get(
+    '/api/clients',
+    {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 120,
+          timeWindow: '1 minute'
+        }
+      }
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      const res = await db.pool.query('SELECT profile FROM clients ORDER BY updated_at DESC LIMIT 2000');
+      return { items: res.rows.map((r) => r.profile) };
+    }
+  );
 
   app.put(
     '/api/clients/:id',
     {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: '1 minute'
+        }
+      },
       schema: {
         body: {
           type: 'object',
@@ -76,6 +95,15 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
 
   app.delete(
     '/api/clients/:id',
+    {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: '1 minute'
+        }
+      }
+    },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);
 

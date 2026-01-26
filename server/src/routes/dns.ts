@@ -53,16 +53,35 @@ function normalize(input: any): DnsSettings {
 }
 
 export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/dns/settings', async (request) => {
-    await requireAdmin(db, request);
-    const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_settings']);
-    const value = res.rows?.[0]?.value;
-    return { value: normalize(value) };
-  });
+  app.get(
+    '/api/dns/settings',
+    {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 120,
+          timeWindow: '1 minute'
+        }
+      }
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_settings']);
+      const value = res.rows?.[0]?.value;
+      return { value: normalize(value) };
+    }
+  );
 
   app.put(
     '/api/dns/settings',
     {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: '1 minute'
+        }
+      },
       schema: {
         body: {
           type: 'object',
@@ -84,7 +103,7 @@ export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig,
       }
     },
     async (request: FastifyRequest<{ Body: DnsSettings }>, reply: FastifyReply) => {
-        await requireAdmin(db, request);
+      await requireAdmin(db, request);
 
       const normalized = normalize(request.body);
 

@@ -5,7 +5,18 @@ import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 
 export async function registerRulesRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/rules', async (request) => {
+  app.get(
+    '/api/rules',
+    {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 120,
+          timeWindow: '1 minute'
+        }
+      }
+    },
+    async (request) => {
     await requireAdmin(db, request);
     // The rules table contains both user-created rules and imported rules produced by
     // blocklist refreshes (e.g. category values like "Blocklist:37:...", "Category:...", "App:...").
@@ -22,11 +33,19 @@ export async function registerRulesRoutes(app: FastifyInstance, config: AppConfi
       `
     );
     return { items: res.rows };
-  });
+    }
+  );
 
   app.post(
     '/api/rules',
     {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: '1 minute'
+        }
+      },
       schema: {
         body: {
           type: 'object',
@@ -66,6 +85,15 @@ export async function registerRulesRoutes(app: FastifyInstance, config: AppConfi
 
   app.delete(
     '/api/rules/:id',
+    {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: '1 minute'
+        }
+      }
+    },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     await requireAdmin(db, request);
 

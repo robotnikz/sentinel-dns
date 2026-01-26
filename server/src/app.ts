@@ -124,6 +124,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   app.get(
     '/api/ui/status',
     {
+      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           // This endpoint reads the filesystem; keep it cheap to call.

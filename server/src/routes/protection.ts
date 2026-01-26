@@ -32,16 +32,35 @@ function computeState(setting: ProtectionPauseSetting): { active: boolean; mode:
 }
 
 export async function registerProtectionRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/protection/pause', async (request) => {
-    await requireAdmin(db, request);
-    const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['protection_pause']);
-    const setting = parsePauseSetting(res.rows?.[0]?.value);
-    return computeState(setting);
-  });
+  app.get(
+    '/api/protection/pause',
+    {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 120,
+          timeWindow: '1 minute'
+        }
+      }
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['protection_pause']);
+      const setting = parsePauseSetting(res.rows?.[0]?.value);
+      return computeState(setting);
+    }
+  );
 
   app.put(
     '/api/protection/pause',
     {
+      onRequest: [app.rateLimit()],
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: '1 minute'
+        }
+      },
       schema: {
         body: {
           type: 'object',
