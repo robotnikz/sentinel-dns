@@ -144,7 +144,7 @@ describe('dnsServer logic', () => {
         { id: '', domain: 'nope.com', target: '1.1.1.1' }
       ]
     });
-    expect(rewrites).toEqual([{ id: '1', domain: 'example.com', target: '1.2.3.4' }]);
+    expect(rewrites).toEqual([{ id: '1', domain: 'example.com', target: '1.2.3.4', wildcard: false }]);
   });
 
   it('buildLocalAnswerResponse returns A answer for IPv4 target', () => {

@@ -873,7 +873,7 @@ const DnsSettings: React.FC = () => {
                                 />
                             </div>
                             <div className="text-[10px] text-zinc-600 leading-relaxed">
-                                Exact-match only. Wildcards are not supported yet.
+                                Supports exact matches and wildcard patterns like *.example.com.
                             </div>
                         </div>
                         <div className="p-5 border-t border-[#27272a] bg-[#121214] flex justify-end gap-3">
