@@ -1,3 +1,24 @@
+## 0.3.0 (2026-01-26)
+
+* Fix CodeQL alerts + stabilize E2E ([5851e09](https://github.com/robotnikz/sentinel-dns/commit/5851e09))
+* Fix CodeQL rate limit and RNG alerts ([02fde5d](https://github.com/robotnikz/sentinel-dns/commit/02fde5d))
+* Fix CodeQL rate limit detection ([8a77b59](https://github.com/robotnikz/sentinel-dns/commit/8a77b59))
+* Fix CodeQL rate limit detection ([62ed023](https://github.com/robotnikz/sentinel-dns/commit/62ed023))
+* Harden rate limiting for CodeQL ([67c08b4](https://github.com/robotnikz/sentinel-dns/commit/67c08b4))
+* Merge pull request #21 from robotnikz/security/authz-hardening ([01ddc12](https://github.com/robotnikz/sentinel-dns/commit/01ddc12)), closes [#21](https://github.com/robotnikz/sentinel-dns/issues/21)
+* Rate limit DB/FS routes (CodeQL) ([f60bc80](https://github.com/robotnikz/sentinel-dns/commit/f60bc80))
+* Fix: make rate limiting CodeQL-detectable ([f091f7e](https://github.com/robotnikz/sentinel-dns/commit/f091f7e))
+* Fix: make route rate limits detectable ([2858b33](https://github.com/robotnikz/sentinel-dns/commit/2858b33))
+* chore(ci): add workflows and test tooling ([5ec431b](https://github.com/robotnikz/sentinel-dns/commit/5ec431b))
+* chore(repo): move frontend to web and compose to deploy ([fa85f45](https://github.com/robotnikz/sentinel-dns/commit/fa85f45))
+* chore(security): make CodeQL recognize rate limits ([213e83c](https://github.com/robotnikz/sentinel-dns/commit/213e83c))
+* chore(security): make rate limiting CodeQL-visible ([f772372](https://github.com/robotnikz/sentinel-dns/commit/f772372))
+* ci: add frontend typecheck and cache Playwright ([d894017](https://github.com/robotnikz/sentinel-dns/commit/d894017))
+* ci: build frontend on PRs ([f978feb](https://github.com/robotnikz/sentinel-dns/commit/f978feb))
+* test: add unit/integration/smoke/e2e coverage ([530af32](https://github.com/robotnikz/sentinel-dns/commit/530af32))
+* feat(server): authz hardening and DNS behavior ([cddd5f5](https://github.com/robotnikz/sentinel-dns/commit/cddd5f5))
+* docs: fix compose snippet and docs consistency ([17709ef](https://github.com/robotnikz/sentinel-dns/commit/17709ef))
+
 ## <small>0.2.3 (2026-01-25)</small>
 
 * fix(ui): don't force https via CSP/HSTS ([c9ae9c3](https://github.com/robotnikz/sentinel-dns/commit/c9ae9c3))
