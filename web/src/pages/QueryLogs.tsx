@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Anomaly, DnsQuery, QueryStatus, ClientProfile } from '../types';
 import { Search, Filter, Sparkles, X, Terminal, CheckCircle, XCircle, AlertTriangle, ShieldCheck, ChevronDown, Users, Shield, Eye, UserPlus, Save, Smartphone, Laptop, Tv, Gamepad2, Info, Ban, ShieldOff, Check, AlertOctagon, Zap, EyeOff } from 'lucide-react';

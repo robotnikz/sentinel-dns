@@ -109,7 +109,7 @@ function mapQueryLogRow(row: any): DnsQuery | null {
   };
 }
 
-function openLogsPreset(preset: { searchTerm?: string; statusFilter?: string; typeFilter?: string; clientFilter?: string; pageSize?: number }) {
+function openLogsPreset(preset: { tab?: 'queries' | 'suspicious'; searchTerm?: string; statusFilter?: string; typeFilter?: string; clientFilter?: string; pageSize?: number }) {
   window.dispatchEvent(new CustomEvent('sentinel:navigate', { detail: { page: 'logs', logsPreset: preset } }));
 }
 
