@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "typecheck:frontend": "tsc -p tsconfig.frontend.json",
     "preview": "vite preview",
     "screenshots": "node scripts/generate-screenshots.mjs",
     "smoke:compose": "node scripts/smoke-compose.mjs --compose-file docker-compose.smoke.yml --dns-port 1053 --http-port 18080",

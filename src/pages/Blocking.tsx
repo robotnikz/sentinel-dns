@@ -669,10 +669,8 @@ const Blocking: React.FC = () => {
                   );
 
                   const categories = Array.from(
-                      new Set(
-                          blockingRules
-                              .map((r: any) => (typeof r?.category === 'string' ? r.category : 'Manual'))
-                              .filter(Boolean)
+                      new Set<string>(
+                          blockingRules.map((r: any) => (typeof r?.category === 'string' ? r.category : 'Manual'))
                       )
                   );
 
