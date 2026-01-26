@@ -2,6 +2,7 @@ import dgram from 'node:dgram';
 import net from 'node:net';
 import tls from 'node:tls';
 import crypto from 'node:crypto';
+import http2 from 'node:http2';
 import dnsPacket from 'dns-packet';
 import ipaddr from 'ipaddr.js';
 
@@ -915,7 +916,7 @@ async function forwardDot(upstream: { host: string; port: number }, msg: Buffer)
   });
 }
 
-async function forwardDoh(dohUrl: string, msg: Buffer): Promise<Buffer> {
+async function forwardDohHttp1(dohUrl: string, msg: Buffer): Promise<Buffer> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 4000);
   try {
@@ -935,6 +936,72 @@ async function forwardDoh(dohUrl: string, msg: Buffer): Promise<Buffer> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function forwardDohHttp2(dohUrl: string, msg: Buffer): Promise<Buffer> {
+  const url = new URL(dohUrl);
+  const origin = `${url.protocol}//${url.host}`;
+  const path = `${url.pathname}${url.search}` || '/';
+
+  return await new Promise<Buffer>((resolve, reject) => {
+    const client = http2.connect(origin);
+    const timer = setTimeout(() => {
+      client.destroy(new Error('UPSTREAM_TIMEOUT'));
+    }, 4000);
+
+    client.on('error', (err) => {
+      clearTimeout(timer);
+      client.close();
+      reject(err);
+    });
+
+    const req = client.request({
+      ':method': 'POST',
+      ':path': path,
+      'content-type': 'application/dns-message',
+      accept: 'application/dns-message',
+      'user-agent': 'sentinel-dns/0.1'
+    });
+
+    let status = 0;
+    const chunks: Buffer[] = [];
+
+    req.on('response', (headers) => {
+      status = Number(headers[':status'] ?? 0);
+    });
+
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+
+    req.on('end', () => {
+      clearTimeout(timer);
+      client.close();
+      if (status && status !== 200) {
+        reject(new Error(`HTTP_${status}`));
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
+
+    req.on('error', (err) => {
+      clearTimeout(timer);
+      client.close();
+      reject(err);
+    });
+
+    req.end(msg);
+  });
+}
+
+async function forwardDoh(dohUrl: string, msg: Buffer): Promise<Buffer> {
+  if (dohUrl.startsWith('https://')) {
+    try {
+      return await forwardDohHttp2(dohUrl, msg);
+    } catch {
+      return await forwardDohHttp1(dohUrl, msg);
+    }
+  }
+
+  return await forwardDohHttp1(dohUrl, msg);
 }
 
 function buildNxDomainResponse(query: any): Buffer {
