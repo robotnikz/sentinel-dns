@@ -1,3 +1,8 @@
+## <small>0.4.1 (2026-01-26)</small>
+
+* Merge pull request #35 from robotnikz/fix/docker-dns ([8912574](https://github.com/robotnikz/sentinel-dns/commit/8912574)), closes [#35](https://github.com/robotnikz/sentinel-dns/issues/35)
+* fix(docker): bootstrap outbound DNS on restart loops ([8a503dd](https://github.com/robotnikz/sentinel-dns/commit/8a503dd))
+
 ## 0.4.0 (2026-01-26)
 
 * Merge pull request #33 from robotnikz/ui-fixes ([d5eca3b](https://github.com/robotnikz/sentinel-dns/commit/d5eca3b)), closes [#33](https://github.com/robotnikz/sentinel-dns/issues/33)
