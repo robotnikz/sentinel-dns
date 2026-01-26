@@ -24,12 +24,7 @@ export async function registerAiRoutes(app: FastifyInstance, config: AppConfig, 
   app.post(
     '/api/ai/analyze-domain',
     {
-      config: {
-        rateLimit: {
-          max: 20,
-          timeWindow: '1 minute'
-        }
-      },
+      onRequest: [app.rateLimit({ max: 20, timeWindow: '1 minute' })],
       schema: {
         body: {
           type: 'object',

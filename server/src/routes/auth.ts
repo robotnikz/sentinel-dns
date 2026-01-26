@@ -38,12 +38,7 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
   app.post(
     '/api/auth/setup',
     {
-      config: {
-        rateLimit: {
-          max: 5,
-          timeWindow: '15 minutes'
-        }
-      },
+      onRequest: [app.rateLimit({ max: 5, timeWindow: '15 minutes' })],
       schema: {
         body: {
           type: 'object',
@@ -82,12 +77,7 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
   app.post(
     '/api/auth/login',
     {
-      config: {
-        rateLimit: {
-          max: 10,
-          timeWindow: '1 minute'
-        }
-      },
+      onRequest: [app.rateLimit({ max: 10, timeWindow: '1 minute' })],
       schema: {
         body: {
           type: 'object',
@@ -130,12 +120,7 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
   app.post(
     '/api/auth/change-password',
     {
-      config: {
-        rateLimit: {
-          max: 5,
-          timeWindow: '15 minutes'
-        }
-      },
+      onRequest: [app.rateLimit({ max: 5, timeWindow: '15 minutes' })],
       schema: {
         body: {
           type: 'object',

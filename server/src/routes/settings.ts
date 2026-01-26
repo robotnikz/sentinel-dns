@@ -7,12 +7,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, config: AppCo
   app.get(
     '/api/settings',
     {
-      config: {
-        rateLimit: {
-          max: 120,
-          timeWindow: '1 minute'
-        }
-      }
+      onRequest: [app.rateLimit({ max: 120, timeWindow: '1 minute' })]
     },
     async (request) => {
     await requireAdmin(db, request);
@@ -24,12 +19,7 @@ export async function registerSettingsRoutes(app: FastifyInstance, config: AppCo
   app.put(
     '/api/settings/:key',
     {
-      config: {
-        rateLimit: {
-          max: 60,
-          timeWindow: '1 minute'
-        }
-      },
+      onRequest: [app.rateLimit({ max: 60, timeWindow: '1 minute' })],
       schema: {
         body: {
           type: 'object'

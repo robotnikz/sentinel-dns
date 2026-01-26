@@ -124,13 +124,13 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   app.get(
     '/api/ui/status',
     {
-      config: {
-        rateLimit: {
+      onRequest: [
+        app.rateLimit({
           // This endpoint reads the filesystem; keep it cheap to call.
           max: 30,
           timeWindow: '1 minute'
-        }
-      }
+        })
+      ]
     },
     async (req, reply) => {
       await requireAdmin(db, req);
