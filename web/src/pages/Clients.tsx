@@ -25,6 +25,7 @@ const Clients: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addMode, setAddMode] = useState<'manual' | 'scan'>('manual'); // New: Switch between manual and scan
     const [editingClient, setEditingClient] = useState<ClientProfile | null>(null);
+        const [clientToDelete, setClientToDelete] = useState<ClientProfile | null>(null);
 
     // Discovered clients (best-effort from DNS logs + optional reverse DNS)
     const [discovered, setDiscovered] = useState<Array<{ ip: string; hostname: string | null; lastSeen?: string | null }>>([]);
@@ -500,11 +501,16 @@ const Clients: React.FC = () => {
   };
 
   const handleDeleteClient = (client: ClientProfile) => {
-      if (!window.confirm(`Delete ${client.name}?`)) return;
-      void removeClient(client.id);
-      if (selectedClient?.id === client.id) {
+      setClientToDelete(client);
+  };
+
+  const confirmDeleteClient = () => {
+      if (!clientToDelete) return;
+      void removeClient(clientToDelete.id);
+      if (selectedClient?.id === clientToDelete.id) {
           setSelectedClient(null);
       }
+      setClientToDelete(null);
   };
 
   // Wrapper for updating client that updates both local view state and global state
@@ -1590,6 +1596,45 @@ const Clients: React.FC = () => {
                     </div>
                 </div>
             </Modal>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {clientToDelete && (
+          <Modal open={true} onClose={() => setClientToDelete(null)} zIndex={1200}>
+              <div className="w-full max-w-md bg-[#09090b] border border-[#27272a] rounded-lg overflow-hidden shadow-2xl animate-fade-in">
+                  <div className="p-5 border-b border-[#27272a] flex justify-between items-center bg-[#121214]">
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                          <Trash2 className="w-4 h-4 text-rose-500" />
+                          Delete Client
+                      </h3>
+                      <button onClick={() => setClientToDelete(null)} className="text-zinc-500 hover:text-white" aria-label="Close">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  <div className="p-6 space-y-3">
+                      <div className="text-sm text-zinc-200">
+                          Delete <span className="font-bold">{clientToDelete.name}</span>?
+                      </div>
+                      <div className="text-xs text-zinc-500">
+                          This removes the client profile and its policy overrides. DNS logs remain unchanged.
+                      </div>
+                  </div>
+                  <div className="p-5 border-t border-[#27272a] bg-[#121214] flex flex-col sm:flex-row justify-end gap-3">
+                      <button
+                          onClick={() => setClientToDelete(null)}
+                          className="px-4 py-2 rounded text-xs font-bold text-zinc-400 hover:text-white"
+                      >
+                          CANCEL
+                      </button>
+                      <button
+                          onClick={confirmDeleteClient}
+                          className="px-6 py-2 rounded text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white"
+                      >
+                          DELETE
+                      </button>
+                  </div>
+              </div>
+          </Modal>
       )}
     </div>
   );

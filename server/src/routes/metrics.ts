@@ -15,6 +15,7 @@ type TimeseriesQuerystring = {
 type TopQuerystring = {
   hours?: string;
   limit?: string;
+  excludeUpstreams?: string;
 };
 
 type ClientsQuerystring = {
@@ -32,6 +33,51 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function parseBool(value: unknown): boolean {
+  const v = String(value ?? '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function extractHostFromDohUrl(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    return u.hostname ? u.hostname.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getUpstreamDomainsToExclude(db: Db): Promise<Set<string>> {
+  const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_settings']);
+  const value = res.rows?.[0]?.value;
+  const settings = typeof value === 'object' && value ? (value as any) : {};
+  const mode = settings.upstreamMode === 'forward' ? 'forward' : 'unbound';
+  if (mode !== 'forward') return new Set();
+
+  const forward = typeof settings.forward === 'object' && settings.forward ? (settings.forward as any) : {};
+  const transport =
+    forward.transport === 'doh'
+      ? 'doh'
+      : forward.transport === 'dot'
+        ? 'dot'
+        : forward.transport === 'tcp'
+          ? 'tcp'
+          : 'udp';
+
+  const out = new Set<string>();
+  if (transport === 'doh') {
+    const dohUrl = typeof forward.dohUrl === 'string' ? forward.dohUrl.trim() : '';
+    const host = dohUrl ? extractHostFromDohUrl(dohUrl) : null;
+    if (host) out.add(host);
+    return out;
+  }
+
+  const host = typeof forward.host === 'string' ? forward.host.trim().toLowerCase() : '';
+  // host might be an IP; we only exclude DNS-like hostnames.
+  if (host && /[a-z]/i.test(host) && host.includes('.')) out.add(host);
+  return out;
 }
 
 export async function registerMetricsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
@@ -190,22 +236,30 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
       await requireAdmin(db, request);
       const hours = clampInt(request.query.hours, 24, 1, 168);
 
-      // Hour buckets with zero-fill.
+      // Smaller buckets for small windows so the timeline isn't just 1-6 points.
+      const bucketSeconds = hours <= 1 ? 5 * 60 : hours <= 6 ? 15 * 60 : 60 * 60;
+      const bucketIntervalSql = bucketSeconds === 300 ? "interval '5 minutes'" : bucketSeconds === 900 ? "interval '15 minutes'" : "interval '1 hour'";
+
+      // Epoch-based bucketing (UTC) with zero-fill.
       const res = await db.pool.query(
         `WITH bounds AS (
-           SELECT date_trunc('hour', NOW()) AS end_ts,
-                  date_trunc('hour', NOW()) - ($1::text || ' hours')::interval + interval '1 hour' AS start_ts
+           SELECT NOW() AS end_ts,
+                  NOW() - ($1::text || ' hours')::interval AS start_ts
          ),
          buckets AS (
-           SELECT generate_series((SELECT start_ts FROM bounds), (SELECT end_ts FROM bounds), interval '1 hour') AS bucket
+           SELECT generate_series(
+             to_timestamp(floor(extract(epoch from (SELECT start_ts FROM bounds)) / ${bucketSeconds})::bigint * ${bucketSeconds}),
+             to_timestamp(floor(extract(epoch from (SELECT end_ts FROM bounds)) / ${bucketSeconds})::bigint * ${bucketSeconds}),
+             ${bucketIntervalSql}
+           ) AS bucket
          ),
          agg AS (
-           SELECT date_trunc('hour', ts) AS bucket,
+           SELECT to_timestamp(floor(extract(epoch from ts) / ${bucketSeconds})::bigint * ${bucketSeconds}) AS bucket,
                   COUNT(*)::bigint AS queries,
                   SUM(CASE WHEN entry->>'status' = 'BLOCKED' THEN 1 ELSE 0 END)::bigint AS ads
            FROM query_logs
            WHERE ts >= (SELECT start_ts FROM bounds)
-             AND ts <= (SELECT end_ts FROM bounds) + interval '59 minutes 59 seconds'
+             AND ts <= (SELECT end_ts FROM bounds)
            GROUP BY 1
          )
          SELECT b.bucket,
@@ -240,6 +294,11 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
       await requireAdmin(db, request);
       const hours = clampInt(request.query.hours, 24, 1, 168);
       const limit = clampInt(request.query.limit, 10, 1, 100);
+      const excludeUpstreams = parseBool(request.query.excludeUpstreams);
+
+      const upstreamDomains = excludeUpstreams ? await getUpstreamDomainsToExclude(db) : new Set<string>();
+
+      const queryLimit = upstreamDomains.size > 0 ? Math.min(100, Math.max(limit, limit * 3)) : limit;
 
       const res = await db.pool.query(
         `SELECT entry->>'domain' AS domain, COUNT(*)::bigint AS count
@@ -251,7 +310,7 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
          GROUP BY 1
          ORDER BY count DESC
          LIMIT $2`,
-        [String(hours), limit]
+        [String(hours), queryLimit]
       );
 
       return {
@@ -259,6 +318,12 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
         items: res.rows
           .filter((r) => typeof r.domain === 'string' && r.domain.length > 0)
           .map((r) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }))
+          .filter((r) => {
+            if (upstreamDomains.size === 0) return true;
+            const d = r.domain.trim().toLowerCase();
+            return d && !upstreamDomains.has(d);
+          })
+          .slice(0, limit)
       };
     }
   );

@@ -163,29 +163,73 @@ const Dashboard: React.FC = () => {
   }, []);
 
   const loadIgnoredSignatures = () => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/suspicious/ignored');
+        if (res.ok) {
+          const data = await res.json();
+          const items = Array.isArray((data as any)?.items) ? (data as any).items : [];
+          setIgnoredSignatures(
+            items
+              .map((it: any) => String(it?.signature ?? '').trim())
+              .filter((s: string) => Boolean(s))
+          );
+          return;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Fallback to legacy localStorage.
+      try {
+        const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed)) {
+          setIgnoredSignatures(parsed.filter((s) => typeof s === 'string'));
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  };
+
+  const migrateLegacyIgnoredSignatures = async () => {
     try {
       const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) {
-        setIgnoredSignatures(parsed.filter((s) => typeof s === 'string'));
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+
+      const sigs = parsed.map((s: any) => (typeof s === 'string' ? s.trim() : '')).filter(Boolean);
+      if (sigs.length === 0) return;
+
+      for (const signature of sigs) {
+        try {
+          await fetch('/api/suspicious/ignored', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signature })
+          });
+        } catch {
+          // ignore
+        }
       }
+
+      localStorage.removeItem(IGNORED_ANOMALY_KEY);
     } catch {
       // ignore
     }
   };
 
   useEffect(() => {
-    loadIgnoredSignatures();
+    void (async () => {
+      await migrateLegacyIgnoredSignatures();
+      loadIgnoredSignatures();
+    })();
 
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === IGNORED_ANOMALY_KEY) loadIgnoredSignatures();
-    };
     const onIgnored = () => loadIgnoredSignatures();
 
-    window.addEventListener('storage', onStorage);
     window.addEventListener('sentinel:ignored-anomalies', onIgnored as any);
     return () => {
-      window.removeEventListener('storage', onStorage);
       window.removeEventListener('sentinel:ignored-anomalies', onIgnored as any);
     };
   }, []);
@@ -208,7 +252,7 @@ const Dashboard: React.FC = () => {
 
     Promise.all([
       fetch('/api/metrics/summary?hours=24').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/metrics/top-domains?hours=24&limit=20').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('/api/metrics/top-domains?hours=24&limit=20&excludeUpstreams=1').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/metrics/top-blocked?hours=24&limit=20').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/geo/countries?hours=24&limit=40').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/query-logs?limit=500').then((r) => (r.ok ? r.json() : null)).catch(() => null)
@@ -396,19 +440,21 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleIgnoreAnomaly = () => {
+  const handleIgnoreAnomaly = async () => {
     if (!selectedAnomaly) return;
     const sig = signatureForAnomaly(selectedAnomaly);
 
-    const next = Array.from(new Set([...ignoredSignatures, sig]));
-    setIgnoredSignatures(next);
     try {
-      localStorage.setItem(IGNORED_ANOMALY_KEY, JSON.stringify(next));
+      await fetch('/api/suspicious/ignored', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signature: sig })
+      });
     } catch {
       // ignore
     }
+    loadIgnoredSignatures();
     window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
-
     setSelectedAnomaly(null);
   };
 
@@ -874,17 +920,17 @@ const Dashboard: React.FC = () => {
             <div className="p-4 border-t border-[#27272a] bg-[#121214] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <button
                 onClick={handleIgnoreAnomaly}
-                className="h-9 px-4 rounded text-xs font-bold whitespace-nowrap inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-zinc-300 border border-[#27272a] bg-[#09090b]/40 hover:bg-[#18181b] transition-all"
+                className="h-9 w-full sm:w-auto px-4 rounded text-xs font-bold inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-zinc-300 border border-[#27272a] bg-[#09090b]/40 hover:bg-[#18181b] transition-all"
                 title="Permanently ignore alerts for this issue on this device"
               >
                 <EyeOff className="w-3.5 h-3.5" />
                 IGNORE ALERT
               </button>
 
-              <div className="flex flex-wrap sm:flex-nowrap gap-2 sm:justify-end">
+              <div className="flex flex-col sm:flex-row w-full sm:w-auto gap-2 sm:justify-end">
                 <button
                   onClick={handleOpenInLogs}
-                  className="h-9 px-4 rounded whitespace-nowrap inline-flex items-center justify-center gap-2 bg-[#18181b] hover:bg-[#1f1f22] text-zinc-200 border border-[#27272a] transition-all text-xs font-bold"
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center gap-2 bg-[#18181b] hover:bg-[#1f1f22] text-zinc-200 border border-[#27272a] transition-all text-xs font-bold"
                   title="Open Query Inspector with filters"
                 >
                   <Info className="w-3.5 h-3.5" />
@@ -892,13 +938,13 @@ const Dashboard: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setSelectedAnomaly(null)}
-                  className="h-9 px-4 rounded whitespace-nowrap inline-flex items-center justify-center bg-[#09090b]/40 hover:bg-[#18181b] text-zinc-300 border border-[#27272a] transition-all text-xs font-bold"
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center bg-[#09090b]/40 hover:bg-[#18181b] text-zinc-300 border border-[#27272a] transition-all text-xs font-bold"
                 >
                   DISMISS
                 </button>
                 <button
                   onClick={handleBlockFromAnomaly}
-                  className="h-9 px-4 rounded whitespace-nowrap inline-flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold"
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   BLOCK DOMAIN
