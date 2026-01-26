@@ -48,7 +48,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const [pageSize, setPageSize] = useState<number>(100);
   const [page, setPage] = useState<number>(1);
 
-  const [queries, setQueries] = useState<DnsQuery[]>([]);
+  const [rawQueries, setRawQueries] = useState<DnsQuery[]>([]);
+  const [discoveredHostnamesByIp, setDiscoveredHostnamesByIp] = useState<Record<string, string>>({});
 
   const [ignoredAnomalySignatures, setIgnoredAnomalySignatures] = useState<string[]>([]);
   const [showIgnoredAnomalies, setShowIgnoredAnomalies] = useState(false);
@@ -126,17 +127,75 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
             blocklistId: typeof q.blocklistId === 'string' ? q.blocklistId : undefined
           }));
 
-        setQueries(mapped);
+        setRawQueries(mapped);
       })
       .catch(() => {
         // Keep empty state if backend not reachable.
-        if (!cancelled) setQueries([]);
+        if (!cancelled) setRawQueries([]);
       });
 
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadDiscovery = async () => {
+      try {
+        const res = await fetch('/api/discovery/clients', { credentials: 'include' });
+        if (cancelled) return;
+        if (res.status === 401 || res.status === 403) {
+          setDiscoveredHostnamesByIp({});
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const list = Array.isArray(data?.items) ? data.items : [];
+        const map: Record<string, string> = {};
+        for (const row of list) {
+          const ip = typeof row?.ip === 'string' ? row.ip : String(row?.ip ?? '');
+          const hostname = typeof row?.hostname === 'string' ? row.hostname.trim() : '';
+          if (ip && hostname) map[ip] = hostname;
+        }
+        setDiscoveredHostnamesByIp(map);
+      } catch {
+        // ignore
+      }
+    };
+
+    void loadDiscovery();
+    const t = window.setInterval(loadDiscovery, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, []);
+
+  const resolveClientLabel = (clientIp: string, rawClient: string): string => {
+    const known = clientIp ? getClientByIp(clientIp) : undefined;
+    const knownName = known?.name ? String(known.name).trim() : '';
+    if (knownName) return knownName;
+
+    const discovered = clientIp ? discoveredHostnamesByIp[clientIp] : '';
+    if (discovered) return discovered;
+
+    const raw = String(rawClient ?? '').trim();
+    if (raw && raw !== 'Unknown' && raw !== clientIp) return raw;
+    if (clientIp) return clientIp;
+    return 'Unknown';
+  };
+
+  const queries = useMemo(
+    () =>
+      rawQueries.map((q) => ({
+        ...q,
+        client: resolveClientLabel(q.clientIp, q.client)
+      })),
+    [rawQueries, discoveredHostnamesByIp, getClientByIp]
+  );
 
   useEffect(() => {
     try {
