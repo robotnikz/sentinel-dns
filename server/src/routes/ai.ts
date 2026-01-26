@@ -4,13 +4,15 @@ import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { getSecret } from '../secretsStore.js';
-import '@fastify/rate-limit';
+import 'fastify-rate-limit';
 
 export async function registerAiRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
   app.get(
     '/api/ai/status',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      }
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -31,7 +33,9 @@ export async function registerAiRoutes(app: FastifyInstance, config: AppConfig, 
   app.post(
     '/api/ai/analyze-domain',
     {
-      preHandler: app.rateLimit({ max: 20, timeWindow: '1 minute' }),
+      config: {
+        rateLimit: { max: 20, timeWindow: '1 minute' }
+      },
       schema: {
         body: {
           type: 'object',

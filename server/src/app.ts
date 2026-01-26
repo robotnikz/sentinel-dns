@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import rateLimit from '@fastify/rate-limit';
+import rateLimit from 'fastify-rate-limit';
 import fastifyStatic from '@fastify/static';
 import cookie from '@fastify/cookie';
 import fs from 'node:fs';
@@ -125,7 +125,10 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
     '/api/ui/status',
     {
       // This endpoint reads the filesystem; keep it cheap to call.
-      preHandler: app.rateLimit({ max: 30, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 30, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
     },
     async (req, reply) => {
       await requireAdmin(db, req);

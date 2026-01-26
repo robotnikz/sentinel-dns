@@ -4,7 +4,7 @@ import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { notifyEvent } from '../notifications/notify.js';
 import { refreshBlocklist } from '../blocklists/refresh.js';
-import '@fastify/rate-limit';
+import 'fastify-rate-limit';
 
 type BlocklistRow = {
   id: string;
@@ -38,7 +38,10 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.get(
     '/api/blocklists',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+        config: {
+          rateLimit: { max: 120, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit()
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -52,7 +55,10 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.post(
     '/api/blocklists',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' }),
+        config: {
+          rateLimit: { max: 60, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -98,7 +104,10 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.put(
     '/api/blocklists/:id',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' }),
+        config: {
+          rateLimit: { max: 60, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -158,7 +167,10 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.delete(
     '/api/blocklists/:id',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' })
+        config: {
+          rateLimit: { max: 60, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit()
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);
@@ -188,7 +200,8 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
           max: 10,
           timeWindow: '1 minute'
         }
-      }
+      },
+      preHandler: app.rateLimit()
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);

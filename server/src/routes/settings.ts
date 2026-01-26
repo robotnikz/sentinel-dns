@@ -2,13 +2,16 @@ import type { FastifyInstance } from 'fastify';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
-import '@fastify/rate-limit';
+import 'fastify-rate-limit';
 
 export async function registerSettingsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
   app.get(
     '/api/settings',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -20,7 +23,10 @@ export async function registerSettingsRoutes(app: FastifyInstance, config: AppCo
   app.put(
     '/api/settings/:key',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' }),
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object'

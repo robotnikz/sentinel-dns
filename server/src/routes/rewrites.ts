@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
+import 'fastify-rate-limit';
 
 export type DnsRewrite = {
   id: string;
@@ -47,15 +48,28 @@ async function saveRewrites(db: Db, rewrites: DnsRewrite[]): Promise<void> {
 }
 
 export async function registerRewritesRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/dns/rewrites', async (request) => {
-    await requireAdmin(db, request);
-    const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_rewrites']);
-    return { items: readRewrites(res.rows?.[0]?.value) };
-  });
+  app.get(
+    '/api/dns/rewrites',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_rewrites']);
+      return { items: readRewrites(res.rows?.[0]?.value) };
+    }
+  );
 
   app.post(
     '/api/dns/rewrites',
     {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -96,6 +110,10 @@ export async function registerRewritesRoutes(app: FastifyInstance, config: AppCo
   app.put(
     '/api/dns/rewrites/:id',
     {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -141,6 +159,12 @@ export async function registerRewritesRoutes(app: FastifyInstance, config: AppCo
 
   app.delete(
     '/api/dns/rewrites/:id',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);
 

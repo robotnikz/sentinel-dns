@@ -35,6 +35,10 @@ coverage
 # Tooling caches
 .turbo
 .parcel-cache
+.tools
+.codeql-db
+codeql-results.sarif
+scripts/codeql-build.cmd
 
 # Playwright artifacts
 playwright-report

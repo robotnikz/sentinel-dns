@@ -3,6 +3,7 @@ import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { createGeoIpLookup } from '../geoip/geoip.js';
+import 'fastify-rate-limit';
 
 type GeoCountriesQuerystring = {
   hours?: string;
@@ -57,6 +58,12 @@ function pickDestinationIp(entry: any): string {
 export async function registerGeoRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
   app.get(
     '/api/geo/countries',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
     async (request: FastifyRequest<{ Querystring: GeoCountriesQuerystring }>) => {
       await requireAdmin(db, request);
 

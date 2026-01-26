@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
-import '@fastify/rate-limit';
+import 'fastify-rate-limit';
 
 export type DnsSettings = {
   upstreamMode: 'unbound' | 'forward';
@@ -57,7 +57,10 @@ export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig,
   app.get(
     '/api/dns/settings',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -70,7 +73,10 @@ export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig,
   app.put(
     '/api/dns/settings',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' }),
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',

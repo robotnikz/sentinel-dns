@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
-import '@fastify/rate-limit';
+import 'fastify-rate-limit';
 
 type SummaryQuerystring = {
   hours?: string;
@@ -38,7 +38,10 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
   app.get(
     '/api/metrics/clients',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
     },
     async (request: FastifyRequest<{ Querystring: ClientsQuerystring }>) => {
       await requireAdmin(db, request);
@@ -76,7 +79,10 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
   app.get(
     '/api/metrics/client-detail',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
     },
     async (request: FastifyRequest<{ Querystring: ClientDetailQuerystring }>) => {
       await requireAdmin(db, request);
@@ -132,7 +138,10 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
   app.get(
     '/api/metrics/summary',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
     },
     async (request: FastifyRequest<{ Querystring: SummaryQuerystring }>) => {
       await requireAdmin(db, request);
@@ -172,7 +181,10 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
   app.get(
     '/api/metrics/timeseries',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
     },
     async (request: FastifyRequest<{ Querystring: TimeseriesQuerystring }>) => {
       await requireAdmin(db, request);
@@ -219,7 +231,10 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
   app.get(
     '/api/metrics/top-domains',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
     },
     async (request: FastifyRequest<{ Querystring: TopQuerystring }>) => {
       await requireAdmin(db, request);
@@ -251,7 +266,10 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
   app.get(
     '/api/metrics/top-blocked',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
     },
     async (request: FastifyRequest<{ Querystring: TopQuerystring }>) => {
       await requireAdmin(db, request);

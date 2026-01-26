@@ -6,6 +6,7 @@ import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { getSecret, hasSecret } from '../secretsStore.js';
+import 'fastify-rate-limit';
 
 const execFileAsync = promisify(execFile);
 
@@ -68,8 +69,16 @@ type TailscaleAuthUrlResponse =
   | { ok: false; error: string; message: string; details?: string };
 
 export async function registerTailscaleRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.post('/api/tailscale/auth-url', async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireAdmin(db, request);
+  app.post(
+    '/api/tailscale/auth-url',
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      await requireAdmin(db, request);
 
     // Use `tailscale login` rather than `tailscale up --force-reauth` so we can return
     // quickly with a login URL instead of blocking the request until auth completes.
@@ -94,11 +103,20 @@ export async function registerTailscaleRoutes(app: FastifyInstance, config: AppC
       message: 'Could not obtain Tailscale login URL from tailscale CLI output.',
       details: combined.slice(0, 800)
     };
-    return body;
-  });
+      return body;
+    }
+  );
 
-  app.get('/api/tailscale/status', async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireAdmin(db, request);
+  app.get(
+    '/api/tailscale/status',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      await requireAdmin(db, request);
 
     const hasAuthKey = await hasSecret(db, 'tailscale_auth_key');
 
@@ -129,33 +147,38 @@ export async function registerTailscaleRoutes(app: FastifyInstance, config: AppC
     const advertisesExitNode =
       Boolean(prefsJson?.AdvertiseExitNode) || advertiseRoutes.includes('0.0.0.0/0') || advertiseRoutes.includes('::/0');
 
-    return {
-      supported: true,
-      running: true,
-      backendState,
-      hasAuthKey,
-      self: {
-        hostName: typeof self?.HostName === 'string' ? self.HostName : '',
-        dnsName: typeof self?.DNSName === 'string' ? self.DNSName : '',
-        tailscaleIps
-      },
-      prefs: prefsJson
-        ? {
-            advertiseExitNode: advertisesExitNode,
-            advertiseRoutes,
-            snatSubnetRoutes: prefsJson?.NoSNAT === true ? false : true,
-            corpDns: prefsJson?.CorpDNS !== false,
-            wantRunning: prefsJson?.WantRunning !== false,
-            loggedOut: prefsJson?.LoggedOut === true
-          }
-        : null,
-      socket: TS_SOCKET
-    };
-  });
+      return {
+        supported: true,
+        running: true,
+        backendState,
+        hasAuthKey,
+        self: {
+          hostName: typeof self?.HostName === 'string' ? self.HostName : '',
+          dnsName: typeof self?.DNSName === 'string' ? self.DNSName : '',
+          tailscaleIps
+        },
+        prefs: prefsJson
+          ? {
+              advertiseExitNode: advertisesExitNode,
+              advertiseRoutes,
+              snatSubnetRoutes: prefsJson?.NoSNAT === true ? false : true,
+              corpDns: prefsJson?.CorpDNS !== false,
+              wantRunning: prefsJson?.WantRunning !== false,
+              loggedOut: prefsJson?.LoggedOut === true
+            }
+          : null,
+        socket: TS_SOCKET
+      };
+    }
+  );
 
   app.post(
     '/api/tailscale/up',
     {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -232,19 +255,32 @@ export async function registerTailscaleRoutes(app: FastifyInstance, config: AppC
     }
   );
 
-  app.post('/api/tailscale/down', async (request: FastifyRequest, reply: FastifyReply) => {
-    await requireAdmin(db, request);
-    const res = await runTailscale(['down']);
-    if (!res.ok) {
-      reply.code(502);
-      return { error: 'TAILSCALE_DOWN_FAILED', message: 'tailscale down failed', details: res.stderr.slice(0, 800) };
+  app.post(
+    '/api/tailscale/down',
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      await requireAdmin(db, request);
+      const res = await runTailscale(['down']);
+      if (!res.ok) {
+        reply.code(502);
+        return { error: 'TAILSCALE_DOWN_FAILED', message: 'tailscale down failed', details: res.stderr.slice(0, 800) };
+      }
+      return { ok: true };
     }
-    return { ok: true };
-  });
+  );
 
   app.post(
     '/api/tailscale/config',
     {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',

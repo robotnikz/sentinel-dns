@@ -4,7 +4,7 @@ import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import ipaddr from 'ipaddr.js';
-import '@fastify/rate-limit';
+import 'fastify-rate-limit';
 
 type ClientProfile = Record<string, unknown> & { id: string };
 
@@ -12,7 +12,10 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
   app.get(
     '/api/clients',
     {
-      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
+        config: {
+          rateLimit: { max: 120, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit()
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -24,7 +27,10 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
   app.put(
     '/api/clients/:id',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' }),
+        config: {
+          rateLimit: { max: 60, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -85,7 +91,10 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
   app.delete(
     '/api/clients/:id',
     {
-      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' })
+        config: {
+          rateLimit: { max: 60, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit()
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);
