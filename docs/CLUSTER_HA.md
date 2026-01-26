@@ -130,6 +130,24 @@ Join Code is only available when:
 - Requires Linux + `network_mode: host` + NET_ADMIN/NET_RAW/NET_BROADCAST capabilities.
 - Some unprivileged LXC setups block host networking/capabilities.
 
+#### Proxmox LXC workaround (common)
+
+If you run Sentinel inside a **Proxmox LXC** and keepalived won’t work, it’s usually because the container is **unprivileged** and does not allow the capabilities needed to add/remove the VIP or send VRRP traffic.
+
+Recommended options:
+
+1) **Use a VM instead of an LXC** for the HA nodes.
+   - This is the most reliable approach for `keepalived` + VIP.
+
+2) **If you must use LXC**:
+   - Prefer a **privileged** LXC (unprivileged often blocks what keepalived needs).
+   - In Proxmox UI for the LXC:
+     - Options → Features: enable **Nesting** (required if you run Docker inside the LXC)
+     - Options → Features: enable **Keyctl** (often needed by containerized tooling)
+   - Ensure the LXC is allowed the network-related capabilities that keepalived requires (at minimum the equivalent of **CAP_NET_ADMIN** and **CAP_NET_RAW**).
+
+If your Proxmox security policy prevents granting these privileges, VIP failover inside the LXC is not feasible. In that case, keep Sentinel running without VIP HA (single node), or run keepalived on a VM/host where the required network privileges are available.
+
 ### VIP doesn’t move
 
 - Nodes should be on the same L2/VLAN.
