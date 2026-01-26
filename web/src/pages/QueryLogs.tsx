@@ -210,29 +210,93 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   );
 
   const loadIgnoredSignatures = () => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/suspicious/ignored');
+        if (res.ok) {
+          const data = await res.json();
+          const items = Array.isArray((data as any)?.items) ? (data as any).items : [];
+          setIgnoredAnomalySignatures(
+            items
+              .map((it: any) => String(it?.signature ?? '').trim())
+              .filter((s: string) => Boolean(s))
+          );
+          return;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Fallback to legacy localStorage.
+      try {
+        const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed)) {
+          setIgnoredAnomalySignatures(parsed.filter((s) => typeof s === 'string'));
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  };
+
+  const migrateLegacyIgnoredSignatures = async () => {
     try {
       const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) {
-        setIgnoredAnomalySignatures(parsed.filter((s) => typeof s === 'string'));
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+
+      const sigs = parsed.map((s: any) => (typeof s === 'string' ? s.trim() : '')).filter(Boolean);
+      if (sigs.length === 0) return;
+
+      for (const signature of sigs) {
+        try {
+          await fetch('/api/suspicious/ignored', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signature })
+          });
+        } catch {
+          // ignore
+        }
       }
+
+      localStorage.removeItem(IGNORED_ANOMALY_KEY);
     } catch {
       // ignore
     }
   };
 
-  useEffect(() => {
-    loadIgnoredSignatures();
+  const ignoreSignature = async (signature: string) => {
+    const sig = String(signature ?? '').trim();
+    if (!sig) return;
 
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === IGNORED_ANOMALY_KEY) loadIgnoredSignatures();
-    };
+    setIgnoredAnomalySignatures((prev) => Array.from(new Set([...prev, sig])));
+
+    try {
+      await fetch('/api/suspicious/ignored', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signature: sig })
+      });
+    } catch {
+      // ignore
+    }
+
+    loadIgnoredSignatures();
+    window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
+  };
+
+  useEffect(() => {
+    void (async () => {
+      await migrateLegacyIgnoredSignatures();
+      loadIgnoredSignatures();
+    })();
+
     const onIgnored = () => loadIgnoredSignatures();
 
-    window.addEventListener('storage', onStorage);
     window.addEventListener('sentinel:ignored-anomalies', onIgnored as any);
     return () => {
-      window.removeEventListener('storage', onStorage);
       window.removeEventListener('sentinel:ignored-anomalies', onIgnored as any);
     };
   }, []);
@@ -349,17 +413,10 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     }
   };
 
-  const ignoreSelectedAnomaly = () => {
+  const ignoreSelectedAnomaly = async () => {
     if (!selectedAnomaly) return;
     const sig = signatureForAnomaly(selectedAnomaly);
-    const next = Array.from(new Set([...ignoredAnomalySignatures, sig]));
-    setIgnoredAnomalySignatures(next);
-    try {
-      localStorage.setItem(IGNORED_ANOMALY_KEY, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
-    window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
+    await ignoreSignature(sig);
     setSelectedAnomaly(null);
   };
 
@@ -395,15 +452,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   };
 
   const ignoreAnomaly = (a: Anomaly) => {
-    const sig = signatureForAnomaly(a);
-    const next = Array.from(new Set([...ignoredAnomalySignatures, sig]));
-    setIgnoredAnomalySignatures(next);
-    try {
-      localStorage.setItem(IGNORED_ANOMALY_KEY, JSON.stringify(next));
-    } catch {
-      // ignore
-    }
-    window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
+    void ignoreSignature(signatureForAnomaly(a));
   };
 
   const getRiskBadge = (risk: Anomaly['risk']) => {

@@ -163,29 +163,73 @@ const Dashboard: React.FC = () => {
   }, []);
 
   const loadIgnoredSignatures = () => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/suspicious/ignored');
+        if (res.ok) {
+          const data = await res.json();
+          const items = Array.isArray((data as any)?.items) ? (data as any).items : [];
+          setIgnoredSignatures(
+            items
+              .map((it: any) => String(it?.signature ?? '').trim())
+              .filter((s: string) => Boolean(s))
+          );
+          return;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Fallback to legacy localStorage.
+      try {
+        const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed)) {
+          setIgnoredSignatures(parsed.filter((s) => typeof s === 'string'));
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  };
+
+  const migrateLegacyIgnoredSignatures = async () => {
     try {
       const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) {
-        setIgnoredSignatures(parsed.filter((s) => typeof s === 'string'));
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+
+      const sigs = parsed.map((s: any) => (typeof s === 'string' ? s.trim() : '')).filter(Boolean);
+      if (sigs.length === 0) return;
+
+      for (const signature of sigs) {
+        try {
+          await fetch('/api/suspicious/ignored', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signature })
+          });
+        } catch {
+          // ignore
+        }
       }
+
+      localStorage.removeItem(IGNORED_ANOMALY_KEY);
     } catch {
       // ignore
     }
   };
 
   useEffect(() => {
-    loadIgnoredSignatures();
+    void (async () => {
+      await migrateLegacyIgnoredSignatures();
+      loadIgnoredSignatures();
+    })();
 
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === IGNORED_ANOMALY_KEY) loadIgnoredSignatures();
-    };
     const onIgnored = () => loadIgnoredSignatures();
 
-    window.addEventListener('storage', onStorage);
     window.addEventListener('sentinel:ignored-anomalies', onIgnored as any);
     return () => {
-      window.removeEventListener('storage', onStorage);
       window.removeEventListener('sentinel:ignored-anomalies', onIgnored as any);
     };
   }, []);
@@ -208,7 +252,7 @@ const Dashboard: React.FC = () => {
 
     Promise.all([
       fetch('/api/metrics/summary?hours=24').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/metrics/top-domains?hours=24&limit=20').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch('/api/metrics/top-domains?hours=24&limit=20&excludeUpstreams=1').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/metrics/top-blocked?hours=24&limit=20').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/geo/countries?hours=24&limit=40').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/query-logs?limit=500').then((r) => (r.ok ? r.json() : null)).catch(() => null)
@@ -396,19 +440,21 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleIgnoreAnomaly = () => {
+  const handleIgnoreAnomaly = async () => {
     if (!selectedAnomaly) return;
     const sig = signatureForAnomaly(selectedAnomaly);
 
-    const next = Array.from(new Set([...ignoredSignatures, sig]));
-    setIgnoredSignatures(next);
     try {
-      localStorage.setItem(IGNORED_ANOMALY_KEY, JSON.stringify(next));
+      await fetch('/api/suspicious/ignored', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signature: sig })
+      });
     } catch {
       // ignore
     }
+    loadIgnoredSignatures();
     window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
-
     setSelectedAnomaly(null);
   };
 
