@@ -3,6 +3,7 @@ import type { Db } from '../db.js';
 import { generateSessionId, getAdminCookieName, hashSessionId, isAdmin, requireAdmin } from '../auth.js';
 import { hashPassword, verifyPassword, type PasswordHashRecord } from '../authPassword.js';
 import { addAdminSession, getAuthValue, removeAdminSession, setAdminUser, updateAdminPassword } from '../authStore.js';
+import '@fastify/rate-limit';
 
 const cookieName = getAdminCookieName();
 const cookieOptionsBase = {
@@ -38,7 +39,7 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
   app.post(
     '/api/auth/setup',
     {
-      config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
+      preHandler: app.rateLimit({ max: 5, timeWindow: '15 minutes' }),
       schema: {
         body: {
           type: 'object',
@@ -77,7 +78,7 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
   app.post(
     '/api/auth/login',
     {
-      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+      preHandler: app.rateLimit({ max: 10, timeWindow: '1 minute' }),
       schema: {
         body: {
           type: 'object',
@@ -120,7 +121,7 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
   app.post(
     '/api/auth/change-password',
     {
-      config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
+      preHandler: app.rateLimit({ max: 5, timeWindow: '15 minutes' }),
       schema: {
         body: {
           type: 'object',

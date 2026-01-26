@@ -3,6 +3,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
+import '@fastify/rate-limit';
 
 type DnsQuery = Record<string, unknown> & { id: string };
 
@@ -14,7 +15,7 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
   app.get(
     '/api/query-logs',
     {
-      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
     },
     async (request: FastifyRequest<{ Querystring: QueryLogsGetQuerystring }>) => {
       await requireAdmin(db, request);
@@ -38,7 +39,7 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
   app.post(
     '/api/query-logs/ingest',
     {
-      config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
+      preHandler: app.rateLimit({ max: 30, timeWindow: '1 minute' }),
       schema: {
         body: {
           type: 'object',
