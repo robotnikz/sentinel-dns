@@ -3,6 +3,7 @@ import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { notifyEvent } from '../notifications/notify.js';
+import '@fastify/rate-limit';
 
 type PauseMode = 'OFF' | 'UNTIL' | 'FOREVER';
 
@@ -35,7 +36,7 @@ export async function registerProtectionRoutes(app: FastifyInstance, config: App
   app.get(
     '/api/protection/pause',
     {
-      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+      preHandler: app.rateLimit({ max: 120, timeWindow: '1 minute' })
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -48,7 +49,7 @@ export async function registerProtectionRoutes(app: FastifyInstance, config: App
   app.put(
     '/api/protection/pause',
     {
-      config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
+      preHandler: app.rateLimit({ max: 60, timeWindow: '1 minute' }),
       schema: {
         body: {
           type: 'object',
