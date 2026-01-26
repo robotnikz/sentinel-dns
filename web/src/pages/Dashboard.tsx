@@ -252,12 +252,10 @@ const Dashboard: React.FC = () => {
 
     Promise.all([
       fetch('/api/metrics/summary?hours=24').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/metrics/top-domains?hours=24&limit=20&excludeUpstreams=1').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/metrics/top-blocked?hours=24&limit=20').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/geo/countries?hours=24&limit=40').then((r) => (r.ok ? r.json() : null)).catch(() => null),
       fetch('/api/query-logs?limit=500').then((r) => (r.ok ? r.json() : null)).catch(() => null)
     ])
-      .then(([summaryRes, topRes, blockedRes, geoRes, logsRes]) => {
+      .then(([summaryRes, geoRes, logsRes]) => {
         if (cancelled) return;
 
         if (summaryRes && typeof summaryRes === 'object') {
@@ -269,21 +267,6 @@ const Dashboard: React.FC = () => {
         } else {
           setSummary(null);
         }
-
-        const blockedItemsRaw = Array.isArray(blockedRes?.items) ? blockedRes.items : [];
-        const blockedItems = blockedItemsRaw
-          .filter((r: any) => typeof r?.domain === 'string')
-          .map((r: any) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }));
-        setBlockedTargets(computePct(blockedItems));
-
-        const blockedSet = new Set(blockedItems.map((b) => b.domain.trim().toLowerCase()).filter(Boolean));
-
-        const topItemsRaw = Array.isArray(topRes?.items) ? topRes.items : [];
-        const topItems = topItemsRaw
-          .filter((r: any) => typeof r?.domain === 'string')
-          .map((r: any) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }))
-          .filter((r) => !blockedSet.has(r.domain.trim().toLowerCase()));
-        setTopDomains(computePct(topItems));
 
         if (geoRes && typeof geoRes === 'object') {
           const items = Array.isArray((geoRes as any).items) ? (geoRes as any).items : [];
@@ -316,8 +299,6 @@ const Dashboard: React.FC = () => {
       .catch(() => {
         if (cancelled) return;
         setSummary(null);
-        setTopDomains([]);
-        setBlockedTargets([]);
           setGeoData([]);
           setGeoStatus(null);
           setGeoPoints([]);
@@ -328,6 +309,46 @@ const Dashboard: React.FC = () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all([
+      fetch(`/api/metrics/top-domains?hours=${encodeURIComponent(String(trafficWindowHours))}&limit=20&excludeUpstreams=1`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      fetch(`/api/metrics/top-blocked?hours=${encodeURIComponent(String(trafficWindowHours))}&limit=20`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+    ])
+      .then(([topRes, blockedRes]) => {
+        if (cancelled) return;
+
+        const blockedItemsRaw = Array.isArray(blockedRes?.items) ? blockedRes.items : [];
+        const blockedItems = blockedItemsRaw
+          .filter((r: any) => typeof r?.domain === 'string')
+          .map((r: any) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }));
+        setBlockedTargets(computePct(blockedItems));
+
+        const blockedSet = new Set(blockedItems.map((b) => b.domain.trim().toLowerCase()).filter(Boolean));
+
+        const topItemsRaw = Array.isArray(topRes?.items) ? topRes.items : [];
+        const topItems = topItemsRaw
+          .filter((r: any) => typeof r?.domain === 'string')
+          .map((r: any) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }))
+          .filter((r) => !blockedSet.has(r.domain.trim().toLowerCase()));
+        setTopDomains(computePct(topItems));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTopDomains([]);
+        setBlockedTargets([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [trafficWindowHours]);
 
   useEffect(() => {
     let cancelled = false;
