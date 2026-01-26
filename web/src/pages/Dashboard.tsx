@@ -920,17 +920,17 @@ const Dashboard: React.FC = () => {
             <div className="p-4 border-t border-[#27272a] bg-[#121214] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <button
                 onClick={handleIgnoreAnomaly}
-                className="h-9 px-4 rounded text-xs font-bold whitespace-nowrap inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-zinc-300 border border-[#27272a] bg-[#09090b]/40 hover:bg-[#18181b] transition-all"
+                className="h-9 w-full sm:w-auto px-4 rounded text-xs font-bold inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-zinc-300 border border-[#27272a] bg-[#09090b]/40 hover:bg-[#18181b] transition-all"
                 title="Permanently ignore alerts for this issue on this device"
               >
                 <EyeOff className="w-3.5 h-3.5" />
                 IGNORE ALERT
               </button>
 
-              <div className="flex flex-wrap sm:flex-nowrap gap-2 sm:justify-end">
+              <div className="flex flex-col sm:flex-row w-full sm:w-auto gap-2 sm:justify-end">
                 <button
                   onClick={handleOpenInLogs}
-                  className="h-9 px-4 rounded whitespace-nowrap inline-flex items-center justify-center gap-2 bg-[#18181b] hover:bg-[#1f1f22] text-zinc-200 border border-[#27272a] transition-all text-xs font-bold"
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center gap-2 bg-[#18181b] hover:bg-[#1f1f22] text-zinc-200 border border-[#27272a] transition-all text-xs font-bold"
                   title="Open Query Inspector with filters"
                 >
                   <Info className="w-3.5 h-3.5" />
@@ -938,13 +938,13 @@ const Dashboard: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setSelectedAnomaly(null)}
-                  className="h-9 px-4 rounded whitespace-nowrap inline-flex items-center justify-center bg-[#09090b]/40 hover:bg-[#18181b] text-zinc-300 border border-[#27272a] transition-all text-xs font-bold"
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center bg-[#09090b]/40 hover:bg-[#18181b] text-zinc-300 border border-[#27272a] transition-all text-xs font-bold"
                 >
                   DISMISS
                 </button>
                 <button
                   onClick={handleBlockFromAnomaly}
-                  className="h-9 px-4 rounded whitespace-nowrap inline-flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold"
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   BLOCK DOMAIN
