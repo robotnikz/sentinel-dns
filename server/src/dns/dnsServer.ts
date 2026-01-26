@@ -959,7 +959,9 @@ async function forwardDohHttp2(dohUrl: string, msg: Buffer): Promise<Buffer> {
   const path = `${url.pathname}${url.search}` || '/';
 
   return await new Promise<Buffer>((resolve, reject) => {
-    const client = http2.connect(origin);
+    const client = http2.connect(origin, {
+      servername: url.hostname
+    });
     const timer = setTimeout(() => {
       client.destroy(new Error('UPSTREAM_TIMEOUT'));
     }, 4000);
@@ -972,6 +974,8 @@ async function forwardDohHttp2(dohUrl: string, msg: Buffer): Promise<Buffer> {
 
     const req = client.request({
       ':method': 'POST',
+      ':scheme': 'https',
+      ':authority': url.host,
       ':path': path,
       'content-type': 'application/dns-message',
       accept: 'application/dns-message',
