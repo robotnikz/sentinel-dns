@@ -54,7 +54,7 @@
     "playwright": "^1.50.1",
     "postcss": "^8.5.6",
     "semantic-release": "^22.0.12",
-    "tailwindcss": "^3.4.17",
+    "tailwindcss": "^4.1.18",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
     "vitest": "^3.0.7"
