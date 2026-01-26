@@ -103,6 +103,14 @@ docker compose logs -f
 curl -fsS http://<server-ip>:8080/api/health
 ```
 
+## Optional HA (VIP failover)
+
+Sentinel supports optional **VIP/VRRP failover** via a keepalived sidecar and automatic **cluster role switching**.
+
+- Setup guide: [docs/CLUSTER_HA.md](docs/CLUSTER_HA.md)
+- Linux only: keepalived requires `network_mode: host` and NET_* capabilities.
+- If you never enable VIP failover in the UI, keepalived stays idle and Sentinel behaves like a normal single node.
+
 ## Smoke test (Docker Compose)
 
 For a quick end-to-end sanity check (container starts, API health responds, DNS answers over UDP):

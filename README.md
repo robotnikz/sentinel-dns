@@ -69,6 +69,7 @@ The UI is intentionally **honest**: status indicators are driven by real backend
 - **Optional AI domain threat analysis (one click):** get instant feedback on a domain when you explicitly ask for it
 - **Upstreams:** UDP / DoT / DoH (presets + custom resolvers)
 - **Optional remote access:** built-in Tailscale support. Connect all your devices to the same Tailscale network and use your DNS blocker on-the-go
+- **Optional HA (2 nodes):** VIP failover (keepalived/VRRP) + cluster sync so your router uses one DNS IP
 
 > [!NOTE]
 > **AI features are optional and opt-in.** They require you to add a **Gemini or ChatGPT API key** in the UI.
@@ -85,6 +86,10 @@ The UI is intentionally **honest**: status indicators are driven by real backend
 ## 🧭 Quickstart
 
 Sentinel-DNS is shipped as a Docker image. You can run it on a Raspberry Pi, NAS, or any Linux server.
+
+If you want **two-node HA** (one DNS IP in your router, automatic failover), see:
+
+- [docs/CLUSTER_HA.md](docs/CLUSTER_HA.md)
 
 ### 🧰 Docker Prerequisites
 

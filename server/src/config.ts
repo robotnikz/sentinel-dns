@@ -39,7 +39,11 @@ const schema = z.object({
 
   // Used to encrypt secrets stored in the DB (Gemini/OpenAI keys, etc.).
   // Can be a passphrase; in production you should set this.
-  SECRETS_KEY: z.string().optional().default('')
+  SECRETS_KEY: z.string().optional().default(''),
+
+  // Optional file path whose contents override cluster role: 'leader' or 'follower'.
+  // Intended for keepalived/VRRP notify scripts to provide automatic role switching with a VIP.
+  CLUSTER_ROLE_FILE: z.string().optional().default('')
 });
 
 export type AppConfig = z.infer<typeof schema>;

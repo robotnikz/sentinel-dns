@@ -1,0 +1,50 @@
+# Rendered by /entrypoint.sh
+#
+# Env vars:
+# - HA_INTERFACE (optional)
+# - HA_VIP (required, can be with or without /CIDR)
+# - HA_VRID (default 53)
+# - HA_PRIORITY (default 110)
+# - HA_AUTH_PASS (required)
+# - HA_MODE: multicast|unicast (default multicast)
+# - HA_UNICAST_PEERS: comma/space separated peer IPs (required when unicast)
+# - HA_SRC_IP (optional; auto-detected from interface)
+# - HA_ADVERT_INT (default 1)
+# - HA_READY_URL (default http://127.0.0.1:8080/api/cluster/ready)
+# - HA_ROLE_FILE (default /data/sentinel/cluster_role)
+
+vrrp_script chk_sentinel_ready {
+  script "/bin/sh -c 'curl -fsS --max-time 2 ${HA_READY_URL} | grep -q \"\\\"ok\\\":true\"'"
+  interval 2
+  timeout 3
+  fall 2
+  rise 2
+}
+
+vrrp_instance VI_${HA_VRID} {
+  state BACKUP
+  interface ${HA_INTERFACE}
+  virtual_router_id ${HA_VRID}
+  priority ${HA_PRIORITY}
+  advert_int ${HA_ADVERT_INT}
+  nopreempt
+
+  authentication {
+    auth_type PASS
+    auth_pass ${HA_AUTH_PASS}
+  }
+
+  track_script {
+    chk_sentinel_ready
+  }
+
+  ${HA_UNICAST_BLOCK}
+
+  virtual_ipaddress {
+    ${HA_VIP_CIDR} dev ${HA_INTERFACE}
+  }
+
+  notify_master "/notify.sh MASTER"
+  notify_backup "/notify.sh BACKUP"
+  notify_fault "/notify.sh FAULT"
+}

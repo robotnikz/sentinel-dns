@@ -7,13 +7,14 @@ import Blocking from './pages/Blocking';
 import DnsSettings from './pages/DnsSettings';
 import NetworkMap from './pages/NetworkMap';
 import Settings from './pages/Settings2';
+import Cluster from './pages/Cluster';
 import Setup from './pages/Setup';
 import { Bell, Search, Terminal, Play, Pause, AlertTriangle, Shield, CheckCircle } from 'lucide-react';
 import { RulesProvider } from './contexts/RulesContext';
 import { ClientsProvider } from './contexts/ClientsContext';
 
 const App: React.FC = () => {
-  const VALID_PAGES = useRef(new Set(['dashboard', 'logs', 'clients', 'topology', 'blocking', 'dns', 'settings']));
+  const VALID_PAGES = useRef(new Set(['dashboard', 'logs', 'clients', 'topology', 'blocking', 'dns', 'settings', 'cluster']));
 
   const readPageFromHash = () => {
     const raw = (window.location.hash || '').replace(/^#\/?/, '').trim();
@@ -444,6 +445,7 @@ const App: React.FC = () => {
       case 'blocking': return <Blocking />;
       case 'dns': return <DnsSettings />;
       case 'settings': return <Settings presetTab={settingsTabPreset} onPresetConsumed={() => setSettingsTabPreset(null)} />;
+      case 'cluster': return <Cluster />;
       default: return null;
     }
   };
@@ -457,6 +459,7 @@ const App: React.FC = () => {
           case 'blocking': return 'Filter Rules';
           case 'dns': return 'DNS Configuration';
           case 'settings': return 'System Settings';
+        case 'cluster': return 'Cluster / HA';
           default: return 'Dashboard';
       }
   };
@@ -475,6 +478,8 @@ const App: React.FC = () => {
     { id: 'topology', label: 'Network Map', hint: 'Network Topology', keywords: ['topology', 'map'], page: 'topology' },
     { id: 'blocking', label: 'Blocking Rules', hint: 'Filter Rules', keywords: ['rules', 'allowlist', 'blocklist', 'filters'], page: 'blocking' },
     { id: 'dns', label: 'DNS Settings', hint: 'DNS Configuration', keywords: ['rewrites', 'upstream', 'resolver', 'unbound'], page: 'dns' },
+
+    { id: 'cluster', label: 'Cluster / HA', hint: 'Sync + VIP Failover', keywords: ['cluster', 'ha', 'vip', 'vrrp', 'keepalived', 'sync', 'leader', 'follower'], page: 'cluster' },
 
     { id: 'settings', label: 'Settings', hint: 'System Settings', keywords: ['configuration', 'options', 'admin'], page: 'settings' },
     { id: 'settings.general', label: 'Settings: AI Keys', page: 'settings', settingsTabPreset: 'general', keywords: ['ai', 'gemini', 'openai', 'api key'] },
