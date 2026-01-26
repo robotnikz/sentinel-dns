@@ -1,3 +1,8 @@
+## <small>0.3.3 (2026-01-26)</small>
+
+* Merge pull request #30 from robotnikz/fix/doh-upstream-headers ([df04523](https://github.com/robotnikz/sentinel-dns/commit/df04523)), closes [#30](https://github.com/robotnikz/sentinel-dns/issues/30)
+* fix: set http2 DoH authority and SNI ([6050e37](https://github.com/robotnikz/sentinel-dns/commit/6050e37))
+
 ## <small>0.3.2 (2026-01-26)</small>
 
 * Merge pull request #29 from robotnikz/fix/dns-rewrites ([5ed2e19](https://github.com/robotnikz/sentinel-dns/commit/5ed2e19)), closes [#29](https://github.com/robotnikz/sentinel-dns/issues/29)
