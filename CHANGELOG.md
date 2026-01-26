@@ -1,3 +1,8 @@
+## 0.5.0 (2026-01-26)
+
+* Merge pull request #38 from robotnikz/feat/dashboard-toplists-timeframe ([9099fa4](https://github.com/robotnikz/sentinel-dns/commit/9099fa4)), closes [#38](https://github.com/robotnikz/sentinel-dns/issues/38)
+* feat(dashboard): sync toplists with traffic timeframe ([7711360](https://github.com/robotnikz/sentinel-dns/commit/7711360))
+
 ## <small>0.4.3 (2026-01-26)</small>
 
 * Merge pull request #37 from robotnikz/fix/top-domains-resolver-noise ([eb64321](https://github.com/robotnikz/sentinel-dns/commit/eb64321)), closes [#37](https://github.com/robotnikz/sentinel-dns/issues/37)
