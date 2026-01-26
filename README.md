@@ -4,39 +4,39 @@
 <h1>Sentinel-DNS</h1>
 
 <p>
-	<b>The self-hosted DNS blocker appliance</b> (Pi-hole/AdGuard-style) with an honest Web UI, API, and an embedded DNS stack.
+  <b>The self-hosted DNS blocker appliance</b> (Pi-hole/AdGuard-style) with an honest Web UI, API, and an embedded DNS stack.
 </p>
 
 <p>
-	<a href="https://github.com/robotnikz/sentinel-dns/stargazers">
-		<img alt="Stars" src="https://img.shields.io/github/stars/robotnikz/sentinel-dns?style=flat-square" />
-	</a>
-	<a href="https://github.com/robotnikz/sentinel-dns/issues">
-		<img alt="Issues" src="https://img.shields.io/github/issues/robotnikz/sentinel-dns?style=flat-square" />
-	</a>
-	<a href="https://github.com/robotnikz/sentinel-dns/commits/main">
-		<img alt="Last Commit" src="https://img.shields.io/github/last-commit/robotnikz/sentinel-dns?style=flat-square" />
-	</a>
-	<a href="https://github.com/robotnikz/sentinel-dns/actions/workflows/docker-publish.yml">
-		<img alt="CI/CD Pipeline" src="https://github.com/robotnikz/sentinel-dns/actions/workflows/docker-publish.yml/badge.svg?branch=main" />
-	</a>
-	<a href="https://github.com/robotnikz/sentinel-dns/pkgs/container/sentinel-dns">
-		<img alt="GitHub Release" src="https://img.shields.io/github/v/release/robotnikz/sentinel-dns?logo=docker&label=ghcr.io&style=flat-square" />
-	</a>
-	<a href="LICENSE">
-		<img alt="License" src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" />
-	</a>
-	<a href="https://docs.docker.com/compose/">
-		<img alt="Docker Compose" src="https://img.shields.io/badge/docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white" />
-	</a>
+  <a href="https://github.com/robotnikz/sentinel-dns/stargazers">
+    <img alt="Stars" src="https://img.shields.io/github/stars/robotnikz/sentinel-dns?style=flat-square" />
+  </a>
+  <a href="https://github.com/robotnikz/sentinel-dns/issues">
+    <img alt="Issues" src="https://img.shields.io/github/issues/robotnikz/sentinel-dns?style=flat-square" />
+  </a>
+  <a href="https://github.com/robotnikz/sentinel-dns/commits/main">
+    <img alt="Last Commit" src="https://img.shields.io/github/last-commit/robotnikz/sentinel-dns?style=flat-square" />
+  </a>
+  <a href="https://github.com/robotnikz/sentinel-dns/actions/workflows/docker-publish.yml">
+    <img alt="CI/CD Pipeline" src="https://github.com/robotnikz/sentinel-dns/actions/workflows/docker-publish.yml/badge.svg?branch=main" />
+  </a>
+  <a href="https://github.com/robotnikz/sentinel-dns/pkgs/container/sentinel-dns">
+    <img alt="GitHub Release" src="https://img.shields.io/github/v/release/robotnikz/sentinel-dns?logo=docker&label=ghcr.io&style=flat-square" />
+  </a>
+  <a href="LICENSE">
+    <img alt="License" src="https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square" />
+  </a>
+  <a href="https://docs.docker.com/compose/">
+    <img alt="Docker Compose" src="https://img.shields.io/badge/docker-compose-2496ED?style=flat-square&logo=docker&logoColor=white" />
+  </a>
 </p>
 
 <p>
-	<a href="#quickstart">Quickstart</a>
-	· <a href="#screenshots">Screenshots</a>
-	· <a href="#remote-access-tailscale">Remote access</a>
-	· <a href="#security--hardening">Security</a>
-	· <a href="#troubleshooting">Troubleshooting</a>
+  <a href="#quickstart">Quickstart</a>
+  · <a href="#screenshots">Screenshots</a>
+  · <a href="#remote-access-tailscale">Remote access</a>
+  · <a href="#security--hardening">Security</a>
+  · <a href="#troubleshooting">Troubleshooting</a>
 </p>
 </div>
 
@@ -114,9 +114,9 @@ services:
     environment:
       # Timezone used for logs/UI timestamps.
       - TZ=Europe/Berlin
-			# Ensure the Web UI/API is reachable via Docker port publishing.
-			- HOST=0.0.0.0
-			- PORT=8080
+      # Ensure the Web UI/API is reachable via Docker port publishing.
+      - HOST=0.0.0.0
+      - PORT=8080
     volumes:
       # Persistent storage for data, settings, secrets, and the GeoIP database.
       - sentinel-data:/data
@@ -151,18 +151,18 @@ docker compose up -d
 
 ```bash
 docker run -d \
-	-p 8080:8080 \
-	-p 53:53/udp \
-	-p 53:53/tcp \
-	-v sentinel-data:/data \
-	-e TZ=Europe/Berlin \
-	--cap-add=NET_ADMIN \
-	--device=/dev/net/tun:/dev/net/tun \
-	--sysctl net.ipv4.ip_forward=1 \
-	--sysctl net.ipv6.conf.all.forwarding=1 \
-	--restart unless-stopped \
-	--name sentinel-dns \
-	ghcr.io/robotnikz/sentinel-dns:latest
+  -p 8080:8080 \
+  -p 53:53/udp \
+  -p 53:53/tcp \
+  -v sentinel-data:/data \
+  -e TZ=Europe/Berlin \
+  --cap-add=NET_ADMIN \
+  --device=/dev/net/tun:/dev/net/tun \
+  --sysctl net.ipv4.ip_forward=1 \
+  --sysctl net.ipv6.conf.all.forwarding=1 \
+  --restart unless-stopped \
+  --name sentinel-dns \
+  ghcr.io/robotnikz/sentinel-dns:latest
 ```
 
 ---
