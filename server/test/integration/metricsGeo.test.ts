@@ -58,9 +58,10 @@ describe('integration: metrics + geo routes', () => {
     ]);
 
     // Seed a couple of well-known upstream-style domains that may appear due to DoH/DoT host resolution.
-    await pool.query('INSERT INTO query_logs(entry) VALUES ($1), ($2), ($3)', [
+    await pool.query('INSERT INTO query_logs(entry) VALUES ($1), ($2), ($3), ($4)', [
       mkEntry({ domain: 'security.cloudflare-dns.com', status: 'PERMITTED', clientIp: '192.168.1.10' }),
       mkEntry({ domain: 'cloudflare-dns.com', status: 'PERMITTED', clientIp: '192.168.1.10' }),
+      mkEntry({ domain: 'dns.google', status: 'PERMITTED', clientIp: '192.168.1.10' }),
       mkEntry({ domain: 'ok.test', status: 'PERMITTED', clientIp: '192.168.1.10' })
     ]);
 
@@ -145,6 +146,7 @@ describe('integration: metrics + geo routes', () => {
     expect(topItems.length).toBeGreaterThan(0);
     expect(topItems.some((r: any) => r.domain === 'security.cloudflare-dns.com')).toBe(false);
     expect(topItems.some((r: any) => r.domain === 'cloudflare-dns.com')).toBe(false);
+    expect(topItems.some((r: any) => r.domain === 'dns.google')).toBe(false);
     expect(topItems.some((r: any) => r.domain === 'ok.test')).toBe(true);
   });
 

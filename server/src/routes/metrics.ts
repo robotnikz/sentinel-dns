@@ -94,12 +94,34 @@ function isUpstreamRelatedDomain(domainRaw: string, upstreamDomains: ReadonlyArr
   return false;
 }
 
+const KNOWN_RESOLVER_DOMAINS: ReadonlyArray<string> = [
+  // Google Public DNS
+  'dns.google',
+  // Cloudflare
+  'cloudflare-dns.com',
+  'security.cloudflare-dns.com',
+  'family.cloudflare-dns.com',
+  'one.one.one.one',
+  // Quad9
+  'dns.quad9.net',
+  // AdGuard
+  'dns.adguard.com'
+];
+
 async function getUpstreamDomainsToExclude(db: Db): Promise<Set<string>> {
   const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_settings']);
   const value = res.rows?.[0]?.value;
   const settings = typeof value === 'object' && value ? (value as any) : {};
   const mode = settings.upstreamMode === 'forward' ? 'forward' : 'unbound';
-  if (mode !== 'forward') return new Set();
+  const out = new Set<string>();
+  // Always include well-known resolver domains so the dashboard can hide common upstream/resolver noise
+  // even if the user is currently in unbound mode.
+  for (const d of KNOWN_RESOLVER_DOMAINS) {
+    const normalized = normalizeDomainCandidate(d);
+    if (normalized) out.add(normalized);
+  }
+
+  if (mode !== 'forward') return out;
 
   const forward = typeof settings.forward === 'object' && settings.forward ? (settings.forward as any) : {};
   const transport =
@@ -111,7 +133,6 @@ async function getUpstreamDomainsToExclude(db: Db): Promise<Set<string>> {
           ? 'tcp'
           : 'udp';
 
-  const out = new Set<string>();
   if (transport === 'doh') {
     const dohUrl = typeof forward.dohUrl === 'string' ? forward.dohUrl.trim() : '';
     const host = dohUrl ? extractHostFromDohUrl(dohUrl) : null;
