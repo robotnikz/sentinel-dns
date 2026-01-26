@@ -36,6 +36,9 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 export async function registerMetricsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
   app.get(
     '/api/metrics/clients',
+    {
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+    },
     async (request: FastifyRequest<{ Querystring: ClientsQuerystring }>) => {
       await requireAdmin(db, request);
       const hours = clampInt(request.query.hours, 24, 1, 168);
@@ -71,6 +74,9 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
 
   app.get(
     '/api/metrics/client-detail',
+    {
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+    },
     async (request: FastifyRequest<{ Querystring: ClientDetailQuerystring }>) => {
       await requireAdmin(db, request);
       const hours = clampInt(request.query.hours, 24, 1, 168);
@@ -124,6 +130,9 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
 
   app.get(
     '/api/metrics/summary',
+    {
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+    },
     async (request: FastifyRequest<{ Querystring: SummaryQuerystring }>) => {
       await requireAdmin(db, request);
       const hours = clampInt(request.query.hours, 24, 1, 168);
@@ -161,6 +170,9 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
 
   app.get(
     '/api/metrics/timeseries',
+    {
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+    },
     async (request: FastifyRequest<{ Querystring: TimeseriesQuerystring }>) => {
       await requireAdmin(db, request);
       const hours = clampInt(request.query.hours, 24, 1, 168);
@@ -205,6 +217,9 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
 
   app.get(
     '/api/metrics/top-domains',
+    {
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+    },
     async (request: FastifyRequest<{ Querystring: TopQuerystring }>) => {
       await requireAdmin(db, request);
       const hours = clampInt(request.query.hours, 24, 1, 168);
@@ -234,6 +249,9 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
 
   app.get(
     '/api/metrics/top-blocked',
+    {
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+    },
     async (request: FastifyRequest<{ Querystring: TopQuerystring }>) => {
       await requireAdmin(db, request);
       const hours = clampInt(request.query.hours, 24, 1, 168);

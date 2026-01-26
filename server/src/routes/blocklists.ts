@@ -37,7 +37,7 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.get(
     '/api/blocklists',
     {
-      onRequest: [app.rateLimit({ max: 120, timeWindow: '1 minute' })]
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
     },
     async (request) => {
       await requireAdmin(db, request);
@@ -51,7 +51,7 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.post(
     '/api/blocklists',
     {
-      onRequest: [app.rateLimit({ max: 60, timeWindow: '1 minute' })],
+      config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
       schema: {
         body: {
           type: 'object',
@@ -97,7 +97,7 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.put(
     '/api/blocklists/:id',
     {
-      onRequest: [app.rateLimit({ max: 60, timeWindow: '1 minute' })],
+      config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
       schema: {
         body: {
           type: 'object',
@@ -157,7 +157,7 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.delete(
     '/api/blocklists/:id',
     {
-      onRequest: [app.rateLimit({ max: 60, timeWindow: '1 minute' })]
+      config: { rateLimit: { max: 60, timeWindow: '1 minute' } }
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);
@@ -181,13 +181,13 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.post(
     '/api/blocklists/:id/refresh',
     {
-      onRequest: [
-        app.rateLimit({
+      config: {
+        rateLimit: {
           // Refresh can be expensive and triggers network IO.
           max: 10,
           timeWindow: '1 minute'
-        })
-      ]
+        }
+      }
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);

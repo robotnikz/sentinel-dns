@@ -8,7 +8,7 @@ export async function registerRulesRoutes(app: FastifyInstance, config: AppConfi
   app.get(
     '/api/rules',
     {
-      onRequest: [app.rateLimit({ max: 120, timeWindow: '1 minute' })]
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
     },
     async (request) => {
     await requireAdmin(db, request);
@@ -33,7 +33,7 @@ export async function registerRulesRoutes(app: FastifyInstance, config: AppConfi
   app.post(
     '/api/rules',
     {
-      onRequest: [app.rateLimit({ max: 60, timeWindow: '1 minute' })],
+      config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
       schema: {
         body: {
           type: 'object',
@@ -74,7 +74,7 @@ export async function registerRulesRoutes(app: FastifyInstance, config: AppConfi
   app.delete(
     '/api/rules/:id',
     {
-      onRequest: [app.rateLimit({ max: 60, timeWindow: '1 minute' })]
+      config: { rateLimit: { max: 60, timeWindow: '1 minute' } }
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
     await requireAdmin(db, request);

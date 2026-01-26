@@ -6,25 +6,31 @@ import { requireAdmin } from '../auth.js';
 import { getSecret } from '../secretsStore.js';
 
 export async function registerAiRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/ai/status', async (request) => {
-    await requireAdmin(db, request);
-    const [geminiSecret, openaiSecret] = await Promise.all([
-      getSecret(db, config, 'gemini_api_key'),
-      getSecret(db, config, 'openai_api_key')
-    ]);
+  app.get(
+    '/api/ai/status',
+    {
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      const [geminiSecret, openaiSecret] = await Promise.all([
+        getSecret(db, config, 'gemini_api_key'),
+        getSecret(db, config, 'openai_api_key')
+      ]);
 
-    return {
-      providers: {
-        gemini: Boolean(config.GEMINI_API_KEY || geminiSecret),
-        openai: Boolean(openaiSecret)
-      }
-    };
-  });
+      return {
+        providers: {
+          gemini: Boolean(config.GEMINI_API_KEY || geminiSecret),
+          openai: Boolean(openaiSecret)
+        }
+      };
+    }
+  );
 
   app.post(
     '/api/ai/analyze-domain',
     {
-      onRequest: [app.rateLimit({ max: 20, timeWindow: '1 minute' })],
+      config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
       schema: {
         body: {
           type: 'object',

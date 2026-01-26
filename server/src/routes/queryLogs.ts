@@ -13,6 +13,9 @@ type QueryLogsGetQuerystring = {
 export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
   app.get(
     '/api/query-logs',
+    {
+      config: { rateLimit: { max: 120, timeWindow: '1 minute' } }
+    },
     async (request: FastifyRequest<{ Querystring: QueryLogsGetQuerystring }>) => {
       await requireAdmin(db, request);
       const limitRaw = Number(request.query.limit ?? '250');
@@ -35,6 +38,7 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
   app.post(
     '/api/query-logs/ingest',
     {
+      config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
       schema: {
         body: {
           type: 'object',
