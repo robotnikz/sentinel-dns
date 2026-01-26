@@ -16,8 +16,14 @@ type RuleMatchDecision = {
 };
 
 type RulesIndex = {
-  manualAllowed: Set<string>;
-  manualBlocked: Set<string>;
+  globalManualAllowed: Set<string>;
+  globalManualBlocked: Set<string>;
+
+  manualAllowedByClientId: Map<string, Set<string>>;
+  manualBlockedByClientId: Map<string, Set<string>>;
+
+  manualAllowedBySubnetId: Map<string, Set<string>>;
+  manualBlockedBySubnetId: Map<string, Set<string>>;
   // Domain -> blocklist id(s) that contain it.
   blockedByDomain: Map<string, string | string[]>;
 };
@@ -256,6 +262,37 @@ function buildCandidateDomains(queryName: string): string[] {
   return out;
 }
 
+function decideManualRule(
+  candidates: string[],
+  allowed: Set<string> | undefined,
+  blocked: Set<string> | undefined
+): 'ALLOWED' | 'BLOCKED' | 'NONE' {
+  if (!candidates.length) return 'NONE';
+  const a = allowed ?? EMPTY_STRING_SET;
+  const b = blocked ?? EMPTY_STRING_SET;
+
+  // Allow should win over block.
+  for (const c of candidates) {
+    if (a.has(c)) return 'ALLOWED';
+  }
+  for (const c of candidates) {
+    if (b.has(c)) return 'BLOCKED';
+  }
+  return 'NONE';
+}
+
+const EMPTY_STRING_SET = new Set<string>();
+
+function getOrCreateSet(map: Map<string, Set<string>>, key: string): Set<string> {
+  const k = String(key ?? '').trim();
+  if (!k) return EMPTY_STRING_SET;
+  const cur = map.get(k);
+  if (cur) return cur;
+  const next = new Set<string>();
+  map.set(k, next);
+  return next;
+}
+
 function decideRuleIndexed(
   index: RulesIndex,
   queryName: string,
@@ -265,14 +302,7 @@ function decideRuleIndexed(
   const candidates = buildCandidateDomains(queryName);
   if (!candidates.length) return { decision: 'NONE' };
 
-  // Allow should win over block.
   for (const c of candidates) {
-    if (index.manualAllowed.has(c)) return { decision: 'ALLOWED' };
-  }
-
-  for (const c of candidates) {
-    if (index.manualBlocked.has(c)) return { decision: 'BLOCKED' };
-
     const hit = index.blockedByDomain.get(c);
     if (!hit) continue;
 
@@ -453,6 +483,17 @@ function isAppBlockedByPolicy(queryName: string, apps: AppService[]): AppService
 }
 
 function findClient(clients: ClientProfile[], clientIp: string): ClientProfile | null {
+  return findExactClient(clients, clientIp) ?? findBestCidrClient(clients, clientIp);
+}
+
+function findExactClient(clients: ClientProfile[], clientIp: string): ClientProfile | null {
+  for (const c of clients) {
+    if (c.ip && c.ip === clientIp) return c;
+  }
+  return null;
+}
+
+function findBestCidrClient(clients: ClientProfile[], clientIp: string): ClientProfile | null {
   let addr: ipaddr.IPv4 | ipaddr.IPv6 | null = null;
   try {
     addr = ipaddr.parse(clientIp);
@@ -460,17 +501,12 @@ function findClient(clients: ClientProfile[], clientIp: string): ClientProfile |
     addr = null;
   }
 
-  // Prefer an exact IP match over any CIDR match.
-  for (const c of clients) {
-    if (c.ip && c.ip === clientIp) return c;
-  }
+  if (!addr) return null;
 
-  // If no exact match exists, use the most-specific CIDR match.
   let best: ClientProfile | null = null;
   let bestPrefixLen = -1;
 
   for (const c of clients) {
-    if (!addr) continue;
     if (!c.cidr) continue;
     try {
       const [range, prefixLen] = ipaddr.parseCIDR(c.cidr);
@@ -499,29 +535,77 @@ function normalizeRuleDomain(value: any): string {
 }
 
 async function loadRulesIndex(db: Db, neededBlocklistIds: number[]): Promise<RulesIndex> {
-  const manualAllowed = new Set<string>();
-  const manualBlocked = new Set<string>();
+  const globalManualAllowed = new Set<string>();
+  const globalManualBlocked = new Set<string>();
+
+  const manualAllowedByClientId = new Map<string, Set<string>>();
+  const manualBlockedByClientId = new Map<string, Set<string>>();
+  const manualAllowedBySubnetId = new Map<string, Set<string>>();
+  const manualBlockedBySubnetId = new Map<string, Set<string>>();
 
   // Manual rules (Allow/Block tab) are not tied to a blocklist selection.
   const manualRes = await db.pool.query(
     `
-    SELECT domain, type
+    SELECT domain, type, category
     FROM rules
     WHERE category NOT LIKE 'Blocklist:%'
     `
   );
 
+  const parseScope = (raw: unknown): { scope: 'global' } | { scope: 'client' | 'subnet'; id: string } => {
+    const c = typeof raw === 'string' ? raw.trim() : '';
+    if (!c) return { scope: 'global' };
+
+    const parseId = (prefix: string): string | null => {
+      if (!c.startsWith(prefix)) return null;
+      const rest = c.slice(prefix.length);
+      const id = (rest.includes(':') ? rest.slice(0, rest.indexOf(':')) : rest).trim();
+      return id ? id : null;
+    };
+
+    const clientId = parseId('Client:');
+    if (clientId) return { scope: 'client', id: clientId };
+
+    const subnetId = parseId('Subnet:');
+    if (subnetId) return { scope: 'subnet', id: subnetId };
+
+    return { scope: 'global' };
+  };
+
   for (const r of manualRes.rows) {
     const domain = normalizeRuleDomain(r?.domain);
     if (!domain) continue;
     const type = r?.type === 'ALLOWED' ? 'ALLOWED' : 'BLOCKED';
-    if (type === 'ALLOWED') manualAllowed.add(domain);
-    else manualBlocked.add(domain);
+
+    const scope = parseScope(r?.category);
+    if (scope.scope === 'global') {
+      if (type === 'ALLOWED') globalManualAllowed.add(domain);
+      else globalManualBlocked.add(domain);
+      continue;
+    }
+
+    if (scope.scope === 'client') {
+      if (type === 'ALLOWED') getOrCreateSet(manualAllowedByClientId, scope.id).add(domain);
+      else getOrCreateSet(manualBlockedByClientId, scope.id).add(domain);
+      continue;
+    }
+
+    if (type === 'ALLOWED') getOrCreateSet(manualAllowedBySubnetId, scope.id).add(domain);
+    else getOrCreateSet(manualBlockedBySubnetId, scope.id).add(domain);
   }
 
   const blockedByDomain = new Map<string, string | string[]>();
   const ids = neededBlocklistIds.filter((n) => Number.isFinite(n));
-  if (!ids.length) return { manualAllowed, manualBlocked, blockedByDomain };
+  if (!ids.length)
+    return {
+      globalManualAllowed,
+      globalManualBlocked,
+      manualAllowedByClientId,
+      manualBlockedByClientId,
+      manualAllowedBySubnetId,
+      manualBlockedBySubnetId,
+      blockedByDomain
+    };
 
   const blocklistRes = await db.pool.query(
     `
@@ -553,7 +637,15 @@ async function loadRulesIndex(db: Db, neededBlocklistIds: number[]): Promise<Rul
     if (!cur.includes(id)) cur.push(id);
   }
 
-  return { manualAllowed, manualBlocked, blockedByDomain };
+  return {
+    globalManualAllowed,
+    globalManualBlocked,
+    manualAllowedByClientId,
+    manualBlockedByClientId,
+    manualAllowedBySubnetId,
+    manualBlockedBySubnetId,
+    blockedByDomain
+  };
 }
 
 async function loadClients(db: Db): Promise<ClientProfile[]> {
@@ -1060,7 +1152,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         `[dns] rules-index reloaded at=${loadedAtIso} maxId=${stats.maxId} ` +
           `selectedBlocklists=${stats.selectedBlocklistCount} ` +
           `domains=${stats.index.blockedByDomain.size} ` +
-          `manualAllowed=${stats.index.manualAllowed.size} manualBlocked=${stats.index.manualBlocked.size} ` +
+          `globalManualAllowed=${stats.index.globalManualAllowed.size} globalManualBlocked=${stats.index.globalManualBlocked.size} ` +
+          `clientScoped=${stats.index.manualBlockedByClientId.size + stats.index.manualAllowedByClientId.size} ` +
+          `subnetScoped=${stats.index.manualBlockedBySubnetId.size + stats.index.manualAllowedBySubnetId.size} ` +
           `durationMs=${stats.durationMs}`
       );
     } catch {
@@ -1077,7 +1171,15 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     loadedAt: 0,
     maxId: 0,
     includedIdsKey: '',
-    index: { manualAllowed: new Set(), manualBlocked: new Set(), blockedByDomain: new Map() }
+    index: {
+      globalManualAllowed: new Set(),
+      globalManualBlocked: new Set(),
+      manualAllowedByClientId: new Map(),
+      manualBlockedByClientId: new Map(),
+      manualAllowedBySubnetId: new Map(),
+      manualBlockedBySubnetId: new Map(),
+      blockedByDomain: new Map()
+    }
   };
   const clientsCache: ClientsCache = { loadedAt: 0, clients: [] };
   const rewritesCache: RewritesCache = { loadedAt: 0, byDomain: new Map(), wildcards: [] };
@@ -1408,8 +1510,10 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       if (rewrite) {
         const localResp = buildLocalAnswerResponse(query, name, qtype, rewrite.target);
         if (localResp) {
-          const client = findClient(clientsCache.clients, clientIp);
-          const clientName = client?.name ?? 'Unknown';
+          const exactClient = findExactClient(clientsCache.clients, clientIp);
+          const subnetClient = findBestCidrClient(clientsCache.clients, clientIp);
+          const effectiveClient = exactClient ?? subnetClient;
+          const clientName = effectiveClient?.name ?? 'Unknown';
           const answerIps = extractAnswerIpsFromDnsResponse(localResp);
           await insertQueryLog(db, {
             id: crypto.randomUUID(),
@@ -1426,11 +1530,13 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         }
       }
 
-      const client = findClient(clientsCache.clients, clientIp);
+      const exactClient = findExactClient(clientsCache.clients, clientIp);
+      const subnetClient = findBestCidrClient(clientsCache.clients, clientIp);
+      const client = exactClient ?? subnetClient;
       const clientName = client?.name ?? 'Unknown';
 
       // Client kill-switch: blocks *all* DNS for this client/subnet.
-      if (client?.isInternetPaused) {
+      if (exactClient?.isInternetPaused || subnetClient?.isInternetPaused) {
         const resp = buildNxDomainResponse(query);
         await insertQueryLog(db, {
           id: crypto.randomUUID(),
@@ -1441,7 +1547,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           status: 'BLOCKED',
           type: qtype,
           durationMs: Date.now() - start,
-          blocklistId: 'ClientPolicy:InternetPaused'
+          blocklistId: exactClient?.isInternetPaused ? 'ClientPolicy:InternetPaused' : 'SubnetPolicy:InternetPaused'
         });
         return resp;
       }
@@ -1476,23 +1582,176 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         return upstreamResp;
       }
 
+      // Manual allow/block rules with precedence: Client > Subnet > Global.
+      // (These are applied after protection pause, but before app/blocklist evaluation.)
+      const candidates = buildCandidateDomains(name);
+      const idx = rulesCache.index;
+
+      const clientManual = exactClient
+        ? decideManualRule(
+            candidates,
+            idx.manualAllowedByClientId.get(exactClient.id),
+            idx.manualBlockedByClientId.get(exactClient.id)
+          )
+        : 'NONE';
+
+      if (clientManual === 'BLOCKED') {
+        const resp = buildNxDomainResponse(query);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: `ClientRule:${exactClient?.id ?? ''}`
+        });
+        return resp;
+      }
+
+      if (clientManual === 'ALLOWED') {
+        const upstream = upstreamCache.upstream;
+        const upstreamResp =
+          upstream.transport === 'tcp'
+            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
+            : upstream.transport === 'dot'
+              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
+              : upstream.transport === 'doh'
+                ? await forwardDoh(upstream.dohUrl, msg)
+                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps: extractAnswerIpsFromDnsResponse(upstreamResp)
+        });
+        return upstreamResp;
+      }
+
+      const subnetManual = subnetClient
+        ? decideManualRule(
+            candidates,
+            idx.manualAllowedBySubnetId.get(subnetClient.id),
+            idx.manualBlockedBySubnetId.get(subnetClient.id)
+          )
+        : 'NONE';
+
+      if (subnetManual === 'BLOCKED') {
+        const resp = buildNxDomainResponse(query);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: `SubnetRule:${subnetClient?.id ?? ''}`
+        });
+        return resp;
+      }
+
+      if (subnetManual === 'ALLOWED') {
+        const upstream = upstreamCache.upstream;
+        const upstreamResp =
+          upstream.transport === 'tcp'
+            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
+            : upstream.transport === 'dot'
+              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
+              : upstream.transport === 'doh'
+                ? await forwardDoh(upstream.dohUrl, msg)
+                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps: extractAnswerIpsFromDnsResponse(upstreamResp)
+        });
+        return upstreamResp;
+      }
+
+      const globalManual = decideManualRule(candidates, idx.globalManualAllowed, idx.globalManualBlocked);
+
+      if (globalManual === 'BLOCKED') {
+        const resp = buildNxDomainResponse(query);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: 'Manual'
+        });
+        return resp;
+      }
+
+      if (globalManual === 'ALLOWED') {
+        const upstream = upstreamCache.upstream;
+        const upstreamResp =
+          upstream.transport === 'tcp'
+            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
+            : upstream.transport === 'dot'
+              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
+              : upstream.transport === 'doh'
+                ? await forwardDoh(upstream.dohUrl, msg)
+                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps: extractAnswerIpsFromDnsResponse(upstreamResp)
+        });
+        return upstreamResp;
+      }
+
       // Compute effective policy (base + schedules).
       const now = new Date();
-      const effectiveBlockedCategories = new Set<ContentCategory>(
-        client?.useGlobalCategories === false ? (client?.blockedCategories ?? []) : []
-      );
-      const effectiveActiveApps = new Set<AppService>(client?.useGlobalApps === false ? [] : globalAppsCache.activeApps);
-      const effectiveShadowApps = new Set<AppService>(client?.useGlobalApps === false ? [] : globalAppsCache.shadowApps);
+      const effectiveBlockedCategories = new Set<ContentCategory>();
+      const shouldUseGlobalCategories = exactClient?.useGlobalCategories === false ? false : subnetClient?.useGlobalCategories === false ? false : true;
+      const shouldUseGlobalApps = exactClient?.useGlobalApps === false ? false : subnetClient?.useGlobalApps === false ? false : true;
 
-      if (client?.useGlobalApps === false) {
-        for (const a of client?.blockedApps ?? []) effectiveActiveApps.add(a);
+      if (!shouldUseGlobalCategories) {
+        const base = exactClient?.useGlobalCategories === false ? exactClient : subnetClient;
+        for (const c of base?.blockedCategories ?? []) effectiveBlockedCategories.add(c);
+      }
+
+      const effectiveActiveApps = new Set<AppService>(shouldUseGlobalApps ? globalAppsCache.activeApps : []);
+      const effectiveShadowApps = new Set<AppService>(shouldUseGlobalApps ? globalAppsCache.shadowApps : []);
+
+      if (!shouldUseGlobalApps) {
+        const base = exactClient?.useGlobalApps === false ? exactClient : subnetClient;
+        for (const a of base?.blockedApps ?? []) effectiveActiveApps.add(a);
       }
 
       // Ensure active always wins if both are present.
       for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
       let blockAll = false;
 
-      for (const s of client?.schedules ?? []) {
+      for (const s of [...(subnetClient?.schedules ?? []), ...(exactClient?.schedules ?? [])]) {
         if (!isScheduleActiveNow(s, now)) continue;
         if (s.blockAll) blockAll = true;
         for (const c of s.blockedCategories ?? []) effectiveBlockedCategories.add(c);
@@ -1546,9 +1805,12 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const categoryIds = categoryBlocklistIdsCache.ids;
       const appIds = appBlocklistIdsCache.ids;
 
-      if (client && client.useGlobalSettings === false) {
-        for (const id of client.assignedBlocklists ?? []) {
-          // Per-client overrides should work even when globally disabled.
+      const shouldUseGlobalBlocklists = exactClient?.useGlobalSettings === false ? false : subnetClient?.useGlobalSettings === false ? false : true;
+
+      if (!shouldUseGlobalBlocklists) {
+        const base = exactClient?.useGlobalSettings === false ? exactClient : subnetClient;
+        for (const id of base?.assignedBlocklists ?? []) {
+          // Per-client/subnet overrides should work even when globally disabled.
           const sid = String(id);
           // Category/App lists are managed separately.
           if (categoryIds.has(sid) || appIds.has(sid)) continue;
@@ -1563,7 +1825,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       // Global categories: include enabled category lists only when allowed for this client.
-      if (client?.useGlobalCategories !== false) {
+      if (shouldUseGlobalCategories) {
         for (const id of categoryIds) {
           const st = blocklistsCache.byId.get(id);
           if (st?.enabled) selectedBlocklists.add(id);
