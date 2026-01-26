@@ -130,24 +130,6 @@ Join Code is only available when:
 - Requires Linux + `network_mode: host` + NET_ADMIN/NET_RAW/NET_BROADCAST capabilities.
 - Some unprivileged LXC setups block host networking/capabilities.
 
-#### Proxmox LXC workaround (common)
-
-If you run Sentinel inside a **Proxmox LXC** and keepalived won’t work, it’s usually because the container is **unprivileged** and does not allow the capabilities needed to add/remove the VIP or send VRRP traffic.
-
-Recommended options:
-
-1) **Use a VM instead of an LXC** for the HA nodes.
-   - This is the most reliable approach for `keepalived` + VIP.
-
-2) **If you must use LXC**:
-   - Prefer a **privileged** LXC (unprivileged often blocks what keepalived needs).
-   - In Proxmox UI for the LXC:
-     - Options → Features: enable **Nesting** (required if you run Docker inside the LXC)
-     - Options → Features: enable **Keyctl** (often needed by containerized tooling)
-   - Ensure the LXC is allowed the network-related capabilities that keepalived requires (at minimum the equivalent of **CAP_NET_ADMIN** and **CAP_NET_RAW**).
-
-If your Proxmox security policy prevents granting these privileges, VIP failover inside the LXC is not feasible. In that case, keep Sentinel running without VIP HA (single node), or run keepalived on a VM/host where the required network privileges are available.
-
 ### VIP doesn’t move
 
 - Nodes should be on the same L2/VLAN.
@@ -155,8 +137,33 @@ If your Proxmox security policy prevents granting these privileges, VIP failover
 
 ### Port 53 already in use
 
-- Common on Linux with `systemd-resolved`.
-- Disable the stub resolver or change the host port mapping.
+- Common on Linux with `systemd-resolved` (stub listener binds port 53 on 127.0.0.53).
+
+1) Check what is using port 53:
+
+```bash
+sudo ss -lntup | grep ':53\b' || true
+sudo ss -lnup  | grep ':53\b' || true
+```
+
+2) If it’s `systemd-resolved`, disable the stub listener:
+
+```bash
+sudo sed -i 's/^#\?DNSStubListener=.*/DNSStubListener=no/' /etc/systemd/resolved.conf
+sudo systemctl restart systemd-resolved
+```
+
+On some distros you must also update `/etc/resolv.conf` to stop pointing at `127.0.0.53`:
+
+```bash
+sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+```
+
+3) Restart Sentinel after freeing port 53.
+
+Important note: for “router points to DNS” setups you generally **must** use port **53**. Most routers/clients cannot specify a custom DNS port.
+
+Fallback (testing only): change your compose ports to use a high port (e.g. `1053:53`) — but this is usually **not usable for whole-LAN DNS**.
 
 ## Notes / limitations
 
