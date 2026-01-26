@@ -56,6 +56,28 @@ Options:
 - Change the host mapping (e.g. `1053:53/udp` + `1053:53/tcp`) and point clients to that port.
 - Disable the stub resolver on the host (advanced; depends on distro).
 
+## Public upstreams break after container restart
+
+If the container can resolve local names, but public upstream resolvers stop working after a restart, check the container's `/etc/resolv.conf`.
+In Docker, you will often see `nameserver 127.0.0.11` (Docker's internal resolver), which then forwards to the Docker host/VM DNS.
+
+If your host/VM DNS ultimately points back to Sentinel (common in homelabs/LAN appliance setups), this can create a DNS loop.
+
+Fix (recommended): pin the container's outbound DNS in your compose file:
+
+```yaml
+services:
+  sentinel:
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+```
+
+This does not change the DNS upstream mode you configure in the UI and does not require re-selecting anything after redeploy.
+
+Note: the single-container image also attempts a best-effort bootstrap if Docker DNS (127.0.0.11) cannot resolve public hostnames.
+If you want to control which resolvers are used for bootstrapping, set `BOOTSTRAP_DNS_SERVERS` (space-separated) on the container.
+
 ## LAN access vs WAN exposure
 
 Sentinel-DNS is a DNS blocker, so it must be reachable by all devices in your LAN.
