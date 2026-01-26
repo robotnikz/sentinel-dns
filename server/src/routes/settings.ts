@@ -7,7 +7,6 @@ export async function registerSettingsRoutes(app: FastifyInstance, config: AppCo
   app.get(
     '/api/settings',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 120,
@@ -25,7 +24,6 @@ export async function registerSettingsRoutes(app: FastifyInstance, config: AppCo
   app.put(
     '/api/settings/:key',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,

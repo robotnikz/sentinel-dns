@@ -56,7 +56,6 @@ export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig,
   app.get(
     '/api/dns/settings',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 120,
@@ -75,7 +74,6 @@ export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig,
   app.put(
     '/api/dns/settings',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,

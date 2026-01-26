@@ -11,7 +11,6 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
   app.get(
     '/api/clients',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 120,
@@ -29,7 +28,6 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
   app.put(
     '/api/clients/:id',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,
@@ -96,7 +94,6 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
   app.delete(
     '/api/clients/:id',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,

@@ -8,7 +8,6 @@ export async function registerRulesRoutes(app: FastifyInstance, config: AppConfi
   app.get(
     '/api/rules',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 120,
@@ -39,7 +38,6 @@ export async function registerRulesRoutes(app: FastifyInstance, config: AppConfi
   app.post(
     '/api/rules',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,
@@ -86,7 +84,6 @@ export async function registerRulesRoutes(app: FastifyInstance, config: AppConfi
   app.delete(
     '/api/rules/:id',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,

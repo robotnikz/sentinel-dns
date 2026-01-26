@@ -35,7 +35,6 @@ export async function registerProtectionRoutes(app: FastifyInstance, config: App
   app.get(
     '/api/protection/pause',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 120,
@@ -54,7 +53,6 @@ export async function registerProtectionRoutes(app: FastifyInstance, config: App
   app.put(
     '/api/protection/pause',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,

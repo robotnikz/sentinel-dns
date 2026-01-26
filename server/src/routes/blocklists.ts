@@ -37,7 +37,6 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.get(
     '/api/blocklists',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 120,
@@ -57,7 +56,6 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.post(
     '/api/blocklists',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,
@@ -109,7 +107,6 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.put(
     '/api/blocklists/:id',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,
@@ -175,7 +172,6 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.delete(
     '/api/blocklists/:id',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           max: 60,
@@ -205,7 +201,6 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.post(
     '/api/blocklists/:id/refresh',
     {
-      onRequest: [app.rateLimit()],
       config: {
         rateLimit: {
           // Refresh can be expensive and triggers network IO.
