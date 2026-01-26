@@ -125,12 +125,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
     '/api/ui/status',
     {
       // This endpoint reads the filesystem; keep it cheap to call.
-      config: {
-        rateLimit: {
-          max: 30,
-          timeWindow: '1 minute'
-        }
-      }
+      preHandler: app.rateLimit({ max: 30, timeWindow: '1 minute' })
     },
     async (req, reply) => {
       await requireAdmin(db, req);
