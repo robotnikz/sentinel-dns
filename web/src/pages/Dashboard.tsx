@@ -161,7 +161,7 @@ const Dashboard: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
+  const loadIgnoredSignatures = () => {
     try {
       const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
@@ -171,6 +171,22 @@ const Dashboard: React.FC = () => {
     } catch {
       // ignore
     }
+  };
+
+  useEffect(() => {
+    loadIgnoredSignatures();
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === IGNORED_ANOMALY_KEY) loadIgnoredSignatures();
+    };
+    const onIgnored = () => loadIgnoredSignatures();
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('sentinel:ignored-anomalies', onIgnored as any);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('sentinel:ignored-anomalies', onIgnored as any);
+    };
   }, []);
 
   useEffect(() => {
@@ -363,6 +379,7 @@ const Dashboard: React.FC = () => {
     } catch {
       // ignore
     }
+    window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
 
     setSelectedAnomaly(null);
   };
@@ -596,7 +613,13 @@ const Dashboard: React.FC = () => {
               <h2 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
                 <Zap className="w-4 h-4 text-amber-500" /> Suspicious Activity
               </h2>
-              <span className="text-[10px] font-mono text-zinc-500">HEURISTIC</span>
+              <button
+                onClick={() => openLogsPreset({ tab: 'suspicious', pageSize: 100 })}
+                className="text-[10px] font-mono text-zinc-500 hover:text-zinc-300 border border-[#27272a] px-2 py-1 rounded"
+                title="Open full Suspicious Activity list"
+              >
+                VIEW ALL
+              </button>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto">
               {anomaliesForUi.length > 0 ? (

@@ -25,6 +25,7 @@ interface AnalysisResult {
 }
 
 type QueryLogsPreset = {
+  tab?: 'queries' | 'suspicious';
   searchTerm?: string;
   statusFilter?: string;
   typeFilter?: string;
@@ -197,7 +198,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     [rawQueries, discoveredHostnamesByIp, getClientByIp]
   );
 
-  useEffect(() => {
+  const loadIgnoredSignatures = () => {
     try {
       const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
@@ -207,6 +208,22 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     } catch {
       // ignore
     }
+  };
+
+  useEffect(() => {
+    loadIgnoredSignatures();
+
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === IGNORED_ANOMALY_KEY) loadIgnoredSignatures();
+    };
+    const onIgnored = () => loadIgnoredSignatures();
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('sentinel:ignored-anomalies', onIgnored as any);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('sentinel:ignored-anomalies', onIgnored as any);
+    };
   }, []);
 
   useEffect(() => {
@@ -216,7 +233,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     if (typeof preset.typeFilter === 'string') setTypeFilter(preset.typeFilter);
     if (typeof preset.clientFilter === 'string') setClientFilter(preset.clientFilter);
     if (typeof preset.pageSize === 'number' && Number.isFinite(preset.pageSize) && preset.pageSize > 0) setPageSize(preset.pageSize);
-    setActiveTab('queries');
+    if (preset.tab === 'suspicious') setActiveTab('suspicious');
+    else setActiveTab('queries');
     setPage(1);
     onPresetConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -330,6 +348,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     } catch {
       // ignore
     }
+    window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
     setSelectedAnomaly(null);
   };
 
@@ -373,6 +392,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     } catch {
       // ignore
     }
+    window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
   };
 
   const getRiskBadge = (risk: Anomaly['risk']) => {
