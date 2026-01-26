@@ -8,44 +8,19 @@ type SeedBlocklist = {
   mode: 'ACTIVE' | 'SHADOW';
 };
 
-// A small, pragmatic baseline similar to what users commonly enable in Pi-hole/AdGuard setups.
-// Kept intentionally minimal to avoid surprising breakage.
+// Keep defaults intentionally minimal to avoid surprising breakage.
 const DEFAULT_BLOCKLISTS: SeedBlocklist[] = [
   {
-    name: 'Pi-hole: StevenBlack Unified Hosts',
-    url: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts',
-    enabled: true,
-    mode: 'ACTIVE'
-  },
-  {
-    name: 'AdGuard: DNS Filter',
-    url: 'https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt',
-    enabled: true,
-    mode: 'ACTIVE'
-  },
-  {
-    name: 'AdGuard: Tracking Protection',
-    url: 'https://filters.adtidy.org/extension/chromium/filters/3.txt',
+    name: 'HaGeZi: Multi NORMAL (All-round protection)',
+    url: 'https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/multi.txt',
     enabled: true,
     mode: 'ACTIVE'
   },
 
   // Category lists (disabled by default). Enable per-client or globally.
   {
-    name: 'Category: Pornography (StevenBlack)',
-    url: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts',
-    enabled: false,
-    mode: 'ACTIVE'
-  },
-  {
     name: 'Category: Pornography (HaGeZi NSFW)',
     url: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/nsfw.txt',
-    enabled: false,
-    mode: 'ACTIVE'
-  },
-  {
-    name: 'Category: Gambling (StevenBlack)',
-    url: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts',
     enabled: false,
     mode: 'ACTIVE'
   },
@@ -56,26 +31,8 @@ const DEFAULT_BLOCKLISTS: SeedBlocklist[] = [
     mode: 'ACTIVE'
   },
   {
-    name: 'Category: Social Media (StevenBlack)',
-    url: 'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts',
-    enabled: false,
-    mode: 'ACTIVE'
-  },
-  {
     name: 'Category: Social Media (HaGeZi)',
     url: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt',
-    enabled: false,
-    mode: 'ACTIVE'
-  },
-  {
-    name: 'Category: Piracy (Block List Project)',
-    url: 'https://blocklistproject.github.io/Lists/alt-version/piracy-nl.txt',
-    enabled: false,
-    mode: 'ACTIVE'
-  },
-  {
-    name: 'Category: Piracy (Block List Project - Torrent)',
-    url: 'https://blocklistproject.github.io/Lists/alt-version/torrent-nl.txt',
     enabled: false,
     mode: 'ACTIVE'
   },

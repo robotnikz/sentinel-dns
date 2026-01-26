@@ -168,23 +168,10 @@ const Clients: React.FC = () => {
     });
 
   const CATEGORY_LIST_URLS: Partial<Record<ContentCategory, string[]>> = {
-      adult: [
-          'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts',
-          'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/nsfw.txt'
-      ],
-      gambling: [
-          'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts',
-          'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/gambling.txt'
-      ],
-      social: [
-          'https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts',
-          'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt'
-      ],
-      piracy: [
-          'https://blocklistproject.github.io/Lists/alt-version/piracy-nl.txt',
-          'https://blocklistproject.github.io/Lists/alt-version/torrent-nl.txt',
-          'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt'
-      ],
+      adult: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/nsfw.txt'],
+      gambling: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/gambling.txt'],
+      social: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt'],
+      piracy: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt'],
       dating: ['https://raw.githubusercontent.com/nextdns/services/main/services/tinder']
   };
 
