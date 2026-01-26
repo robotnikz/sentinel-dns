@@ -1,3 +1,8 @@
+## <small>0.3.2 (2026-01-26)</small>
+
+* Merge pull request #29 from robotnikz/fix/dns-rewrites ([5ed2e19](https://github.com/robotnikz/sentinel-dns/commit/5ed2e19)), closes [#29](https://github.com/robotnikz/sentinel-dns/issues/29)
+* fix: support wildcard DNS rewrites ([f8752d1](https://github.com/robotnikz/sentinel-dns/commit/f8752d1))
+
 ## <small>0.3.1 (2026-01-26)</small>
 
 * Merge pull request #28 from robotnikz/fix/doh-http2 ([12ca24a](https://github.com/robotnikz/sentinel-dns/commit/12ca24a)), closes [#28](https://github.com/robotnikz/sentinel-dns/issues/28)
