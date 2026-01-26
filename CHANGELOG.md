@@ -1,3 +1,8 @@
+## <small>0.3.1 (2026-01-26)</small>
+
+* Merge pull request #28 from robotnikz/fix/doh-http2 ([12ca24a](https://github.com/robotnikz/sentinel-dns/commit/12ca24a)), closes [#28](https://github.com/robotnikz/sentinel-dns/issues/28)
+* fix: add HTTP/2 support for DoH upstreams ([16ceec7](https://github.com/robotnikz/sentinel-dns/commit/16ceec7))
+
 ## 0.3.0 (2026-01-26)
 
 * Fix CodeQL alerts + stabilize E2E ([5851e09](https://github.com/robotnikz/sentinel-dns/commit/5851e09))
