@@ -4,6 +4,7 @@ import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { Resolver } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import 'fastify-rate-limit';
 
 export type DiscoverySettings = {
   reverseDns: {
@@ -103,15 +104,28 @@ async function resolvePtrHostname(ip: string, resolverIp: string, timeoutMs: num
 }
 
 export async function registerDiscoveryRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/discovery/settings', async (request, reply) => {
-    await requireAdmin(db, request);
-    const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['discovery_settings']);
-    return { value: normalizeDiscoverySettings(res.rows?.[0]?.value) };
-  });
+  app.get(
+    '/api/discovery/settings',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request, reply) => {
+      await requireAdmin(db, request);
+      const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['discovery_settings']);
+      return { value: normalizeDiscoverySettings(res.rows?.[0]?.value) };
+    }
+  );
 
   app.post(
     '/api/discovery/test-ptr',
     {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -163,6 +177,10 @@ export async function registerDiscoveryRoutes(app: FastifyInstance, config: AppC
   app.put(
     '/api/discovery/settings',
     {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -185,6 +203,12 @@ export async function registerDiscoveryRoutes(app: FastifyInstance, config: AppC
 
   app.get(
     '/api/discovery/clients',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
     async (request: FastifyRequest<{ Querystring: { limit?: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);
 

@@ -669,10 +669,8 @@ const Blocking: React.FC = () => {
                   );
 
                   const categories = Array.from(
-                      new Set(
-                          blockingRules
-                              .map((r: any) => (typeof r?.category === 'string' ? r.category : 'Manual'))
-                              .filter(Boolean)
+                      new Set<string>(
+                          blockingRules.map((r: any) => (typeof r?.category === 'string' ? r.category : 'Manual'))
                       )
                   );
 
@@ -1319,6 +1317,7 @@ const Blocking: React.FC = () => {
                           </div>
                        </div>
                        <button 
+                                  aria-label={`Delete rule ${rule.domain}`}
                           onClick={() => removeRule(rule.id)}
                           className="p-2 text-zinc-600 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
                        >

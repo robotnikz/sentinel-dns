@@ -30,7 +30,7 @@ export async function isAdmin(db: Db, request: FastifyRequest): Promise<boolean>
   const ok = sessions.some((s) => s?.idHashB64 === idHashB64);
   if (ok) {
     // Best-effort: keep lastSeen reasonably up to date.
-    void touchAdminSession(db, idHashB64);
+    void touchAdminSession(db, idHashB64).catch(() => undefined);
   }
   return ok;
 }

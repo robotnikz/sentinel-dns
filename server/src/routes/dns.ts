@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
+import 'fastify-rate-limit';
 
 export type DnsSettings = {
   upstreamMode: 'unbound' | 'forward';
@@ -53,15 +54,29 @@ function normalize(input: any): DnsSettings {
 }
 
 export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/dns/settings', async () => {
-    const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_settings']);
-    const value = res.rows?.[0]?.value;
-    return { value: normalize(value) };
-  });
+  app.get(
+    '/api/dns/settings',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_settings']);
+      const value = res.rows?.[0]?.value;
+      return { value: normalize(value) };
+    }
+  );
 
   app.put(
     '/api/dns/settings',
     {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -83,7 +98,7 @@ export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig,
       }
     },
     async (request: FastifyRequest<{ Body: DnsSettings }>, reply: FastifyReply) => {
-        await requireAdmin(db, request);
+      await requireAdmin(db, request);
 
       const normalized = normalize(request.body);
 

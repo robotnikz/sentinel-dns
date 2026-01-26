@@ -1,6 +1,7 @@
 // UDP DNS wire-format smoke test.
 // Usage:
 //   node scripts/test-dns-udp.cjs <host> <port> <name> [A|AAAA|...]
+//   node scripts/test-dns-udp.cjs <host> <port> <name> [A|AAAA|...] [EXPECTED_RCODE]
 
 const dgram = require('node:dgram');
 const dnsPacket = require('../server/node_modules/dns-packet');
@@ -9,6 +10,7 @@ const host = process.argv[2] || '127.0.0.1';
 const port = Number(process.argv[3] || '53');
 const name = process.argv[4] || 'example.com';
 const qtype = process.argv[5] || 'A';
+const expectedRcode = process.argv[6];
 
 if (!Number.isFinite(port) || port <= 0) {
   console.error('Invalid port:', process.argv[3]);
@@ -37,6 +39,15 @@ socket.once('message', (data) => {
   const dec = dnsPacket.decode(data);
   console.log('rcode', dec.rcode);
   console.log('answers', (dec.answers || []).slice(0, 10));
+
+  if (expectedRcode) {
+    const got = String(dec.rcode || '');
+    const exp = String(expectedRcode);
+    if (got !== exp) {
+      console.error(`Expected rcode ${exp} but got ${got}`);
+      process.exit(1);
+    }
+  }
 });
 
 socket.send(msg, port, host);

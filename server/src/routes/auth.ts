@@ -3,6 +3,7 @@ import type { Db } from '../db.js';
 import { generateSessionId, getAdminCookieName, hashSessionId, isAdmin, requireAdmin } from '../auth.js';
 import { hashPassword, verifyPassword, type PasswordHashRecord } from '../authPassword.js';
 import { addAdminSession, getAuthValue, removeAdminSession, setAdminUser, updateAdminPassword } from '../authStore.js';
+import 'fastify-rate-limit';
 
 const cookieName = getAdminCookieName();
 const cookieOptionsBase = {
@@ -24,20 +25,42 @@ function cookieOptionsFor(request: FastifyRequest) {
 }
 
 export async function registerAuthRoutes(app: FastifyInstance, _config: unknown, db: Db): Promise<void> {
-  app.get('/api/auth/status', async () => {
+  app.get(
+    '/api/auth/status',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async () => {
     const auth = await getAuthValue(db);
     return { configured: !!auth.adminUser };
-  });
+    }
+  );
 
-  app.get('/api/auth/me', async (request: FastifyRequest) => {
+  app.get(
+    '/api/auth/me',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request: FastifyRequest) => {
     const auth = await getAuthValue(db);
     const loggedIn = await isAdmin(db, request);
     return { loggedIn, username: loggedIn ? auth.adminUser?.username : undefined };
-  });
+    }
+  );
 
   app.post(
     '/api/auth/setup',
     {
+      config: {
+        rateLimit: { max: 5, timeWindow: '15 minutes' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -76,6 +99,10 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
   app.post(
     '/api/auth/login',
     {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -118,6 +145,10 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
   app.post(
     '/api/auth/change-password',
     {
+      config: {
+        rateLimit: { max: 5, timeWindow: '15 minutes' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -160,12 +191,21 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
     }
   );
 
-  app.post('/api/auth/logout', async (request: FastifyRequest, reply: FastifyReply) => {
-    const sessionId = (request as any).cookies?.[cookieName] as string | undefined;
-    if (sessionId) {
-      await removeAdminSession(db, hashSessionId(sessionId));
+  app.post(
+    '/api/auth/logout',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const sessionId = (request as any).cookies?.[cookieName] as string | undefined;
+      if (sessionId) {
+        await removeAdminSession(db, hashSessionId(sessionId));
+      }
+      reply.clearCookie(cookieName, { path: '/' });
+      return { ok: true };
     }
-    reply.clearCookie(cookieName, { path: '/' });
-    return { ok: true };
-  });
+  );
 }

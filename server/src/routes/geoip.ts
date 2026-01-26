@@ -9,6 +9,7 @@ import { requireAdmin } from '../auth.js';
 import { getSecret, hasSecret } from '../secretsStore.js';
 import { getGeoIpEditionId, getGeoIpStatus } from '../geoip/geoip.js';
 import { notifyEvent } from '../notifications/notify.js';
+import 'fastify-rate-limit';
 
 type GeoIpUpdateBody = {
   // Optional: allow one-off update without storing the key (still admin-only).
@@ -51,8 +52,16 @@ function buildMaxMindDownloadUrl(editionId: string, licenseKey: string): string 
 }
 
 export async function registerGeoIpRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/geoip/status', async (request) => {
-    await requireAdmin(db, request);
+  app.get(
+    '/api/geoip/status',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request) => {
+      await requireAdmin(db, request);
 
     const geoip = await getGeoIpStatus(config);
     const hasKey = await hasSecret(db, 'maxmind_license_key');
@@ -64,18 +73,23 @@ export async function registerGeoIpRoutes(app: FastifyInstance, config: AppConfi
     const lastError = typeof meta?.lastError === 'string' ? meta.lastError : '';
     const lastEditionId = typeof meta?.lastEditionId === 'string' ? meta.lastEditionId : '';
 
-    return {
-      geoip,
-      editionId: lastEditionId || detectedEditionId || 'Unknown',
-      hasLicenseKey: hasKey,
-      lastUpdatedAt,
-      lastError
-    };
-  });
+      return {
+        geoip,
+        editionId: lastEditionId || detectedEditionId || 'Unknown',
+        hasLicenseKey: hasKey,
+        lastUpdatedAt,
+        lastError
+      };
+    }
+  );
 
   app.post(
     '/api/geoip/update',
     {
+      config: {
+        rateLimit: { max: 5, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',

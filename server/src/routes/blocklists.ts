@@ -4,6 +4,7 @@ import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { notifyEvent } from '../notifications/notify.js';
 import { refreshBlocklist } from '../blocklists/refresh.js';
+import 'fastify-rate-limit';
 
 type BlocklistRow = {
   id: string;
@@ -34,16 +35,30 @@ function resolveEnabledAndMode(body: { enabled?: boolean; mode?: 'ACTIVE' | 'SHA
 
 
 export async function registerBlocklistsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/blocklists', async () => {
-    const res = await db.pool.query(
-      'SELECT id, name, url, enabled, mode, last_updated_at, last_error, last_rule_count, created_at, updated_at FROM blocklists ORDER BY id DESC LIMIT 500'
-    );
-    return { items: res.rows.map((r) => ({ ...r, id: String(r.id) })) as BlocklistRow[] };
-  });
+  app.get(
+    '/api/blocklists',
+    {
+        config: {
+          rateLimit: { max: 120, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit()
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      const res = await db.pool.query(
+        'SELECT id, name, url, enabled, mode, last_updated_at, last_error, last_rule_count, created_at, updated_at FROM blocklists ORDER BY id DESC LIMIT 500'
+      );
+      return { items: res.rows.map((r) => ({ ...r, id: String(r.id) })) as BlocklistRow[] };
+    }
+  );
 
   app.post(
     '/api/blocklists',
     {
+        config: {
+          rateLimit: { max: 60, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -89,6 +104,10 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
   app.put(
     '/api/blocklists/:id',
     {
+        config: {
+          rateLimit: { max: 60, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -147,6 +166,12 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
 
   app.delete(
     '/api/blocklists/:id',
+    {
+        config: {
+          rateLimit: { max: 60, timeWindow: '1 minute' }
+        },
+        preHandler: app.rateLimit()
+    },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);
       const id = Number(request.params.id);
@@ -168,6 +193,16 @@ export async function registerBlocklistsRoutes(app: FastifyInstance, config: App
 
   app.post(
     '/api/blocklists/:id/refresh',
+    {
+      // Refresh can be expensive and triggers network IO.
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: '1 minute'
+        }
+      },
+      preHandler: app.rateLimit()
+    },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       await requireAdmin(db, request);
       const id = Number(request.params.id);

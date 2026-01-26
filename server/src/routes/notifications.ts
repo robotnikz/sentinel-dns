@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
+import 'fastify-rate-limit';
 
 async function insertNotification(db: Db, entry: any): Promise<void> {
   try {
@@ -20,26 +21,48 @@ function normalizeDiscordWebhookUrl(raw: unknown): string {
 }
 
 export async function registerNotificationRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/notifications/feed', async (request) => {
-    await requireAdmin(db, request);
-    const limitRaw = (request.query as any)?.limit;
-    const limit = Math.min(200, Math.max(1, Number.isFinite(Number(limitRaw)) ? Math.floor(Number(limitRaw)) : 50));
-    const res = await db.pool.query(
-      'SELECT id, ts, read, entry FROM notifications ORDER BY ts DESC LIMIT $1',
-      [limit]
-    );
-    return { items: res.rows };
-  });
+  app.get(
+    '/api/notifications/feed',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      const limitRaw = (request.query as any)?.limit;
+      const limit = Math.min(200, Math.max(1, Number.isFinite(Number(limitRaw)) ? Math.floor(Number(limitRaw)) : 50));
+      const res = await db.pool.query(
+        'SELECT id, ts, read, entry FROM notifications ORDER BY ts DESC LIMIT $1',
+        [limit]
+      );
+      return { items: res.rows };
+    }
+  );
 
-  app.get('/api/notifications/feed/unread-count', async (request) => {
-    await requireAdmin(db, request);
-    const res = await db.pool.query('SELECT COUNT(*)::int AS count FROM notifications WHERE read = FALSE');
-    return { count: res.rows?.[0]?.count ?? 0 };
-  });
+  app.get(
+    '/api/notifications/feed/unread-count',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      const res = await db.pool.query('SELECT COUNT(*)::int AS count FROM notifications WHERE read = FALSE');
+      return { count: res.rows?.[0]?.count ?? 0 };
+    }
+  );
 
   app.post(
     '/api/notifications/feed/mark-read',
     {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',
@@ -68,6 +91,10 @@ export async function registerNotificationRoutes(app: FastifyInstance, config: A
   app.post(
     '/api/notifications/discord/test',
     {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         body: {
           type: 'object',

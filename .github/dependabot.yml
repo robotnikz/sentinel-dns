@@ -5,19 +5,29 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    groups:
+      npm:
+        patterns:
+          - "*"
 
   - package-ecosystem: "npm"
     directory: "/server"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    groups:
+      npm:
+        patterns:
+          - "*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
 
   - package-ecosystem: "docker"
     directory: "/docker/single"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10

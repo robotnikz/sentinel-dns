@@ -446,7 +446,10 @@ function isScheduleActiveNow(schedule: Schedule, now: Date): boolean {
   }
 
   const yesterdayKey = (['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const)[(now.getDay() + 6) % 7];
-  return schedule.days.includes(yesterdayKey);
+  if (nowMin < end) {
+    return schedule.days.includes(yesterdayKey);
+  }
+  return false;
 }
 
 function isAppBlockedByPolicy(queryName: string, apps: AppService[]): AppService | null {
@@ -935,10 +938,13 @@ async function forwardDoh(dohUrl: string, msg: Buffer): Promise<Buffer> {
 }
 
 function buildNxDomainResponse(query: any): Buffer {
+  const baseFlags = typeof query?.flags === 'number' ? query.flags : 0;
   const response = {
     type: 'response',
     id: query.id,
-    flags: query.flags,
+    // dns-packet encodes the header RCODE in the low 4 bits of `flags`.
+    // Preserve all existing flag bits/opcode from the query, but overwrite the RCODE.
+    flags: (baseFlags & ~0xf) | 3,
     questions: query.questions,
     answers: [],
     authorities: [],
@@ -949,10 +955,12 @@ function buildNxDomainResponse(query: any): Buffer {
 }
 
 function buildServFailResponse(query: any): Buffer {
+  const baseFlags = typeof query?.flags === 'number' ? query.flags : 0;
   const response = {
     type: 'response',
     id: query.id,
-    flags: query.flags,
+    // Preserve existing flag bits/opcode from the query, but overwrite the RCODE.
+    flags: (baseFlags & ~0xf) | 2,
     questions: query.questions,
     answers: [],
     authorities: [],
@@ -1347,6 +1355,36 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         return resp;
       }
 
+      // Global protection pause: bypass all filtering and allow queries through.
+      // (Rewrites are still handled above; internet-paused remains a hard kill-switch.)
+      if (isProtectionPaused(protectionPause)) {
+        const upstream = upstreamCache.upstream;
+        const upstreamResp =
+          upstream.transport === 'tcp'
+            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
+            : upstream.transport === 'dot'
+              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
+              : upstream.transport === 'doh'
+                ? await forwardDoh(upstream.dohUrl, msg)
+                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+
+        const answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps,
+          protectionPaused: true
+        });
+
+        return upstreamResp;
+      }
+
       // Compute effective policy (base + schedules).
       const now = new Date();
       const effectiveBlockedCategories = new Set<ContentCategory>(
@@ -1409,35 +1447,6 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const shadowApp = isAppBlockedByPolicy(name, Array.from(effectiveShadowApps));
       if (shadowApp) {
         appShadowHit = `ClientPolicy:AppShadow:${shadowApp}`;
-      }
-
-      // Global protection pause: bypass all blocking and allow queries through.
-      if (isProtectionPaused(protectionPause)) {
-        const upstream = upstreamCache.upstream;
-        const upstreamResp =
-          upstream.transport === 'tcp'
-            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-            : upstream.transport === 'dot'
-              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-              : upstream.transport === 'doh'
-                ? await forwardDoh(upstream.dohUrl, msg)
-                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
-
-        const answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
-        await insertQueryLog(db, {
-          id: crypto.randomUUID(),
-          timestamp: new Date().toISOString(),
-          domain: name,
-          client: clientName,
-          clientIp,
-          status: 'PERMITTED',
-          type: qtype,
-          durationMs: Date.now() - start,
-          answerIps,
-          protectionPaused: true
-        });
-
-        return upstreamResp;
       }
 
       // Determine which blocklists are active for this client.
@@ -1710,3 +1719,27 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
   return { close };
 }
+
+export const __testing = {
+  normalizeScheduleMode,
+  parseProtectionPauseSetting,
+  isProtectionPaused,
+  parseGlobalBlockedAppsSetting,
+  parseGlobalShadowAppsSetting,
+  parseHostPort,
+  normalizeName,
+  matchesDomain,
+  extractBlocklistId,
+  formatBlocklistCategory,
+  buildCandidateDomains,
+  decideRuleIndexed,
+  parseTimeToMinutes,
+  isScheduleActiveNow,
+  isAppBlockedByPolicy,
+  findClient,
+  loadRewritesFromSettings,
+  buildLocalAnswerResponse,
+  extractAnswerIpsFromDnsResponse,
+  buildNxDomainResponse,
+  buildServFailResponse
+};
