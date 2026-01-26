@@ -121,36 +121,48 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   const distDir = path.resolve(__dirname, '../../dist');
 
   // Diagnostics: helps debug "white page" reports in production without shell access.
-  app.get('/api/ui/status', async (req, reply) => {
-    await requireAdmin(db, req);
-    const distExists = fs.existsSync(distDir);
-    const indexPath = path.join(distDir, 'index.html');
-    const indexExists = distExists && fs.existsSync(indexPath);
-
-    let assetUrls: string[] = [];
-    if (indexExists) {
-      try {
-        const html = fs.readFileSync(indexPath, 'utf8');
-        const urls = new Set<string>();
-        for (const match of html.matchAll(/\b(?:src|href)="(\/assets\/[^\"]+)"/g)) {
-          if (match[1]) urls.add(String(match[1]));
+  app.get(
+    '/api/ui/status',
+    {
+      config: {
+        rateLimit: {
+          // This endpoint reads the filesystem; keep it cheap to call.
+          max: 30,
+          timeWindow: '1 minute'
         }
-        assetUrls = Array.from(urls).slice(0, 20);
-      } catch {
-        // ignore
       }
-    }
+    },
+    async (req, reply) => {
+      await requireAdmin(db, req);
+      const distExists = fs.existsSync(distDir);
+      const indexPath = path.join(distDir, 'index.html');
+      const indexExists = distExists && fs.existsSync(indexPath);
 
-    // Prevent caching so troubleshooting is accurate.
-    reply.header('cache-control', 'no-store');
-    return {
-      ok: true,
-      distDir,
-      distExists,
-      indexExists,
-      assetUrls
-    };
-  });
+      let assetUrls: string[] = [];
+      if (indexExists) {
+        try {
+          const html = fs.readFileSync(indexPath, 'utf8');
+          const urls = new Set<string>();
+          for (const match of html.matchAll(/\b(?:src|href)="(\/assets\/[^\"]+)"/g)) {
+            if (match[1]) urls.add(String(match[1]));
+          }
+          assetUrls = Array.from(urls).slice(0, 20);
+        } catch {
+          // ignore
+        }
+      }
+
+      // Prevent caching so troubleshooting is accurate.
+      reply.header('cache-control', 'no-store');
+      return {
+        ok: true,
+        distDir,
+        distExists,
+        indexExists,
+        assetUrls
+      };
+    }
+  );
 
   if (enableStatic && fs.existsSync(distDir)) {
     await app.register(fastifyStatic, { root: distDir });

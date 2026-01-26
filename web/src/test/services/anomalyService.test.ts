@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { detectAnomalies } from '../../services/anomalyService';
 import { QueryStatus, type DnsQuery } from '../../types';
 
+let nextId = 0;
+
 function q(partial: Partial<DnsQuery>): DnsQuery {
   return {
-    id: partial.id ?? `q-${Math.random().toString(16).slice(2)}`,
+    id: partial.id ?? `q-${++nextId}`,
     timestamp: partial.timestamp ?? new Date().toISOString(),
     domain: partial.domain ?? 'example.com',
     client: partial.client ?? 'Device',

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,7 +51,7 @@ describe('integration: GeoIP MaxMind update (mocked download)', () => {
     closeApp = built.close;
 
     const username = `it-${Date.now()}`;
-    const password = `it-pass-${Math.random().toString(16).slice(2)}-12345678`;
+    const password = `it-pass-${crypto.randomBytes(8).toString('hex')}-12345678`;
 
     const setup = await app.inject({
       method: 'POST',

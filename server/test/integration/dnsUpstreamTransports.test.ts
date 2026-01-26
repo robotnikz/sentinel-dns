@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import crypto from 'node:crypto';
 import dgram from 'node:dgram';
 import net from 'node:net';
 import http from 'node:http';
@@ -30,7 +31,7 @@ async function pickFreeTcpPort(): Promise<number> {
 async function udpQuery(host: string, port: number, name: string): Promise<any> {
   const msg = dnsPacket.encode({
     type: 'query',
-    id: Math.floor(Math.random() * 65535),
+    id: crypto.randomInt(0, 65536),
     flags: dnsPacket.RECURSION_DESIRED,
     questions: [{ type: 'A', name }]
   } as any);

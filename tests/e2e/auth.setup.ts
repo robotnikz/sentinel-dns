@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { E2E_PASSWORD, E2E_USERNAME } from './_credentials';
 
 test('authenticate and persist storage state', async ({ page }) => {
-  const storageStatePath = path.resolve(process.cwd(), 'tests/e2e/.auth/admin.json');
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
+  const storageStatePath = path.resolve(testDir, '.auth/admin.json');
   await fs.mkdir(path.dirname(storageStatePath), { recursive: true });
 
   await page.goto('/');

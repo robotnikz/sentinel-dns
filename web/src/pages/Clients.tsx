@@ -599,7 +599,7 @@ const Clients: React.FC = () => {
 
   const addNewSchedule = () => {
       if (!selectedClient) return;
-      const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const id = `sched-${Date.now()}-${selectedClient.schedules.length + 1}`;
       const newSchedule = {
           id,
           name: 'New Schedule',

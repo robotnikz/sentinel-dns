@@ -1,4 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const testRootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   testDir: './e2e',
@@ -18,7 +22,7 @@ export default defineConfig({
     {
       name: 'chromium',
       dependencies: ['setup'],
-      use: { ...devices['Desktop Chrome'], storageState: './e2e/.auth/admin.json' }
+      use: { ...devices['Desktop Chrome'], storageState: path.resolve(testRootDir, 'e2e/.auth/admin.json') }
     }
   ]
 });

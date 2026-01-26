@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import dgram from 'node:dgram';
 import { createRequire } from 'node:module';
 
@@ -29,7 +30,7 @@ const dnsPacket = require('../server/node_modules/dns-packet');
 async function dnsQueryUdp({ host, port, name, qtype = 'A', timeoutMs = 4000 }) {
   const msg = dnsPacket.encode({
     type: 'query',
-    id: Math.floor(Math.random() * 65535),
+    id: crypto.randomInt(0, 65536),
     flags: dnsPacket.RECURSION_DESIRED,
     questions: [{ type: qtype, name }]
   });
@@ -250,7 +251,7 @@ async function main() {
   if (args.assertBlocking) {
     const baseUrl = `http://${args.host}:${args.httpPort}`;
     const username = `smoke-${Date.now()}`;
-    const password = `smoke-pass-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+    const password = `smoke-pass-${crypto.randomBytes(16).toString('hex')}`;
 
     // First run in an isolated project should always be unconfigured, but handle both.
     const statusRes = await fetch(`${baseUrl}/api/auth/status`).catch(() => null);

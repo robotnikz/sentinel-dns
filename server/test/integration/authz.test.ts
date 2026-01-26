@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import crypto from 'node:crypto';
 import { extractSessionCookie, hasDocker, startPostgresContainer, startTestApp } from './_harness.js';
 
 describe('integration: authz gates', () => {
@@ -92,7 +93,7 @@ describe('integration: authz gates', () => {
     if (!dockerOk) return;
 
     const username = `it-${Date.now()}`;
-    const password = `it-pass-${Math.random().toString(16).slice(2)}-12345678`;
+    const password = `it-pass-${crypto.randomBytes(8).toString('hex')}-12345678`;
 
     const setup = await app.inject({
       method: 'POST',

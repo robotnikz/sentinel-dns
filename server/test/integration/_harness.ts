@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { loadConfig } from '../../src/config.js';
 
@@ -19,7 +20,7 @@ export async function hasDocker(): Promise<boolean> {
 }
 
 function randomPassword(): string {
-  return `pw-${Math.random().toString(16).slice(2)}-${Date.now()}`;
+  return `pw-${crypto.randomBytes(16).toString('hex')}-${Date.now()}`;
 }
 
 async function waitForPostgres(url: string, timeoutMs = 60_000): Promise<void> {
@@ -49,7 +50,7 @@ export type PostgresContainer = {
 };
 
 export async function startPostgresContainer(): Promise<PostgresContainer> {
-  const containerName = `sentinel-it-pg-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const containerName = `sentinel-it-pg-${Date.now()}-${crypto.randomUUID()}`;
   const password = randomPassword();
 
   // Start Postgres on an ephemeral host port (127.0.0.1 only).
