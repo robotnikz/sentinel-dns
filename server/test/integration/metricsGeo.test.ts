@@ -57,6 +57,13 @@ describe('integration: metrics + geo routes', () => {
       mkEntry({ domain: 'blocked-noip.test', status: 'BLOCKED', answerIps: [], type: 'A' })
     ]);
 
+    // Seed a couple of well-known upstream-style domains that may appear due to DoH/DoT host resolution.
+    await pool.query('INSERT INTO query_logs(entry) VALUES ($1), ($2), ($3)', [
+      mkEntry({ domain: 'security.cloudflare-dns.com', status: 'PERMITTED', clientIp: '192.168.1.10' }),
+      mkEntry({ domain: 'cloudflare-dns.com', status: 'PERMITTED', clientIp: '192.168.1.10' }),
+      mkEntry({ domain: 'ok.test', status: 'PERMITTED', clientIp: '192.168.1.10' })
+    ]);
+
     // Geo: successful lookup with no IP answers but non-A type
     await pool.query('INSERT INTO query_logs(entry) VALUES ($1)', [
       mkEntry({ domain: 'https-record.test', status: 'PERMITTED', answerIps: [], type: 'HTTPS' })
@@ -110,7 +117,7 @@ describe('integration: metrics + geo routes', () => {
   it('GET /api/metrics/top-domains can exclude configured upstream domains', async () => {
     if (!dockerOk) return;
 
-    // Pretend our upstream resolver is "allowed.test".
+    // Pretend our upstream resolver is a subdomain; resolution can also touch its parent/CNAME target.
     await pool?.query(
       `INSERT INTO settings(key, value) VALUES ($1, $2)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
@@ -119,9 +126,9 @@ describe('integration: metrics + geo routes', () => {
         {
           upstreamMode: 'forward',
           forward: {
-            transport: 'udp',
-            host: 'allowed.test',
-            port: 53
+            transport: 'dot',
+            host: 'security.cloudflare-dns.com',
+            port: 853
           }
         }
       ]
@@ -136,7 +143,9 @@ describe('integration: metrics + geo routes', () => {
 
     const topItems = Array.isArray(top.json()?.items) ? top.json().items : [];
     expect(topItems.length).toBeGreaterThan(0);
-    expect(topItems.some((r: any) => r.domain === 'allowed.test')).toBe(false);
+    expect(topItems.some((r: any) => r.domain === 'security.cloudflare-dns.com')).toBe(false);
+    expect(topItems.some((r: any) => r.domain === 'cloudflare-dns.com')).toBe(false);
+    expect(topItems.some((r: any) => r.domain === 'ok.test')).toBe(true);
   });
 
   it('GET /api/metrics/clients and client-detail return expected shapes', async () => {

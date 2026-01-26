@@ -49,6 +49,51 @@ function extractHostFromDohUrl(raw: string): string | null {
   }
 }
 
+function normalizeDomainCandidate(raw: unknown): string {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s) return '';
+
+  // Strip trailing dot (FQDN form)
+  const noDot = s.endsWith('.') ? s.slice(0, -1) : s;
+
+  // If someone passed host:port as host, strip a trailing :<digits> port.
+  // Avoid touching IPv6 literals.
+  const lastColon = noDot.lastIndexOf(':');
+  if (lastColon > -1 && noDot.indexOf(':') === lastColon) {
+    const maybePort = noDot.slice(lastColon + 1);
+    if (/^\d{1,5}$/.test(maybePort)) return noDot.slice(0, lastColon);
+  }
+
+  return noDot;
+}
+
+function labelCount(domain: string): number {
+  return domain.split('.').filter(Boolean).length;
+}
+
+function isUpstreamRelatedDomain(domainRaw: string, upstreamDomains: ReadonlyArray<string>): boolean {
+  const d = normalizeDomainCandidate(domainRaw);
+  if (!d) return false;
+
+  // Always allow single-label tokens through.
+  const dLabels = labelCount(d);
+
+  for (const upstream of upstreamDomains) {
+    const u = normalizeDomainCandidate(upstream);
+    if (!u) continue;
+
+    if (d === u) return true;
+    if (d.endsWith(`.${u}`)) return true; // subdomain of upstream
+
+    // If upstream is a subdomain (e.g. security.cloudflare-dns.com), resolution can also query
+    // its CNAME targets / parent domains (e.g. cloudflare-dns.com). Hide those too.
+    const uLabels = labelCount(u);
+    if (dLabels >= 2 && uLabels >= 2 && u.endsWith(`.${d}`)) return true;
+  }
+
+  return false;
+}
+
 async function getUpstreamDomainsToExclude(db: Db): Promise<Set<string>> {
   const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_settings']);
   const value = res.rows?.[0]?.value;
@@ -70,11 +115,14 @@ async function getUpstreamDomainsToExclude(db: Db): Promise<Set<string>> {
   if (transport === 'doh') {
     const dohUrl = typeof forward.dohUrl === 'string' ? forward.dohUrl.trim() : '';
     const host = dohUrl ? extractHostFromDohUrl(dohUrl) : null;
-    if (host) out.add(host);
+    if (host) {
+      const normalized = normalizeDomainCandidate(host);
+      if (normalized && /[a-z]/i.test(normalized) && normalized.includes('.')) out.add(normalized);
+    }
     return out;
   }
 
-  const host = typeof forward.host === 'string' ? forward.host.trim().toLowerCase() : '';
+  const host = normalizeDomainCandidate(typeof forward.host === 'string' ? forward.host : '');
   // host might be an IP; we only exclude DNS-like hostnames.
   if (host && /[a-z]/i.test(host) && host.includes('.')) out.add(host);
   return out;
@@ -297,6 +345,7 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
       const excludeUpstreams = parseBool(request.query.excludeUpstreams);
 
       const upstreamDomains = excludeUpstreams ? await getUpstreamDomainsToExclude(db) : new Set<string>();
+      const upstreamDomainList = Array.from(upstreamDomains);
 
       const queryLimit = upstreamDomains.size > 0 ? Math.min(100, Math.max(limit, limit * 3)) : limit;
 
@@ -319,9 +368,8 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
           .filter((r) => typeof r.domain === 'string' && r.domain.length > 0)
           .map((r) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }))
           .filter((r) => {
-            if (upstreamDomains.size === 0) return true;
-            const d = r.domain.trim().toLowerCase();
-            return d && !upstreamDomains.has(d);
+            if (upstreamDomainList.length === 0) return true;
+            return !isUpstreamRelatedDomain(r.domain, upstreamDomainList);
           })
           .slice(0, limit)
       };
