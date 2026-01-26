@@ -5,7 +5,7 @@ services:
     # - binds to high ports to avoid requiring privileged port 53
     # - uses a separate named volume so it does not touch your real data
     build:
-      context: .
+      context: ../..
       dockerfile: docker/single/Dockerfile
     image: sentinel-dns-smoke:local
     ports:

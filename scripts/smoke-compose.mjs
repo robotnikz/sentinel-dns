@@ -141,7 +141,7 @@ async function waitForHealth(url, { timeoutMs, intervalMs } = {}) {
 
 function parseArgs(argv) {
   const args = {
-    composeFile: 'docker-compose.yml',
+    composeFile: 'deploy/compose/docker-compose.yml',
     project: '',
     projectPrefix: 'sentinel-smoke',
     host: '127.0.0.1',
@@ -171,7 +171,7 @@ function parseArgs(argv) {
       console.log(`Usage: node scripts/smoke-compose.mjs [options]
 
 Options:
-  --compose-file <path>   Compose file (default: docker-compose.yml)
+      --compose-file <path>   Compose file (default: deploy/compose/docker-compose.yml)
   --project <name>        Compose project name (isolates volumes/network)
   --project-prefix <pfx>  Project prefix when auto-generating a name (default: sentinel-smoke)
   --host <ip>             Host to test against (default: 127.0.0.1)

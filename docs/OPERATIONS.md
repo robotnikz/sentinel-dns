@@ -7,7 +7,7 @@ It intentionally does not cover local development (see `docs/DEVELOPMENT.md`).
 
 Recommended approach:
 
-- Pin a version tag in your `docker-compose.yml` (e.g. `ghcr.io/robotnikz/sentinel-dns:0.1.1`).
+- Pin a version tag in your compose file (e.g. `deploy/compose/docker-compose.yml`: `ghcr.io/robotnikz/sentinel-dns:0.1.1`).
 - Upgrade by changing the tag and restarting the container.
 - Roll back by restoring the previous tag.
 
@@ -15,7 +15,7 @@ Commands:
 
 ```bash
 docker compose pull
-docker compose up -d
+docker compose -f deploy/compose/docker-compose.yml up -d
 ```
 
 ## Backups
@@ -113,7 +113,7 @@ npm run smoke:compose
 
 Notes:
 
-- By default this uses `docker-compose.smoke.yml` (local build) and high ports (`18080` for HTTP, `1053` for DNS) to avoid requiring privileged port bindings.
+- By default this uses `deploy/compose/docker-compose.smoke.yml` (local build) and high ports (`18080` for HTTP, `1053` for DNS) to avoid requiring privileged port bindings.
 - It runs `docker compose up -d --build`, waits for `/api/health`, runs a DNS UDP query against `127.0.0.1:1053`.
 - By default it also asserts blocking works by setting a temporary manual BLOCKED rule via the API and verifying DNS returns `NXDOMAIN` for that domain.
 - It runs in an isolated Compose project name and removes its volumes on teardown (does not touch your regular `sentinel-data` volume).

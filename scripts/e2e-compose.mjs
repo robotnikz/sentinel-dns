@@ -40,7 +40,7 @@ async function waitForHealth(url, { timeoutMs = 90_000, intervalMs = 1_000 } = {
 
 function parseArgs(argv) {
   const args = {
-    composeFile: 'docker-compose.smoke.yml',
+    composeFile: 'deploy/compose/docker-compose.smoke.yml',
     projectPrefix: 'sentinel-e2e',
     project: '',
     httpPort: 18080,
@@ -60,7 +60,7 @@ function parseArgs(argv) {
       console.log(`Usage: node scripts/e2e-compose.mjs [options]
 
 Options:
-  --compose-file <path>   Compose file to run (default: docker-compose.smoke.yml)
+      --compose-file <path>   Compose file to run (default: deploy/compose/docker-compose.smoke.yml)
   --project <name>        Compose project name
   --project-prefix <pfx>  Prefix for auto project name (default: sentinel-e2e)
   --http-port <port>      Mapped HTTP port (default: 18080)
@@ -105,7 +105,7 @@ async function main() {
     BASE_URL: baseUrl
   };
 
-  const pwArgs = ['playwright', 'test'];
+  const pwArgs = ['playwright', 'test', '-c', 'tests/playwright.config.ts'];
   if (args.headed) pwArgs.push('--headed');
 
   await run(npxCmd, pwArgs, { cwd, env });

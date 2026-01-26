@@ -1,5 +1,5 @@
 ﻿<div align="center">
-<img src="public/sentinel.svg" width="96" height="96" alt="Sentinel-DNS" />
+<img src="web/public/sentinel.svg" width="96" height="96" alt="Sentinel-DNS" />
 
 <h1>Sentinel-DNS</h1>
 
@@ -96,7 +96,7 @@ Sentinel-DNS is shipped as a Docker image. You can run it on a Raspberry Pi, NAS
 > [!TIP]
 > For production, pin a version tag (e.g. `ghcr.io/robotnikz/sentinel-dns:0.1.1`) so upgrades/rollbacks are explicit.
 
-Use the included `docker-compose.yml` in this repository (or create your own):
+Use the included compose file at `deploy/compose/docker-compose.yml` (or create your own):
 
 ```yaml
 services:
@@ -138,7 +138,7 @@ volumes:
 Run it:
 
 ```bash
-docker compose up -d
+docker compose -f deploy/compose/docker-compose.yml up -d
 ```
 
 > [!IMPORTANT]
