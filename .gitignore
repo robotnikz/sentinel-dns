@@ -29,10 +29,20 @@ server/dist
 coverage
 .vite
 .cache
+*.tsbuildinfo
+.eslintcache
+
+# Tooling caches
+.turbo
+.parcel-cache
 
 # Playwright artifacts
 playwright-report
 test-results
+
+# Playwright auth storage state (contains session cookies)
+tests/e2e/.auth/
+tests/e2e/**/.auth/
 
 # Local scratch / auth cookies
 .tmp_*

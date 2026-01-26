@@ -1,0 +1,19 @@
+services:
+  sentinel:
+    # Smoke-test profile:
+    # - uses a locally built image (so it tests the current workspace code)
+    # - binds to high ports to avoid requiring privileged port 53
+    # - uses a separate named volume so it does not touch your real data
+    build:
+      context: .
+      dockerfile: docker/single/Dockerfile
+    image: sentinel-dns-smoke:local
+    ports:
+      - "1053:53/udp"
+      - "1053:53/tcp"
+      - "18080:8080"
+    volumes:
+      - sentinel-smoke-data:/data
+
+volumes:
+  sentinel-smoke-data:
