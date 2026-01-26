@@ -1,3 +1,8 @@
+## <small>0.4.2 (2026-01-26)</small>
+
+* Merge pull request #36 from robotnikz/fix/top-domains-upstreams ([ec33686](https://github.com/robotnikz/sentinel-dns/commit/ec33686)), closes [#36](https://github.com/robotnikz/sentinel-dns/issues/36)
+* fix(metrics): hide all configured upstream domains ([6b67650](https://github.com/robotnikz/sentinel-dns/commit/6b67650))
+
 ## <small>0.4.1 (2026-01-26)</small>
 
 * Merge pull request #35 from robotnikz/fix/docker-dns ([8912574](https://github.com/robotnikz/sentinel-dns/commit/8912574)), closes [#35](https://github.com/robotnikz/sentinel-dns/issues/35)
