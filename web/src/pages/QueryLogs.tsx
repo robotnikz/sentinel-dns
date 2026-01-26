@@ -48,6 +48,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
   const [pageSize, setPageSize] = useState<number>(100);
   const [page, setPage] = useState<number>(1);
+  const [liveMode, setLiveMode] = useState(false);
 
   const [rawQueries, setRawQueries] = useState<DnsQuery[]>([]);
   const [discoveredHostnamesByIp, setDiscoveredHostnamesByIp] = useState<Record<string, string>>({});
@@ -96,49 +97,59 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const [newClientName, setNewClientName] = useState('');
   const [newClientType, setNewClientType] = useState('smartphone');
 
+  const loadQueryLogs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/query-logs?limit=500');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const items = Array.isArray(data?.items) ? data.items : [];
+      const mapped: DnsQuery[] = items
+        .map((row: any) => row as Partial<DnsQuery>)
+        .filter((q: any) => q && typeof q.id === 'string' && typeof q.domain === 'string')
+        .map((q: any) => ({
+          id: String(q.id),
+          timestamp: typeof q.timestamp === 'string' ? q.timestamp : new Date().toISOString(),
+          domain: String(q.domain),
+          client: typeof q.client === 'string' ? q.client : 'Unknown',
+          clientIp: typeof q.clientIp === 'string' ? q.clientIp : '',
+          status:
+            q.status === QueryStatus.BLOCKED ||
+            q.status === QueryStatus.PERMITTED ||
+            q.status === QueryStatus.SHADOW_BLOCKED ||
+            q.status === QueryStatus.CACHED
+              ? q.status
+              : QueryStatus.PERMITTED,
+          type: typeof q.type === 'string' ? q.type : 'A',
+          durationMs: typeof q.durationMs === 'number' ? q.durationMs : 0,
+          blocklistId: typeof q.blocklistId === 'string' ? q.blocklistId : undefined
+        }));
+
+      setRawQueries(mapped);
+    } catch {
+      // Keep empty state if backend not reachable.
+      setRawQueries([]);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
-    fetch('/api/query-logs?limit=500')
-      .then(async (r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(data => {
-        if (cancelled) return;
-        const items = Array.isArray(data?.items) ? data.items : [];
-        const mapped: DnsQuery[] = items
-          .map((row: any) => row as Partial<DnsQuery>)
-          .filter((q: any) => q && typeof q.id === 'string' && typeof q.domain === 'string')
-          .map((q: any) => ({
-            id: String(q.id),
-            timestamp: typeof q.timestamp === 'string' ? q.timestamp : new Date().toISOString(),
-            domain: String(q.domain),
-            client: typeof q.client === 'string' ? q.client : 'Unknown',
-            clientIp: typeof q.clientIp === 'string' ? q.clientIp : '',
-            status:
-              q.status === QueryStatus.BLOCKED ||
-              q.status === QueryStatus.PERMITTED ||
-              q.status === QueryStatus.SHADOW_BLOCKED ||
-              q.status === QueryStatus.CACHED
-                ? q.status
-                : QueryStatus.PERMITTED,
-            type: typeof q.type === 'string' ? q.type : 'A',
-            durationMs: typeof q.durationMs === 'number' ? q.durationMs : 0,
-            blocklistId: typeof q.blocklistId === 'string' ? q.blocklistId : undefined
-          }));
+    const load = async () => {
+      if (cancelled) return;
+      await loadQueryLogs();
+    };
 
-        setRawQueries(mapped);
-      })
-      .catch(() => {
-        // Keep empty state if backend not reachable.
-        if (!cancelled) setRawQueries([]);
-      });
-
-    return () => {
+    void load();
+    if (!liveMode) return () => {
       cancelled = true;
     };
-  }, []);
+
+    const t = window.setInterval(load, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [liveMode, loadQueryLogs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -540,6 +551,14 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     setPage(1);
   }, [searchTerm, statusFilter, typeFilter, clientFilter, pageSize]);
 
+  const clearFilters = () => {
+    setSearchTerm('');
+    setStatusFilter('ALL');
+    setTypeFilter('ALL');
+    setClientFilter('ALL');
+    setPageSize(100);
+  };
+
   const pageCount = useMemo(() => {
     return Math.max(1, Math.ceil(filteredQueries.length / Math.max(1, pageSize)));
   }, [filteredQueries.length, pageSize]);
@@ -641,6 +660,26 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
               onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
+
+            <button
+              onClick={clearFilters}
+              className="px-3 py-1.5 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]"
+              title="Clear all filters"
+            >
+              Clear Filters
+            </button>
+
+            <button
+              onClick={() => setLiveMode((v) => !v)}
+              className={`px-3 py-1.5 rounded text-xs font-bold border ${
+                liveMode
+                  ? 'bg-emerald-950/30 border-emerald-800 text-emerald-400'
+                  : 'bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]'
+              }`}
+              title={liveMode ? 'Live updates enabled' : 'Enable live updates'}
+            >
+              {liveMode ? 'Live: On' : 'Live: Off'}
+            </button>
           </>
           ) : (
             <>

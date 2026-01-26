@@ -149,7 +149,7 @@ function MenuSelect<T extends string | number>(props: {
 
 const NetworkMap: React.FC = () => {
    const [windowHours, setWindowHours] = useState<number>(24);
-   const [viewMode, setViewMode] = useState<'graph' | 'table'>('graph');
+   const [viewMode, setViewMode] = useState<'graph' | 'table'>('table');
    const [sortBy, setSortBy] = useState<'queries' | 'blockedPct' | 'lastSeen'>('queries');
    const [search, setSearch] = useState('');
    const [loading, setLoading] = useState(true);
@@ -385,9 +385,7 @@ const NetworkMap: React.FC = () => {
 
    const goToLogs = () => {
       if (!selectedClient) return;
-      const preset: any = isLikelyIp(selectedClient)
-         ? { clientFilter: selectedClient, pageSize: 100 }
-         : { searchTerm: selectedClient, pageSize: 100 };
+      const preset: any = { clientFilter: selectedClient, pageSize: 100 };
       window.dispatchEvent(new CustomEvent('sentinel:navigate', { detail: { page: 'logs', logsPreset: preset } }));
    };
 
@@ -421,7 +419,7 @@ const NetworkMap: React.FC = () => {
                   </div>
 
                   <div className="flex gap-1 border-b border-[#27272a]">
-                     {[{ id: 'graph', label: 'Graph', icon: Network }, { id: 'table', label: 'Table', icon: Table2 }].map((t) => (
+                     {[{ id: 'table', label: 'Table', icon: Table2 }, { id: 'graph', label: 'Graph', icon: Network }].map((t) => (
                         <button
                            key={t.id}
                            onClick={() => setViewMode(t.id as any)}
