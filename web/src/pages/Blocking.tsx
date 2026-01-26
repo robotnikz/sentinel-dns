@@ -172,6 +172,19 @@ const Blocking: React.FC = () => {
         [blocklists]
     );
 
+    const categoryGroups = useMemo(() => {
+        const map = new Map<string, Blocklist[]>();
+        for (const list of categoryLists) {
+            const key = displayCategoryName(list.name);
+            const cur = map.get(key) ?? [];
+            cur.push(list);
+            map.set(key, cur);
+        }
+        return Array.from(map.entries())
+            .map(([name, lists]) => ({ name, lists }))
+            .sort((a, b) => a.name.localeCompare(b.name, 'de', { sensitivity: 'base' }));
+    }, [categoryLists]);
+
     const appLists = useMemo(
         () => blocklists.filter((b) => isAppBlocklist(b)),
         [blocklists]
@@ -190,6 +203,29 @@ const Blocking: React.FC = () => {
         const hasSelectedApps = (globalBlockedApps.length + globalShadowApps.length) > 0;
         return hasEnabledGlobalLists || hasEnabledCategories || hasSelectedApps;
     }, [blocklistsOnly, categoryLists, globalBlockedApps, globalShadowApps]);
+
+    const groupModeFor = (lists: Blocklist[]): BlocklistMode => {
+        const modes = new Set(lists.map((l) => l.mode));
+        if (modes.size === 1) return lists[0].mode;
+        if (modes.has('ACTIVE')) return 'ACTIVE';
+        if (modes.has('SHADOW')) return 'SHADOW';
+        return 'DISABLED';
+    };
+
+    const handleCategoryGroupModeChange = (ids: string[], mode: BlocklistMode) => {
+        setBlocklists((prev) => prev.map((list) => (ids.includes(list.id) ? { ...list, mode } : list)));
+
+        void (async () => {
+            try {
+                await Promise.all(ids.map((id) => updateBlocklistMode(id, mode)));
+                setGlobalCategoriesMsg('Saved');
+            } catch (e: any) {
+                setBlocklistsError(String(e?.message || 'Failed to update blocklist.'));
+                setGlobalCategoriesMsg(String(e?.message || 'Failed to save.'));
+                loadBlocklists();
+            }
+        })();
+    };
 
     const updateListsTitle = useMemo(() => {
         return !canUpdateLists
@@ -954,7 +990,7 @@ const Blocking: React.FC = () => {
                             <div className="text-xs text-zinc-500 font-mono whitespace-nowrap">Total Rules: <span className="text-white font-bold ml-1">{totalCategoryRules.toLocaleString()}</span></div>
                             <div className="flex items-center gap-4 whitespace-nowrap">
                                 <div className="text-xs text-zinc-500">
-                                    Enabled categories: <span className="text-zinc-200 font-mono">{categoryLists.filter((b) => b.mode !== 'DISABLED').length}</span>
+                                    Enabled categories: <span className="text-zinc-200 font-mono">{categoryGroups.filter((g) => g.lists.some((b) => b.mode !== 'DISABLED')).length}</span>
                                     {globalCategoriesMsg ? (
                                         <span
                                             className={`ml-2 inline-flex items-center px-2 py-0.5 rounded border text-[11px] font-bold tracking-tight transition-opacity duration-500 ${
@@ -990,10 +1026,24 @@ const Blocking: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-[#27272a]">
-                                {categoryLists.map((list) => (
-                                    <tr key={list.id} className="hover:bg-[#18181b] transition-colors">
+                                {categoryGroups.map((group) => {
+                                    const ids = group.lists.map((l) => l.id);
+                                    const groupMode = groupModeFor(group.lists);
+                                    const updatedTimestamps = group.lists
+                                        .map((l) => (typeof l.lastUpdatedAt === 'string' ? Date.parse(l.lastUpdatedAt) : NaN))
+                                        .filter((t) => Number.isFinite(t));
+                                    const updated = updatedTimestamps.length
+                                        ? new Date(Math.max(...updatedTimestamps)).toLocaleString()
+                                        : '—';
+                                    const hasRules = group.lists.some((l) => !!l.lastUpdatedAt);
+                                    const ruleCount = hasRules
+                                        ? group.lists.reduce((sum, l) => sum + (Number.isFinite(l.ruleCount) ? l.ruleCount : 0), 0)
+                                        : null;
+
+                                    return (
+                                    <tr key={group.name} className="hover:bg-[#18181b] transition-colors">
                                         <td className="p-4">
-                                            <div className="font-bold text-zinc-200 text-sm">{displayCategoryName(list.name)}</div>
+                                            <div className="font-bold text-zinc-200 text-sm">{group.name}</div>
                                         </td>
                                         <td className="p-4">
                                             <div className="flex bg-[#09090b] rounded p-1 border border-[#27272a] w-fit relative z-10 pointer-events-auto">
@@ -1001,9 +1051,9 @@ const Blocking: React.FC = () => {
                                                     type="button"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleBlocklistModeChange(list.id, 'ACTIVE', 'categories');
+                                                        handleCategoryGroupModeChange(ids, 'ACTIVE');
                                                     }}
-                                                    className={`relative z-10 pointer-events-auto px-3 py-1 rounded text-[9px] font-bold transition-all ${list.mode === 'ACTIVE' ? 'bg-emerald-600 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                                    className={`relative z-10 pointer-events-auto px-3 py-1 rounded text-[9px] font-bold transition-all ${groupMode === 'ACTIVE' ? 'bg-emerald-600 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
                                                 >
                                                     ACTIVE
                                                 </button>
@@ -1011,9 +1061,9 @@ const Blocking: React.FC = () => {
                                                     type="button"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleBlocklistModeChange(list.id, 'SHADOW', 'categories');
+                                                        handleCategoryGroupModeChange(ids, 'SHADOW');
                                                     }}
-                                                    className={`relative z-10 pointer-events-auto px-3 py-1 rounded text-[9px] font-bold transition-all ${list.mode === 'SHADOW' ? 'bg-amber-600 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                                    className={`relative z-10 pointer-events-auto px-3 py-1 rounded text-[9px] font-bold transition-all ${groupMode === 'SHADOW' ? 'bg-amber-600 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
                                                     title="Log only, do not block. Useful for testing new lists."
                                                 >
                                                     SHADOW
@@ -1022,28 +1072,28 @@ const Blocking: React.FC = () => {
                                                     type="button"
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleBlocklistModeChange(list.id, 'DISABLED', 'categories');
+                                                        handleCategoryGroupModeChange(ids, 'DISABLED');
                                                     }}
-                                                    className={`relative z-10 pointer-events-auto px-3 py-1 rounded text-[9px] font-bold transition-all ${list.mode === 'DISABLED' ? 'bg-zinc-700 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                                    className={`relative z-10 pointer-events-auto px-3 py-1 rounded text-[9px] font-bold transition-all ${groupMode === 'DISABLED' ? 'bg-zinc-700 text-white shadow' : 'text-zinc-500 hover:text-zinc-300'}`}
                                                 >
                                                     OFF
                                                 </button>
                                             </div>
-                                            {list.mode === 'SHADOW' && (
+                                            {groupMode === 'SHADOW' && (
                                                 <div className="mt-1 text-[9px] text-amber-500 flex items-center gap-1">
                                                     <Eye className="w-3 h-3" /> Silent Monitoring
                                                 </div>
                                             )}
                                         </td>
-                                        <td className="p-4 text-xs text-zinc-300 font-mono">{list.lastUpdatedAt ? list.ruleCount.toLocaleString() : '—'}</td>
-                                        <td className="p-4 text-xs text-zinc-500">{list.lastUpdated}</td>
+                                        <td className="p-4 text-xs text-zinc-300 font-mono">{ruleCount != null ? ruleCount.toLocaleString() : '—'}</td>
+                                        <td className="p-4 text-xs text-zinc-500">{updated}</td>
                                         <td className="p-4 text-right">
                                             <button
                                                 type="button"
                                                 onClick={() => {
                                                     void (async () => {
                                                         try {
-                                                            await refreshBlocklist(list.id);
+                                                            await Promise.all(ids.map((id) => refreshBlocklist(id)));
                                                             loadBlocklists();
                                                         } catch {
                                                             setBlocklistsError('Failed to refresh category list.');
@@ -1058,7 +1108,8 @@ const Blocking: React.FC = () => {
                                             </button>
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -1093,7 +1144,7 @@ const Blocking: React.FC = () => {
                             <div className="text-xs text-zinc-200 font-bold mb-1">Global App Blocking</div>
                             <div className="text-xs text-zinc-400 leading-relaxed">
                                 Settings here apply globally. If a client has per-client settings, those take precedence.
-                                App blocks are evaluated independently from normal Blocklists.
+                                App blocks are evaluated independently from normal Blocklists. Lists are sourced from NextDNS Services and coverage may vary.
                             </div>
                         </div>
 
