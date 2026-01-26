@@ -1,3 +1,14 @@
+## <small>0.3.5 (2026-01-26)</small>
+
+* Merge pull request #32 from robotnikz/fix/misc-fixes-2 ([480631b](https://github.com/robotnikz/sentinel-dns/commit/480631b)), closes [#32](https://github.com/robotnikz/sentinel-dns/issues/32)
+* fix: add client policy edit and delete ([bd44d78](https://github.com/robotnikz/sentinel-dns/commit/bd44d78))
+* fix: add traffic analysis time picker ([2d86fb0](https://github.com/robotnikz/sentinel-dns/commit/2d86fb0))
+* fix: address frontend typecheck errors ([4aa7e64](https://github.com/robotnikz/sentinel-dns/commit/4aa7e64))
+* fix: dedupe category rows and clarify app lists ([01177e3](https://github.com/robotnikz/sentinel-dns/commit/01177e3))
+* fix: improve query log navigation and live view ([a0713bd](https://github.com/robotnikz/sentinel-dns/commit/a0713bd))
+* fix: streamline default blocklists and category sources ([810741c](https://github.com/robotnikz/sentinel-dns/commit/810741c))
+* fix: sync suspicious activity views ([4a76ac2](https://github.com/robotnikz/sentinel-dns/commit/4a76ac2))
+
 ## <small>0.3.4 (2026-01-26)</small>
 
 * Merge pull request #31 from robotnikz/fix/query-logs-hostnames ([d4556b2](https://github.com/robotnikz/sentinel-dns/commit/d4556b2)), closes [#31](https://github.com/robotnikz/sentinel-dns/issues/31)
