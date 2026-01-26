@@ -34,7 +34,8 @@ function resolveEnabledAndMode(body: { enabled?: boolean; mode?: 'ACTIVE' | 'SHA
 
 
 export async function registerBlocklistsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/blocklists', async () => {
+  app.get('/api/blocklists', async (request) => {
+    await requireAdmin(db, request);
     const res = await db.pool.query(
       'SELECT id, name, url, enabled, mode, last_updated_at, last_error, last_rule_count, created_at, updated_at FROM blocklists ORDER BY id DESC LIMIT 500'
     );

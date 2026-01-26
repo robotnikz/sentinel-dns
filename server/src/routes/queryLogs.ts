@@ -14,6 +14,7 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
   app.get(
     '/api/query-logs',
     async (request: FastifyRequest<{ Querystring: QueryLogsGetQuerystring }>) => {
+      await requireAdmin(db, request);
       const limitRaw = Number(request.query.limit ?? '250');
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, limitRaw)) : 250;
 

@@ -53,7 +53,8 @@ function normalize(input: any): DnsSettings {
 }
 
 export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/dns/settings', async () => {
+  app.get('/api/dns/settings', async (request) => {
+    await requireAdmin(db, request);
     const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['dns_settings']);
     const value = res.rows?.[0]?.value;
     return { value: normalize(value) };

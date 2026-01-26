@@ -5,7 +5,8 @@ import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 
 export async function registerRulesRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/rules', async () => {
+  app.get('/api/rules', async (request) => {
+    await requireAdmin(db, request);
     // The rules table contains both user-created rules and imported rules produced by
     // blocklist refreshes (e.g. category values like "Blocklist:37:...", "Category:...", "App:...").
     // This endpoint is for the UI "Allow/Block" tab and must only return user-created rules.

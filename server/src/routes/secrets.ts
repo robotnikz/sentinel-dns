@@ -5,7 +5,8 @@ import { requireAdmin } from '../auth.js';
 import { hasSecret, setSecret } from '../secretsStore.js';
 
 export async function registerSecretsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/secrets/status', async () => {
+  app.get('/api/secrets/status', async (request) => {
+    await requireAdmin(db, request);
     const [gemini, openai] = await Promise.all([hasSecret(db, 'gemini_api_key'), hasSecret(db, 'openai_api_key')]);
     return { configured: { gemini, openai } };
   });

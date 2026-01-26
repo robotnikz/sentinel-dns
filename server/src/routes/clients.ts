@@ -8,7 +8,8 @@ import ipaddr from 'ipaddr.js';
 type ClientProfile = Record<string, unknown> & { id: string };
 
 export async function registerClientsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/clients', async () => {
+  app.get('/api/clients', async (request) => {
+    await requireAdmin(db, request);
     const res = await db.pool.query('SELECT profile FROM clients ORDER BY updated_at DESC LIMIT 2000');
     return { items: res.rows.map((r) => r.profile) };
   });

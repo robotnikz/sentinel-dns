@@ -1319,6 +1319,7 @@ const Blocking: React.FC = () => {
                           </div>
                        </div>
                        <button 
+                                  aria-label={`Delete rule ${rule.domain}`}
                           onClick={() => removeRule(rule.id)}
                           className="p-2 text-zinc-600 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
                        >

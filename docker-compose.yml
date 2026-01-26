@@ -5,9 +5,16 @@ services:
     ports:
       # DNS service (UDP/TCP). If port 53 is already in use (e.g. systemd-resolved),
       # adjust the host-side port mapping or disable the stub resolver.
+      # By default this is published on all host interfaces (0.0.0.0).
+      # To keep it reachable for all devices in your LAN while avoiding WAN exposure,
+      # bind explicitly to your LAN interface IP (example 192.168.1.10):
+      # - "192.168.1.10:53:53/udp"
+      # - "192.168.1.10:53:53/tcp"
       - "53:53/udp"
       - "53:53/tcp"
       # Web UI + API
+      # Same idea for the UI/API:
+      # - "192.168.1.10:8080:8080"
       - "8080:8080"
     environment:
       # Timezone used for logs/UI timestamps.

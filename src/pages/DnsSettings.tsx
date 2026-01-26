@@ -808,6 +808,7 @@ const DnsSettings: React.FC = () => {
                                 </td>
                                 <td className="p-4 text-right pr-6">
                                     <button
+                                        aria-label={`Delete rewrite ${rewrite.domain}`}
                                         onClick={async () => {
                                             try {
                                                 const res = await fetch(`/api/dns/rewrites/${rewrite.id}`, {
