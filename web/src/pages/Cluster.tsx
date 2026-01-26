@@ -178,6 +178,23 @@ const Cluster: React.FC = () => {
     return `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30`;
   }, [effectiveRole]);
 
+  const activeBadge = useMemo(() => {
+    const base = 'inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border';
+    if (effectiveRole === 'leader') {
+      return {
+        text: haEnabled ? 'Active (VIP owner)' : 'Active (Leader)',
+        className: `${base} bg-emerald-500/10 text-emerald-200 border-emerald-500/30`
+      };
+    }
+    if (effectiveRole === 'follower') {
+      return {
+        text: haEnabled ? 'Standby (Follower)' : 'Follower',
+        className: `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30`
+      };
+    }
+    return { text: 'Standalone', className: `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30` };
+  }, [effectiveRole, haEnabled]);
+
   const enableLeader = async () => {
     setBusy(true);
     try {
@@ -722,7 +739,10 @@ const Cluster: React.FC = () => {
                 <Shield className="w-4 h-4 text-zinc-400" />
                 <h3 className="font-semibold">Status</h3>
               </div>
-              <span className={roleBadge}>Role: {effectiveRole}</span>
+              <div className="flex items-center gap-2">
+                <span className={activeBadge.className}>{activeBadge.text}</span>
+                <span className={roleBadge}>Role: {effectiveRole}</span>
+              </div>
             </div>
 
             {loading ? (
