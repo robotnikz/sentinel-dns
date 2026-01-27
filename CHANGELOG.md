@@ -1,3 +1,19 @@
+## [0.5.4](https://github.com/robotnikz/sentinel-dns/compare/v0.5.3...v0.5.4) (2026-01-27)
+
+### fix
+
+* trigger patch release ([](https://github.com/robotnikz/sentinel-dns/commit/7a2f7bb107af1b95d164017ecb0bd05f79e0fefa))
+
+* Merge pull request #42 from robotnikz/fix/tailscale-dns-logs ([](https://github.com/robotnikz/sentinel-dns/commit/918e552bd4c9e5d0d790a4092f3c30d8cb80ea52)), closes [#42](https://github.com/robotnikz/sentinel-dns/issues/42)
+
+### Fix
+
+* log Tailscale IPv6 DNS queries ([](https://github.com/robotnikz/sentinel-dns/commit/cf1d765c4d4b4bdeb754a2fc5ac6228a264dfb9e))
+
+### docs
+
+* overhaul app audit and mark completed items ([](https://github.com/robotnikz/sentinel-dns/commit/9d69d6153a8efce5fceb621de4794601ee64d3a8))
+
 ## [0.5.3](https://github.com/robotnikz/sentinel-dns/compare/v0.5.2...v0.5.3) (2026-01-27)
 
 * Merge pull request #40 from robotnikz/bugfixes ([](https://github.com/robotnikz/sentinel-dns/commit/7462b9a9d724c749cdfd6c05fbbfd0577190b14d)), closes [#40](https://github.com/robotnikz/sentinel-dns/issues/40)
