@@ -1,3 +1,38 @@
+## [0.5.3](https://github.com/robotnikz/sentinel-dns/compare/v0.5.2...v0.5.3) (2026-01-27)
+
+* Merge pull request #40 from robotnikz/bugfixes ([](https://github.com/robotnikz/sentinel-dns/commit/7462b9a9d724c749cdfd6c05fbbfd0577190b14d)), closes [#40](https://github.com/robotnikz/sentinel-dns/issues/40)
+
+### web
+
+* smooth live query log row updates ([](https://github.com/robotnikz/sentinel-dns/commit/5dcce3cfc98911fec6e3207aaedc25e7dd199ef7))
+
+### docs
+
+* add audit, threat model and test cases ([](https://github.com/robotnikz/sentinel-dns/commit/fa331c7ef32d5133ee6c1b0424a7be3d0bc4f351))
+* clarify LAN/proxy defaults and retention ([](https://github.com/robotnikz/sentinel-dns/commit/0384512fb4ad96b2a4bc7d9e507ac7b12838e5cb))
+
+### test
+
+* **frontend:** cover apiFetch shim and clients loading ([](https://github.com/robotnikz/sentinel-dns/commit/6afd5ed27cfcfcfda241f2aa9520f9c51eb16122))
+
+### fix
+
+* **frontend:** default /api fetch to include cookies ([](https://github.com/robotnikz/sentinel-dns/commit/422403fcaad6838c9fec41935e35848b90b85b57))
+* **server:** make trust proxy configurable ([](https://github.com/robotnikz/sentinel-dns/commit/c4a5c36022b80a5c6c794629c3bd0c8daf8449b6))
+
+### perf
+
+* **server:** batch query-logs ingest ([](https://github.com/robotnikz/sentinel-dns/commit/13ca013e74d5f54e62943699059fac2c937f5986))
+* **server:** indexes, retention and metrics TTL cache ([](https://github.com/robotnikz/sentinel-dns/commit/060ac923ba83e5aa737511f4e795bade5b67c19a))
+
+### security
+
+* **server:** harden settings/secrets validation ([](https://github.com/robotnikz/sentinel-dns/commit/fb02a12124962b9322e371aba0af49cc17a2ad64))
+
+### chore
+
+* **release:** upgrade semantic-release toolchain ([](https://github.com/robotnikz/sentinel-dns/commit/4da1c1700d84bc5cdedfef6b5c436ef2579f1e76))
+
 ## <small>0.5.2 (2026-01-27)</small>
 
 * fix: make client deletion reliable ([da13516](https://github.com/robotnikz/sentinel-dns/commit/da13516))
