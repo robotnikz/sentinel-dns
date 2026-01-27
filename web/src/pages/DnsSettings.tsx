@@ -421,12 +421,12 @@ const DnsSettings: React.FC = () => {
     };
 
   const toggleResolver = (id: number) => {
-      setResolvers(resolvers.map(r => ({ ...r, selected: r.id === id })));
+      setResolvers(prev => prev.map(r => ({ ...r, selected: r.id === id })));
   };
 
   const deleteResolver = (id: number, e: React.MouseEvent) => {
       e.stopPropagation();
-      setResolvers(resolvers.filter(r => r.id !== id));
+      setResolvers(prev => prev.filter(r => r.id !== id));
   };
 
   const handleAddResolver = () => {
@@ -455,7 +455,7 @@ const DnsSettings: React.FC = () => {
               isCustom: true
           };
 
-          setResolvers([...resolvers, newR]);
+          setResolvers(prev => [...prev, newR]);
           
           // Reset Form
           setNewIp('');
