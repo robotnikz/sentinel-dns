@@ -3,8 +3,10 @@ import net from 'node:net';
 import tls from 'node:tls';
 import crypto from 'node:crypto';
 import http2 from 'node:http2';
+import * as dns from 'node:dns';
 import dnsPacket from 'dns-packet';
 import ipaddr from 'ipaddr.js';
+import { Agent, request } from 'undici';
 
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
@@ -1117,11 +1119,66 @@ async function forwardDot(upstream: { host: string; port: number }, msg: Buffer,
 }
 
 async function forwardDohHttp1(dohUrl: string, msg: Buffer, timeoutMs: number): Promise<Buffer> {
+  return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4: false });
+}
+
+type DohHttp1Options = {
+  preferIpv4: boolean;
+};
+
+const dohHttpAgentDefault = new Agent({
+  connections: 32,
+  pipelining: 1,
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000
+});
+
+const dohHttpAgentPreferIpv4 = new Agent({
+  connections: 32,
+  pipelining: 1,
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+  connect: {
+    lookup: (hostname: string, options: any, callback: any) => {
+      const requestedFamily = typeof options?.family === 'number' ? options.family : 0;
+      if (requestedFamily === 4 || requestedFamily === 6) {
+        dns.lookup(hostname, { ...options, family: requestedFamily }, callback);
+        return;
+      }
+
+      dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
+        if (err) {
+          callback(err);
+          return;
+        }
+
+        const list = Array.isArray(addresses) ? addresses : [];
+        const v4 = list.find((a: any) => a && a.family === 4);
+        const v6 = list.find((a: any) => a && a.family === 6);
+        const chosen = v4 ?? v6 ?? list[0];
+        if (!chosen?.address || !chosen?.family) {
+          callback(new Error('DNS_LOOKUP_FAILED'));
+          return;
+        }
+        callback(null, chosen.address, chosen.family);
+      });
+    }
+  }
+});
+
+async function forwardDohHttp1WithOptions(
+  dohUrl: string,
+  msg: Buffer,
+  timeoutMs: number,
+  options: DohHttp1Options
+): Promise<Buffer> {
+  const dispatcher = options.preferIpv4 ? dohHttpAgentPreferIpv4 : dohHttpAgentDefault;
+
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
     try {
-      const res = await fetch(dohUrl, {
+      const res = await request(dohUrl, {
         method: 'POST',
         headers: {
           'content-type': 'application/dns-message',
@@ -1129,10 +1186,20 @@ async function forwardDohHttp1(dohUrl: string, msg: Buffer, timeoutMs: number): 
           'user-agent': 'sentinel-dns/0.1'
         },
         body: msg,
+        dispatcher,
         signal: ac.signal
       });
-      if (!res.ok) throw new Error(`HTTP_${res.status}`);
-      const buf = Buffer.from(await res.arrayBuffer());
+
+      if (res.statusCode !== 200) {
+        try {
+          await res.body.text();
+        } catch {
+          // ignore
+        }
+        throw new Error(`HTTP_${res.statusCode}`);
+      }
+
+      const buf = Buffer.from(await res.body.arrayBuffer());
       return buf;
     } catch (e: any) {
       if (ac.signal.aborted) throw new Error('UPSTREAM_TIMEOUT');
@@ -1201,14 +1268,14 @@ async function forwardDohHttp2(dohUrl: string, msg: Buffer, timeoutMs: number): 
   });
 }
 
-async function forwardDoh(dohUrl: string, msg: Buffer, timeoutMs: number): Promise<Buffer> {
+async function forwardDoh(dohUrl: string, msg: Buffer, timeoutMs: number, preferIpv4: boolean): Promise<Buffer> {
   if (dohUrl.startsWith('https://')) {
     // Prefer HTTP/1.1: it's generally more compatible on constrained networks.
     // (HTTP/2 can stall due to middleboxes, IPv6 routing issues, or ALPN handling.)
-    return await forwardDohHttp1(dohUrl, msg, timeoutMs);
+    return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4 });
   }
 
-  return await forwardDohHttp1(dohUrl, msg, timeoutMs);
+  return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4 });
 }
 
 function buildNxDomainResponse(query: any): Buffer {
@@ -1682,12 +1749,14 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
         const timeoutMs = getTimeoutMs();
 
+        const preferIpv4 = Boolean((config as any).DNS_FORWARD_DOH_PREFER_IPV4);
+
         return upstream.transport === 'tcp'
           ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg, timeoutMs)
           : upstream.transport === 'dot'
             ? await forwardDot({ host: upstream.host, port: upstream.port }, msg, timeoutMs)
             : upstream.transport === 'doh'
-              ? await forwardDoh(upstream.dohUrl, msg, timeoutMs)
+              ? await forwardDoh(upstream.dohUrl, msg, timeoutMs, preferIpv4)
               : await forwardUdp({ host: upstream.host, port: upstream.port }, msg, timeoutMs);
       };
 
