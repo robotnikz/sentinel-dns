@@ -1146,6 +1146,8 @@ const dohHttpAgentPreferIpv4 = new Agent({
         return;
       }
 
+      const wantsAll = Boolean(options?.all);
+
       dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
         if (err) {
           callback(err);
@@ -1153,9 +1155,16 @@ const dohHttpAgentPreferIpv4 = new Agent({
         }
 
         const list = Array.isArray(addresses) ? addresses : [];
-        const v4 = list.find((a: any) => a && a.family === 4);
-        const v6 = list.find((a: any) => a && a.family === 6);
-        const chosen = v4 ?? v6 ?? list[0];
+        const v4 = list.filter((a: any) => a && a.family === 4);
+        const v6 = list.filter((a: any) => a && a.family === 6);
+        const reordered = [...v4, ...v6];
+
+        if (wantsAll) {
+          callback(null, reordered);
+          return;
+        }
+
+        const chosen = reordered[0];
         if (!chosen?.address || !chosen?.family) {
           callback(new Error('DNS_LOOKUP_FAILED'));
           return;
