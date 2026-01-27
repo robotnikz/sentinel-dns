@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Anomaly, DnsQuery, QueryStatus, ClientProfile } from '../types';
-import { Search, Filter, Sparkles, X, Terminal, CheckCircle, XCircle, AlertTriangle, ShieldCheck, ChevronDown, Users, Shield, Eye, UserPlus, Save, Smartphone, Laptop, Tv, Gamepad2, Info, Ban, ShieldOff, Check, AlertOctagon, Zap, EyeOff } from 'lucide-react';
+import { Search, Filter, Sparkles, X, Terminal, CheckCircle, XCircle, AlertTriangle, ShieldCheck, ChevronDown, Users, Shield, Eye, UserPlus, Save, Smartphone, Laptop, Tv, Gamepad2, Info, Ban, ShieldOff, Check, AlertOctagon, Zap, EyeOff, Trash2 } from 'lucide-react';
 import { analyzeDomain } from '../services/geminiService';
 import { detectAnomalies } from '../services/anomalyService';
 import { useRules } from '../contexts/RulesContext';
 import { useClients } from '../contexts/ClientsContext';
 import { apiFetch } from '../services/apiClient';
+import ConfirmModal from '../components/ConfirmModal';
+import Modal from '../components/Modal';
+import { ModalCard, ModalFooter, ModalHeader } from '../components/ModalLayout';
 
 const IGNORED_ANOMALY_KEY = 'sentinel_ignored_anomaly_signatures';
 
@@ -50,6 +52,10 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const [pageSize, setPageSize] = useState<number>(100);
   const [page, setPage] = useState<number>(1);
   const [liveMode, setLiveMode] = useState(false);
+
+  const [flushConfirmOpen, setFlushConfirmOpen] = useState(false);
+  const [flushBusy, setFlushBusy] = useState(false);
+  const [flushMsg, setFlushMsg] = useState('');
 
   const [rawQueries, setRawQueries] = useState<DnsQuery[]>([]);
   const [discoveredHostnamesByIp, setDiscoveredHostnamesByIp] = useState<Record<string, string>>({});
@@ -139,6 +145,28 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
       setRawQueries([]);
     }
   }, []);
+
+  const flushQueryLogs = useCallback(async () => {
+    setFlushMsg('');
+    setFlushBusy(true);
+    try {
+      const res = await apiFetch('/api/query-logs/flush', { method: 'POST' });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setFlushMsg(data?.message || data?.error || 'Failed to clear query logs.');
+        return;
+      }
+      const deleted = typeof data?.deleted === 'number' ? data.deleted : Number(data?.deleted || 0);
+      setFlushMsg(Number.isFinite(deleted) && deleted > 0 ? `Cleared ${deleted} log entries.` : 'Query logs cleared.');
+      setFlushConfirmOpen(false);
+      setPage(1);
+      await loadQueryLogs();
+    } catch {
+      setFlushMsg('Backend not reachable.');
+    } finally {
+      setFlushBusy(false);
+    }
+  }, [loadQueryLogs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -495,25 +523,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
       setNewClientName(suggestedName);
   };
 
-  // Ensure modals are always centered in the viewport, not inside a transformed/animated container.
-  const renderPortal = (node: React.ReactNode) => {
-    if (typeof document === 'undefined') return null;
-    return createPortal(node, document.body);
-  };
-
-  // Close any open modal with Escape.
-  useEffect(() => {
-    if (!clientToAdd && !selectedDomain && !selectedAnomaly) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setClientToAdd(null);
-        setSelectedDomain(null);
-        setSelectedAnomaly(null);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [clientToAdd, selectedDomain, selectedAnomaly]);
+  // Modal.tsx handles Escape/backdrop closing per modal.
 
   const saveNewClient = () => {
       if(!clientToAdd) return;
@@ -827,6 +837,23 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
             </button>
 
             <button
+              onClick={() => setFlushConfirmOpen(true)}
+              disabled={flushBusy}
+              className={
+                `px-3 py-1.5 rounded text-xs font-bold border inline-flex items-center gap-2 ` +
+                (flushBusy
+                  ? 'border-zinc-800 bg-zinc-900 text-zinc-600 cursor-not-allowed'
+                  : 'border-rose-900/50 bg-rose-950/30 text-rose-300 hover:bg-rose-950/50')
+              }
+              title="Delete all stored query logs"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Clear Logs
+            </button>
+
+            {flushMsg ? <div className="text-[10px] font-mono text-zinc-500 max-w-[220px] truncate" title={flushMsg}>{flushMsg}</div> : null}
+
+            <button
               onClick={() => setLiveMode((v) => !v)}
               className={`px-3 py-1.5 rounded text-xs font-bold border ${
                 liveMode
@@ -1106,95 +1133,101 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
         </div>
       )}
 
-      {/* Add Client Modal */}
-      {clientToAdd && renderPortal(
-          <div
-            className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-            onMouseDown={(e) => {
-              if (e.target === e.currentTarget) setClientToAdd(null);
-            }}
-          >
-              <div className="relative z-[1001] w-full max-w-sm rounded-lg overflow-hidden border border-[#27272a] bg-[#09090b] shadow-2xl animate-fade-in pointer-events-auto">
-                  <div className="p-4 border-b border-[#27272a] bg-[#121214] flex justify-between items-center">
-                      <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                          <UserPlus className="w-4 h-4 text-emerald-500" /> Register New Device
-                      </h3>
-                      <button onClick={() => setClientToAdd(null)}><X className="w-4 h-4 text-zinc-500 hover:text-white" /></button>
-                  </div>
-                  <div className="p-6 space-y-4">
-                      <div className="bg-[#18181b] border border-[#27272a] rounded p-3 flex items-center gap-3">
-                          <Info className="w-4 h-4 text-zinc-500" />
-                          <div>
-                              <div className="text-[10px] text-zinc-500 uppercase font-bold">Detected Identifier (IP)</div>
-                              <div className="text-sm font-mono text-zinc-200">{clientToAdd.ip}</div>
-                          </div>
-                      </div>
+      <ConfirmModal
+        open={flushConfirmOpen}
+        title="Clear Query Logs"
+        subtitle="Deletes all stored DNS query log entries."
+        body={
+          'This operation is irreversible. It only clears the UI log history; filtering rules and DNS settings stay unchanged.'
+        }
+        confirmText="CLEAR LOGS"
+        busyText="CLEARING…"
+        variant="danger"
+        busy={flushBusy}
+        onCancel={() => setFlushConfirmOpen(false)}
+        onConfirm={() => void flushQueryLogs()}
+        message={flushMsg || null}
+      />
 
-                      <div>
-                          <label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Friendly Name</label>
-                          <input 
-                            type="text" 
-                            placeholder="e.g. Sarah's iPhone"
-                            value={newClientName}
-                            onChange={(e) => setNewClientName(e.target.value)}
-                            className="w-full bg-[#09090b] border border-[#27272a] text-white px-3 py-2 rounded text-xs focus:border-emerald-500 outline-none placeholder:text-zinc-700"
-                          />
-                      </div>
-                      
-                      <div>
-                           <label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Device Type</label>
-                           <div className="grid grid-cols-4 gap-2">
-                               {['smartphone', 'laptop', 'tv', 'game'].map(type => (
-                                   <div 
-                                      key={type} 
-                                      onClick={() => setNewClientType(type)}
-                                      className={`p-2 rounded border cursor-pointer flex justify-center items-center transition-colors ${newClientType === type ? 'bg-emerald-950/30 border-emerald-500 text-emerald-500' : 'bg-[#18181b] border-[#27272a] text-zinc-500 hover:border-zinc-500'}`}
-                                   >
-                                       {type === 'smartphone' && <Smartphone className="w-4 h-4" />}
-                                       {type === 'laptop' && <Laptop className="w-4 h-4" />}
-                                       {type === 'tv' && <Tv className="w-4 h-4" />}
-                                       {type === 'game' && <Gamepad2 className="w-4 h-4" />}
-                                   </div>
-                               ))}
-                           </div>
-                      </div>
-                      <button 
-                        onClick={saveNewClient}
-                        className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold flex items-center justify-center gap-2 mt-4"
-                      >
-                          <Save className="w-3.5 h-3.5" /> SAVE DEVICE
-                      </button>
-                  </div>
-              </div>
-          </div>
-            )}
+      <Modal open={!!clientToAdd} onClose={() => setClientToAdd(null)}>
+        {clientToAdd ? (
+          <ModalCard className="max-w-sm">
+            <ModalHeader
+              title="Register New Device"
+              icon={<UserPlus className="w-5 h-5 text-emerald-300" />}
+              iconContainerClassName="bg-emerald-500/10 border-emerald-500/20"
+              onClose={() => setClientToAdd(null)}
+            />
 
-      {/* Suspicious Activity Modal */}
-      {selectedAnomaly && renderPortal(
-        <div
-          className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setSelectedAnomaly(null);
-          }}
-        >
-          <div className="dashboard-card w-full max-w-lg rounded-lg overflow-hidden animate-fade-in shadow-2xl border border-[#27272a] bg-[#09090b]">
-            <div className="p-5 border-b border-[#27272a] flex justify-between items-start bg-[#121214]">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                  <Zap className="w-5 h-5 text-amber-400" />
-                </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-[#18181b] border border-[#27272a] rounded p-3 flex items-center gap-3">
+                <Info className="w-4 h-4 text-zinc-500" />
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Suspicious Activity</h3>
-                    {getRiskBadge(selectedAnomaly.risk)}
-                  </div>
-                  <p className="text-zinc-300 font-mono text-xs mt-0.5">{selectedAnomaly.issue}</p>
+                  <div className="text-[10px] text-zinc-500 uppercase font-bold">Detected Identifier (IP)</div>
+                  <div className="text-sm font-mono text-zinc-200">{clientToAdd.ip}</div>
                 </div>
               </div>
-              <button onClick={() => setSelectedAnomaly(null)} className="text-zinc-500 hover:text-white transition-colors">
-                <X className="w-5 h-5" />
-              </button>
+
+              <div>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Friendly Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Sarah's iPhone"
+                  value={newClientName}
+                  onChange={(e) => setNewClientName(e.target.value)}
+                  className="w-full bg-[#09090b] border border-[#27272a] text-white px-3 py-2 rounded text-xs focus:border-emerald-500 outline-none placeholder:text-zinc-700"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-zinc-500 uppercase mb-1 block">Device Type</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {['smartphone', 'laptop', 'tv', 'game'].map((type) => (
+                    <div
+                      key={type}
+                      onClick={() => setNewClientType(type)}
+                      className={`p-2 rounded border cursor-pointer flex justify-center items-center transition-colors ${newClientType === type ? 'bg-emerald-950/30 border-emerald-500 text-emerald-500' : 'bg-[#18181b] border-[#27272a] text-zinc-500 hover:border-zinc-500'}`}
+                    >
+                      {type === 'smartphone' && <Smartphone className="w-4 h-4" />}
+                      {type === 'laptop' && <Laptop className="w-4 h-4" />}
+                      {type === 'tv' && <Tv className="w-4 h-4" />}
+                      {type === 'game' && <Gamepad2 className="w-4 h-4" />}
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
+
+            <ModalFooter>
+              <button
+                onClick={() => setClientToAdd(null)}
+                className="px-4 py-2 rounded border border-[#27272a] text-zinc-300 hover:bg-[#27272a] transition-all text-xs font-bold"
+              >
+                CANCEL
+              </button>
+              <button
+                onClick={saveNewClient}
+                className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-all text-xs font-bold flex items-center gap-2"
+              >
+                <Save className="w-3.5 h-3.5" /> SAVE DEVICE
+              </button>
+            </ModalFooter>
+          </ModalCard>
+        ) : null}
+      </Modal>
+
+      <Modal open={!!selectedAnomaly} onClose={() => setSelectedAnomaly(null)}>
+        {selectedAnomaly ? (
+          <ModalCard className="max-w-lg">
+            <ModalHeader
+              title="Suspicious Activity"
+              titleRight={getRiskBadge(selectedAnomaly.risk)}
+              subtitle={selectedAnomaly.issue}
+              subtitleClassName="text-zinc-300 font-mono text-xs mt-0.5"
+              icon={<Zap className="w-5 h-5 text-amber-400" />}
+              iconContainerClassName="bg-amber-500/10 border-amber-500/20"
+              onClose={() => setSelectedAnomaly(null)}
+            />
 
             <div className="p-6 space-y-4">
               <div className="flex items-center justify-between p-3 rounded bg-[#18181b] border border-[#27272a]">
@@ -1260,7 +1293,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
               </div>
             </div>
 
-            <div className="p-4 border-t border-[#27272a] bg-[#121214] flex flex-wrap justify-end gap-2">
+            <ModalFooter className="flex flex-wrap justify-end">
               <button
                 onClick={openSelectedAnomalyInQueries}
                 className="px-4 py-2 rounded border border-[#27272a] text-zinc-300 hover:bg-[#27272a] transition-all text-xs font-bold flex items-center gap-2"
@@ -1281,38 +1314,23 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
               >
                 <Ban className="w-3.5 h-3.5" /> BLOCK DOMAIN
               </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </ModalFooter>
+          </ModalCard>
+        ) : null}
+      </Modal>
 
-      {/* AI Analysis Modal */}
-      {selectedDomain && renderPortal(
-        <div
-          className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setSelectedDomain(null);
-          }}
-        >
-          <div className="dashboard-card w-full max-w-lg rounded-lg overflow-hidden animate-fade-in shadow-2xl border border-[#27272a] bg-[#09090b]">
-            
-            {/* Modal Header */}
-            <div className="p-5 border-b border-[#27272a] flex justify-between items-start bg-[#121214]">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
-                  <Sparkles className="w-5 h-5 text-indigo-400" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Neural Analysis</h3>
-                  <p className="text-indigo-400 font-mono text-xs mt-0.5">{selectedDomain.domain}</p>
-                </div>
-              </div>
-              <button onClick={() => setSelectedDomain(null)} className="text-zinc-500 hover:text-white transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            {/* Modal Content */}
+      <Modal open={!!selectedDomain} onClose={() => setSelectedDomain(null)}>
+        {selectedDomain ? (
+          <ModalCard className="max-w-lg">
+            <ModalHeader
+              title="Neural Analysis"
+              subtitle={selectedDomain.domain}
+              subtitleClassName="text-indigo-400 font-mono text-xs mt-0.5"
+              icon={<Sparkles className="w-5 h-5 text-indigo-400" />}
+              iconContainerClassName="bg-indigo-500/10 border-indigo-500/20"
+              onClose={() => setSelectedDomain(null)}
+            />
+
             <div className="p-6">
               {isAnalyzing ? (
                 <div className="flex flex-col items-center justify-center py-8 text-zinc-500 space-y-3">
@@ -1353,8 +1371,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
               )}
             </div>
 
-            {/* Footer Actions */}
-            <div className="p-4 border-t border-[#27272a] bg-[#121214] flex justify-end gap-2">
+            <ModalFooter>
                <button 
                  onClick={() => setSelectedDomain(null)} 
                  className="px-4 py-2 rounded text-xs font-bold text-zinc-500 hover:text-white transition-colors"
@@ -1379,10 +1396,10 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
                   <XCircle className="w-3.5 h-3.5" />
                   BLOCK DOMAIN
                </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </ModalFooter>
+          </ModalCard>
+        ) : null}
+      </Modal>
     </div>
   );
 };
