@@ -686,7 +686,9 @@ const DnsSettings: React.FC = () => {
                             {server.isCustom && (
                                 <button 
                                     onClick={(e) => deleteResolver(server.id, e)}
-                                    className="p-1.5 text-zinc-600 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                                    className="p-1.5 text-zinc-600 hover:text-rose-500 transition-colors opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+                                    aria-label={`Delete resolver ${server.name}`}
+                                    title="Delete resolver"
                                 >
                                     <Trash2 className="w-3.5 h-3.5" />
                                 </button>
