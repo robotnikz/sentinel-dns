@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Anomaly, DnsQuery, QueryStatus, ClientProfile } from '../types';
 import { Search, Filter, Sparkles, X, Terminal, CheckCircle, XCircle, AlertTriangle, ShieldCheck, ChevronDown, Users, Shield, Eye, UserPlus, Save, Smartphone, Laptop, Tv, Gamepad2, Info, Ban, ShieldOff, Check, AlertOctagon, Zap, EyeOff } from 'lucide-react';
@@ -6,6 +6,7 @@ import { analyzeDomain } from '../services/geminiService';
 import { detectAnomalies } from '../services/anomalyService';
 import { useRules } from '../contexts/RulesContext';
 import { useClients } from '../contexts/ClientsContext';
+import { apiFetch } from '../services/apiClient';
 
 const IGNORED_ANOMALY_KEY = 'sentinel_ignored_anomaly_signatures';
 
@@ -97,9 +98,16 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const [newClientName, setNewClientName] = useState('');
   const [newClientType, setNewClientType] = useState('smartphone');
 
+  const queryLogsAbortRef = useRef<AbortController | null>(null);
+  const discoveryAbortRef = useRef<AbortController | null>(null);
+
   const loadQueryLogs = useCallback(async () => {
     try {
-      const res = await fetch('/api/query-logs?limit=500');
+      queryLogsAbortRef.current?.abort();
+      const controller = new AbortController();
+      queryLogsAbortRef.current = controller;
+
+      const res = await apiFetch('/api/query-logs?limit=500', { signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const items = Array.isArray(data?.items) ? data.items : [];
@@ -125,7 +133,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
         }));
 
       setRawQueries(mapped);
-    } catch {
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') return;
       // Keep empty state if backend not reachable.
       setRawQueries([]);
     }
@@ -142,12 +151,14 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     void load();
     if (!liveMode) return () => {
       cancelled = true;
+      queryLogsAbortRef.current?.abort();
     };
 
     const t = window.setInterval(load, 2000);
     return () => {
       cancelled = true;
       window.clearInterval(t);
+      queryLogsAbortRef.current?.abort();
     };
   }, [liveMode, loadQueryLogs]);
 
@@ -156,7 +167,11 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
     const loadDiscovery = async () => {
       try {
-        const res = await fetch('/api/discovery/clients', { credentials: 'include' });
+        discoveryAbortRef.current?.abort();
+        const controller = new AbortController();
+        discoveryAbortRef.current = controller;
+
+        const res = await apiFetch('/api/discovery/clients', { signal: controller.signal });
         if (cancelled) return;
         if (res.status === 401 || res.status === 403) {
           setDiscoveredHostnamesByIp({});
@@ -173,7 +188,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
           if (ip && hostname) map[ip] = hostname;
         }
         setDiscoveredHostnamesByIp(map);
-      } catch {
+      } catch (err) {
+        if ((err as any)?.name === 'AbortError') return;
         // ignore
       }
     };
@@ -183,6 +199,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     return () => {
       cancelled = true;
       window.clearInterval(t);
+      discoveryAbortRef.current?.abort();
     };
   }, []);
 
@@ -212,7 +229,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const loadIgnoredSignatures = () => {
     void (async () => {
       try {
-        const res = await fetch('/api/suspicious/ignored');
+        const res = await apiFetch('/api/suspicious/ignored');
         if (res.ok) {
           const data = await res.json();
           const items = Array.isArray((data as any)?.items) ? (data as any).items : [];
@@ -251,7 +268,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
       for (const signature of sigs) {
         try {
-          await fetch('/api/suspicious/ignored', {
+          await apiFetch('/api/suspicious/ignored', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ signature })
@@ -274,7 +291,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     setIgnoredAnomalySignatures((prev) => Array.from(new Set([...prev, sig])));
 
     try {
-      await fetch('/api/suspicious/ignored', {
+      await apiFetch('/api/suspicious/ignored', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signature: sig })

@@ -9,6 +9,7 @@ import { analyzeDomain } from '../services/geminiService';
 import { DnsQuery, QueryStatus, type Anomaly, type ChartDataPoint } from '../types';
 import { useRules } from '../contexts/RulesContext';
 import { useClients } from '../contexts/ClientsContext';
+import { apiFetch } from '../services/apiClient';
 
 const IGNORED_ANOMALY_KEY = 'sentinel_ignored_anomaly_signatures';
 
@@ -165,7 +166,7 @@ const Dashboard: React.FC = () => {
   const loadIgnoredSignatures = () => {
     void (async () => {
       try {
-        const res = await fetch('/api/suspicious/ignored');
+        const res = await apiFetch('/api/suspicious/ignored');
         if (res.ok) {
           const data = await res.json();
           const items = Array.isArray((data as any)?.items) ? (data as any).items : [];
@@ -204,7 +205,7 @@ const Dashboard: React.FC = () => {
 
       for (const signature of sigs) {
         try {
-          await fetch('/api/suspicious/ignored', {
+          await apiFetch('/api/suspicious/ignored', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ signature })
@@ -249,11 +250,12 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     Promise.all([
-      fetch('/api/metrics/summary?hours=24').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/geo/countries?hours=24&limit=40').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/query-logs?limit=500').then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      apiFetch('/api/metrics/summary?hours=24', { signal: controller.signal }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      apiFetch('/api/geo/countries?hours=24&limit=40', { signal: controller.signal }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      apiFetch('/api/query-logs?limit=500', { signal: controller.signal }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
     ])
       .then(([summaryRes, geoRes, logsRes]) => {
         if (cancelled) return;
@@ -307,17 +309,19 @@ const Dashboard: React.FC = () => {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     Promise.all([
-      fetch(`/api/metrics/top-domains?hours=${encodeURIComponent(String(trafficWindowHours))}&limit=20&excludeUpstreams=1`)
+      apiFetch(`/api/metrics/top-domains?hours=${encodeURIComponent(String(trafficWindowHours))}&limit=20&excludeUpstreams=1`, { signal: controller.signal })
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null),
-      fetch(`/api/metrics/top-blocked?hours=${encodeURIComponent(String(trafficWindowHours))}&limit=20`)
+      apiFetch(`/api/metrics/top-blocked?hours=${encodeURIComponent(String(trafficWindowHours))}&limit=20`, { signal: controller.signal })
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null)
     ])
@@ -347,13 +351,15 @@ const Dashboard: React.FC = () => {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [trafficWindowHours]);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
-    fetch(`/api/metrics/timeseries?hours=${encodeURIComponent(String(trafficWindowHours))}`)
+    apiFetch(`/api/metrics/timeseries?hours=${encodeURIComponent(String(trafficWindowHours))}`, { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((tsRes) => {
         if (cancelled) return;
@@ -375,6 +381,7 @@ const Dashboard: React.FC = () => {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [trafficWindowHours]);
 
@@ -466,7 +473,7 @@ const Dashboard: React.FC = () => {
     const sig = signatureForAnomaly(selectedAnomaly);
 
     try {
-      await fetch('/api/suspicious/ignored', {
+      await apiFetch('/api/suspicious/ignored', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ signature: sig })

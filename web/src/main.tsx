@@ -1,8 +1,11 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { installApiFetchDefaults } from './services/apiClient';
 
 import './styles/index.css';
+
+installApiFetchDefaults();
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

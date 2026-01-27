@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { ClientProfile, Schedule, ScheduleModeType } from '../types';
-import { getAuthHeaders } from '../services/apiClient';
+import { apiFetch, getAuthHeaders } from '../services/apiClient';
 
 interface ClientsContextType {
   clients: ClientProfile[];
@@ -76,7 +76,7 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const persistClient = async (input: RequestInfo, init: RequestInit): Promise<boolean> => {
     try {
-      const res = await fetch(input, { ...init, credentials: 'include' });
+      const res = await apiFetch(input, init);
       return res.ok;
     } catch {
       return false;
@@ -85,8 +85,9 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
-    fetch('/api/clients')
+    apiFetch('/api/clients', { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -106,6 +107,7 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 
