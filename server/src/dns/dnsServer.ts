@@ -1172,41 +1172,55 @@ async function forwardDohHttp1WithOptions(
   timeoutMs: number,
   options: DohHttp1Options
 ): Promise<Buffer> {
-  const dispatcher = options.preferIpv4 ? dohHttpAgentPreferIpv4 : dohHttpAgentDefault;
-
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), timeoutMs);
-  try {
+  const started = Date.now();
+  const attempt = async (dispatcher: Agent, budgetMs: number): Promise<Buffer> => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), budgetMs);
     try {
-      const res = await request(dohUrl, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/dns-message',
-          accept: 'application/dns-message',
-          'user-agent': 'sentinel-dns/0.1'
-        },
-        body: msg,
-        dispatcher,
-        signal: ac.signal
-      });
+      try {
+        const res = await request(dohUrl, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/dns-message',
+            accept: 'application/dns-message',
+            'user-agent': 'sentinel-dns/0.1'
+          },
+          body: msg,
+          dispatcher,
+          signal: ac.signal
+        });
 
-      if (res.statusCode !== 200) {
-        try {
-          await res.body.text();
-        } catch {
-          // ignore
+        if (res.statusCode !== 200) {
+          try {
+            await res.body.text();
+          } catch {
+            // ignore
+          }
+          throw new Error(`HTTP_${res.statusCode}`);
         }
-        throw new Error(`HTTP_${res.statusCode}`);
-      }
 
-      const buf = Buffer.from(await res.body.arrayBuffer());
-      return buf;
-    } catch (e: any) {
-      if (ac.signal.aborted) throw new Error('UPSTREAM_TIMEOUT');
-      throw e;
+        return Buffer.from(await res.body.arrayBuffer());
+      } catch (e: any) {
+        if (ac.signal.aborted) throw new Error('UPSTREAM_TIMEOUT');
+        throw e;
+      }
+    } finally {
+      clearTimeout(timer);
     }
-  } finally {
-    clearTimeout(timer);
+  };
+
+  try {
+    return await attempt(options.preferIpv4 ? dohHttpAgentPreferIpv4 : dohHttpAgentDefault, timeoutMs);
+  } catch (e: any) {
+    // If IPv4 is preferred but fails (e.g. v4 route blackhole) allow a single retry
+    // with the default agent to let IPv6 succeed within the remaining time budget.
+    const msgText = e instanceof Error ? e.message : String(e);
+    if (!options.preferIpv4) throw e;
+    if (msgText.startsWith('HTTP_')) throw e;
+    if (msgText === 'UPSTREAM_TIMEOUT') throw e;
+
+    const remaining = Math.max(250, timeoutMs - (Date.now() - started));
+    return await attempt(dohHttpAgentDefault, remaining);
   }
 }
 
