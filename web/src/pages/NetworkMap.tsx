@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Share2, Search, ShieldCheck, BarChart3, Clock, ArrowRight, ChevronDown } from 'lucide-react';
+import { Share2, Search, ShieldCheck, BarChart3, Clock, ArrowRight, ChevronDown, X } from 'lucide-react';
 import { useClients } from '../contexts/ClientsContext';
 
 type ClientActivity = {
@@ -336,6 +336,128 @@ const NetworkMap: React.FC = () => {
       window.dispatchEvent(new CustomEvent('sentinel:navigate', { detail: { page: 'logs', logsPreset: preset } }));
    };
 
+   const detailsOpen = Boolean(selectedClient);
+
+   const detailsPanel = (
+      <>
+         <div className="p-4 border-b border-[#27272a] bg-[#121214]">
+            <div className="flex items-center justify-between gap-3">
+               <div className="min-w-0">
+                  <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Client Details</div>
+                  <div className="text-sm font-bold text-white mt-1 truncate">
+                     {selectedClient ? displayFor(selectedClient).primary : ''}
+                  </div>
+                  {selectedClient && displayFor(selectedClient).secondary ? (
+                     <div className="text-[10px] font-mono text-zinc-500 mt-0.5 truncate">
+                        {displayFor(selectedClient).secondary}
+                     </div>
+                  ) : null}
+               </div>
+
+               <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                     onClick={goToLogs}
+                     className="flex items-center gap-2 px-3 py-2 rounded border border-[#27272a] text-zinc-300 hover:text-white hover:bg-[#18181b] transition-colors text-xs"
+                     title="Open Query Logs"
+                  >
+                     View Logs <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                     onClick={() => setSelectedClient(null)}
+                     className="p-2 rounded border border-[#27272a] bg-[#18181b] text-zinc-400 hover:text-white hover:bg-[#27272a] transition-colors"
+                     title="Close"
+                  >
+                     <X className="w-4 h-4" />
+                  </button>
+               </div>
+            </div>
+         </div>
+
+         <div className="p-4 space-y-4 overflow-auto h-[calc(100%-72px)]">
+            {!selected ? (
+               <div className="text-xs text-zinc-500 font-mono">Loading…</div>
+            ) : (
+               <>
+                  <div className="grid grid-cols-2 gap-3">
+                     <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase">Queries</div>
+                        <div className="text-lg font-bold text-white mt-1">{selected.totalQueries.toLocaleString()}</div>
+                        <div className="text-[10px] text-zinc-500 font-mono">in last {windowHours}h</div>
+                     </div>
+                     <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase">Blocked</div>
+                        <div className="text-lg font-bold text-white mt-1">{selected.blockedQueries.toLocaleString()}</div>
+                        <div className="text-[10px] text-zinc-500 font-mono">{blockedPct(selected)}%</div>
+                     </div>
+                     <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase">Unique Domains</div>
+                        <div className="text-lg font-bold text-white mt-1">{selected.uniqueDomains.toLocaleString()}</div>
+                     </div>
+                     <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase">Last Seen</div>
+                        <div className="text-lg font-bold text-white mt-1">{formatAgo(selected.lastSeen)}</div>
+                        <div className="text-[10px] text-zinc-500 font-mono">
+                           {selected.lastSeen ? new Date(selected.lastSeen).toLocaleString() : '—'}
+                        </div>
+                     </div>
+                  </div>
+
+                  <div>
+                     <div className="flex items-center justify-between">
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Blocked rate</div>
+                        <div className="text-[10px] font-mono text-zinc-400">{blockedPct(selected)}%</div>
+                     </div>
+                     <div className="w-full h-1.5 bg-[#27272a] rounded-full overflow-hidden mt-2">
+                        <div
+                           className="h-full bg-rose-500 rounded-full"
+                           style={{ width: `${clamp(blockedPct(selected), 0, 100)}%` }}
+                        ></div>
+                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                     <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Top allowed domains</div>
+                        {detailBusy ? (
+                           <div className="text-xs text-zinc-500 font-mono mt-2">Loading…</div>
+                        ) : detail?.topAllowed?.length ? (
+                           <div className="mt-2 space-y-1">
+                              {detail.topAllowed.slice(0, 6).map((d) => (
+                                 <div key={d.domain} className="flex justify-between text-xs">
+                                    <span className="text-zinc-300 font-mono truncate max-w-[230px]">{d.domain}</span>
+                                    <span className="text-zinc-500 font-mono">{d.count}</span>
+                                 </div>
+                              ))}
+                           </div>
+                        ) : (
+                           <div className="text-xs text-zinc-600 font-mono mt-2">—</div>
+                        )}
+                     </div>
+
+                     <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
+                        <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Top blocked domains</div>
+                        {detailBusy ? (
+                           <div className="text-xs text-zinc-500 font-mono mt-2">Loading…</div>
+                        ) : detail?.topBlocked?.length ? (
+                           <div className="mt-2 space-y-1">
+                              {detail.topBlocked.slice(0, 6).map((d) => (
+                                 <div key={d.domain} className="flex justify-between text-xs">
+                                    <span className="text-zinc-300 font-mono truncate max-w-[230px]">{d.domain}</span>
+                                    <span className="text-rose-400 font-mono">{d.count}</span>
+                                 </div>
+                              ))}
+                           </div>
+                        ) : (
+                           <div className="text-xs text-zinc-600 font-mono mt-2">—</div>
+                        )}
+                     </div>
+                  </div>
+               </>
+            )}
+         </div>
+      </>
+   );
+
    return (
       <div className="space-y-4 h-[calc(100vh-140px)] flex flex-col">
          <div className="flex flex-col gap-3">
@@ -470,113 +592,31 @@ const NetworkMap: React.FC = () => {
                </div>
             </div>
 
-            <div className="w-[360px] border-l border-[#27272a] bg-[#09090b]">
-               <div className="p-4 border-b border-[#27272a] bg-[#121214]">
-                  <div className="flex items-center justify-between">
-                     <div>
-                        <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Client Details</div>
-                        <div className="text-sm font-bold text-white mt-1">
-                           {selected ? displayFor(selected.client).primary : 'Select a node'}
-                        </div>
-                        {selected && displayFor(selected.client).secondary ? (
-                           <div className="text-[10px] font-mono text-zinc-500 mt-0.5 truncate">
-                              {displayFor(selected.client).secondary}
-                           </div>
-                        ) : null}
-                     </div>
-                     {selected ? (
-                        <button
-                           onClick={goToLogs}
-                           className="flex items-center gap-2 px-3 py-2 rounded border border-[#27272a] text-zinc-300 hover:text-white hover:bg-[#18181b] transition-colors text-xs"
-                           title="Open Query Logs"
-                        >
-                           View Logs <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                     ) : null}
+            {/* Mobile / narrow screens: overlay sidebar */}
+            {detailsOpen ? (
+               <>
+                  <div
+                     className="fixed inset-0 z-[1099] bg-black/70 backdrop-blur-sm xl:hidden"
+                     onMouseDown={() => setSelectedClient(null)}
+                  />
+                  <div
+                     className={`fixed top-0 right-0 z-[1100] h-full w-full max-w-[380px] xl:hidden bg-[#09090b] border-l border-[#27272a] transition-transform duration-300 ease-out ${
+                        detailsOpen ? 'translate-x-0' : 'translate-x-full'
+                     }`}
+                  >
+                     {detailsPanel}
                   </div>
-               </div>
+               </>
+            ) : null}
 
-               <div className="p-4 space-y-4 overflow-auto h-[calc(100%-72px)]">
-                  {!selected ? (
-                     <div className="text-xs text-zinc-500">
-                        Pick a client to see DNS activity, blocked rate, and top domains.
-                     </div>
-                  ) : (
-                     <>
-                        <div className="grid grid-cols-2 gap-3">
-                           <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
-                              <div className="text-[10px] font-mono text-zinc-500 uppercase">Queries</div>
-                              <div className="text-lg font-bold text-white mt-1">{selected.totalQueries.toLocaleString()}</div>
-                              <div className="text-[10px] text-zinc-500 font-mono">in last {windowHours}h</div>
-                           </div>
-                           <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
-                              <div className="text-[10px] font-mono text-zinc-500 uppercase">Blocked</div>
-                              <div className="text-lg font-bold text-white mt-1">{selected.blockedQueries.toLocaleString()}</div>
-                              <div className="text-[10px] text-zinc-500 font-mono">{blockedPct(selected)}%</div>
-                           </div>
-                           <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
-                              <div className="text-[10px] font-mono text-zinc-500 uppercase">Unique Domains</div>
-                              <div className="text-lg font-bold text-white mt-1">{selected.uniqueDomains.toLocaleString()}</div>
-                           </div>
-                           <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
-                              <div className="text-[10px] font-mono text-zinc-500 uppercase">Last Seen</div>
-                              <div className="text-lg font-bold text-white mt-1">{formatAgo(selected.lastSeen)}</div>
-                              <div className="text-[10px] text-zinc-500 font-mono">{selected.lastSeen ? new Date(selected.lastSeen).toLocaleString() : '—'}</div>
-                           </div>
-                        </div>
-
-                        <div>
-                           <div className="flex items-center justify-between">
-                              <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Blocked rate</div>
-                              <div className="text-[10px] font-mono text-zinc-400">{blockedPct(selected)}%</div>
-                           </div>
-                           <div className="w-full h-1.5 bg-[#27272a] rounded-full overflow-hidden mt-2">
-                              <div
-                                 className="h-full bg-rose-500 rounded-full"
-                                 style={{ width: `${clamp(blockedPct(selected), 0, 100)}%` }}
-                              ></div>
-                           </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-4">
-                           <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
-                              <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Top allowed domains</div>
-                              {detailBusy ? (
-                                 <div className="text-xs text-zinc-500 font-mono mt-2">Loading…</div>
-                              ) : detail?.topAllowed?.length ? (
-                                 <div className="mt-2 space-y-1">
-                                    {detail.topAllowed.slice(0, 6).map((d) => (
-                                       <div key={d.domain} className="flex justify-between text-xs">
-                                          <span className="text-zinc-300 font-mono truncate max-w-[230px]">{d.domain}</span>
-                                          <span className="text-zinc-500 font-mono">{d.count}</span>
-                                       </div>
-                                    ))}
-                                 </div>
-                              ) : (
-                                 <div className="text-xs text-zinc-600 font-mono mt-2">—</div>
-                              )}
-                           </div>
-
-                           <div className="p-3 rounded border border-[#27272a] bg-[#121214]">
-                              <div className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Top blocked domains</div>
-                              {detailBusy ? (
-                                 <div className="text-xs text-zinc-500 font-mono mt-2">Loading…</div>
-                              ) : detail?.topBlocked?.length ? (
-                                 <div className="mt-2 space-y-1">
-                                    {detail.topBlocked.slice(0, 6).map((d) => (
-                                       <div key={d.domain} className="flex justify-between text-xs">
-                                          <span className="text-zinc-300 font-mono truncate max-w-[230px]">{d.domain}</span>
-                                          <span className="text-rose-400 font-mono">{d.count}</span>
-                                       </div>
-                                    ))}
-                                 </div>
-                              ) : (
-                                 <div className="text-xs text-zinc-600 font-mono mt-2">—</div>
-                              )}
-                           </div>
-                        </div>
-                     </>
-                  )}
+            {/* Desktop: in-card sidebar that is hidden by default */}
+            <div
+               className={`hidden xl:block shrink-0 overflow-hidden bg-[#09090b] transition-[width] duration-300 ease-out ${
+                  detailsOpen ? 'w-[360px] border-l border-[#27272a]' : 'w-0 border-l-0'
+               }`}
+            >
+               <div className={`w-[360px] h-full transition-transform duration-300 ease-out ${detailsOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+                  {detailsPanel}
                </div>
             </div>
          </div>
