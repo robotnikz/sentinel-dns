@@ -1,3 +1,7 @@
+## <small>0.5.2 (2026-01-27)</small>
+
+* fix: make client deletion reliable ([da13516](https://github.com/robotnikz/sentinel-dns/commit/da13516))
+
 ## <small>0.5.1 (2026-01-27)</small>
 
 * fix: client/subnet policy precedence and clients page rename ([3e429d6](https://github.com/robotnikz/sentinel-dns/commit/3e429d6)), closes [#39](https://github.com/robotnikz/sentinel-dns/issues/39)
