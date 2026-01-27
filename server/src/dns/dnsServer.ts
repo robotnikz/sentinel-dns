@@ -1661,14 +1661,30 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const qtype = q?.type ? String(q.type) : 'A';
 
       const forwardUpstream = async (upstream: UpstreamCache['upstream']): Promise<Buffer> => {
-        const timeoutMs =
-          upstream.transport === 'udp'
-            ? config.DNS_FORWARD_UDP_TIMEOUT_MS
-            : upstream.transport === 'tcp'
-              ? config.DNS_FORWARD_TCP_TIMEOUT_MS
-              : upstream.transport === 'dot'
-                ? config.DNS_FORWARD_DOT_TIMEOUT_MS
-                : config.DNS_FORWARD_DOH_TIMEOUT_MS;
+        const getTimeoutMs = (): number => {
+          const defaults = {
+            udp: 2000,
+            tcp: 4000,
+            dot: 4000,
+            doh: 15000
+          } as const;
+
+          const raw =
+            upstream.transport === 'udp'
+              ? (config as any).DNS_FORWARD_UDP_TIMEOUT_MS
+              : upstream.transport === 'tcp'
+                ? (config as any).DNS_FORWARD_TCP_TIMEOUT_MS
+                : upstream.transport === 'dot'
+                  ? (config as any).DNS_FORWARD_DOT_TIMEOUT_MS
+                  : (config as any).DNS_FORWARD_DOH_TIMEOUT_MS;
+
+          const fallback = defaults[upstream.transport];
+          const n = Number(raw);
+          if (!Number.isFinite(n)) return fallback;
+          return Math.max(250, Math.floor(n));
+        };
+
+        const timeoutMs = getTimeoutMs();
 
         return upstream.transport === 'tcp'
           ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg, timeoutMs)
