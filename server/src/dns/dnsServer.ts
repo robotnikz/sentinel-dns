@@ -1203,13 +1203,9 @@ async function forwardDohHttp2(dohUrl: string, msg: Buffer, timeoutMs: number): 
 
 async function forwardDoh(dohUrl: string, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   if (dohUrl.startsWith('https://')) {
-    const started = Date.now();
-    try {
-      return await forwardDohHttp2(dohUrl, msg, timeoutMs);
-    } catch {
-      const remaining = Math.max(250, timeoutMs - (Date.now() - started));
-      return await forwardDohHttp1(dohUrl, msg, remaining);
-    }
+    // Prefer HTTP/1.1: it's generally more compatible on constrained networks.
+    // (HTTP/2 can stall due to middleboxes, IPv6 routing issues, or ALPN handling.)
+    return await forwardDohHttp1(dohUrl, msg, timeoutMs);
   }
 
   return await forwardDohHttp1(dohUrl, msg, timeoutMs);
