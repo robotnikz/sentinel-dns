@@ -94,6 +94,24 @@ export function createDb(config: AppConfig): Db {
       await client.query("ALTER TABLE blocklists ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'ACTIVE'");
 
       await client.query('CREATE INDEX IF NOT EXISTS query_logs_ts_idx ON query_logs (ts DESC)');
+
+      // Performance: common access patterns for metrics and tests use JSONB fields.
+      // Expression indexes help avoid sequential scans on large query_logs tables.
+      await client.query(
+        "CREATE INDEX IF NOT EXISTS query_logs_domain_ts_idx ON query_logs ((entry->>'domain'), ts DESC, id DESC)"
+      );
+      await client.query(
+        "CREATE INDEX IF NOT EXISTS query_logs_domain_clientip_ts_idx ON query_logs ((entry->>'domain'), (entry->>'clientIp'), ts DESC, id DESC)"
+      );
+      await client.query(
+        "CREATE INDEX IF NOT EXISTS query_logs_client_ident_ts_idx ON query_logs ((COALESCE(NULLIF(entry->>'clientIp',''), NULLIF(entry->>'client',''), 'Unknown')), ts DESC, id DESC)"
+      );
+
+      // Partial index for blocked lookups/counts.
+      await client.query(
+        "CREATE INDEX IF NOT EXISTS query_logs_blocked_ts_idx ON query_logs (ts DESC, id DESC) WHERE entry->>'status' IN ('BLOCKED','SHADOW_BLOCKED')"
+      );
+
       await client.query('CREATE INDEX IF NOT EXISTS notifications_ts_idx ON notifications (ts DESC)');
       await client.query('CREATE INDEX IF NOT EXISTS notifications_unread_ts_idx ON notifications (read, ts DESC)');
       await client.query('CREATE INDEX IF NOT EXISTS ignored_anomalies_ignored_at_idx ON ignored_anomalies (ignored_at DESC)');

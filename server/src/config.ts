@@ -26,6 +26,10 @@ const schema = z.object({
 
   FRONTEND_ORIGIN: z.string().optional().default('http://localhost:3000'),
 
+  // If Sentinel is behind a reverse proxy (nginx/traefik/caddy), enable this so Fastify derives
+  // protocol/host from X-Forwarded-* headers. Keep enabled by default for backward compatibility.
+  TRUST_PROXY: z.coerce.boolean().optional().default(true),
+
   ADMIN_TOKEN: z.string().optional().default(''),
 
   DATABASE_URL: z.string().optional().default('postgres://sentinel:sentinel@localhost:5432/sentinel'),
@@ -39,7 +43,17 @@ const schema = z.object({
 
   // Used to encrypt secrets stored in the DB (Gemini/OpenAI keys, etc.).
   // Can be a passphrase; in production you should set this.
-  SECRETS_KEY: z.string().optional().default('')
+  SECRETS_KEY: z.string().optional().default(''),
+
+  // Performance/operations: keep query_logs bounded.
+  // Set to 0 to disable retention.
+  QUERY_LOGS_RETENTION_DAYS: z.coerce.number().int().min(0).optional().default(30),
+
+  // Background maintenance frequency (cleanup queries, etc.).
+  MAINTENANCE_INTERVAL_MINUTES: z.coerce.number().int().min(1).optional().default(60),
+
+  // Short TTL cache for heavy metrics endpoints (server-side). Set to 0 to disable.
+  METRICS_CACHE_TTL_MS: z.coerce.number().int().min(0).optional().default(2000)
 });
 
 export type AppConfig = z.infer<typeof schema>;
