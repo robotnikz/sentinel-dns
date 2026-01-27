@@ -1,3 +1,13 @@
+## [0.6.2](https://github.com/robotnikz/sentinel-dns/compare/v0.6.1...v0.6.2) (2026-01-27)
+
+* Merge pull request #45 from robotnikz/fix/dns-forward-timeouts ([](https://github.com/robotnikz/sentinel-dns/commit/80083934449881d512ce346eb0c99d97baa55daa)), closes [#45](https://github.com/robotnikz/sentinel-dns/issues/45)
+
+### fix
+
+* **dns:** default DoH prefer IPv4 with fallback ([](https://github.com/robotnikz/sentinel-dns/commit/917f62ae73b2687d74f58fc6305c69841a0b46d9))
+* **dns:** DoH keep-alive + optional IPv4 prefer ([](https://github.com/robotnikz/sentinel-dns/commit/23231a4a8950465055f264b2e3c1e3df1de5b455))
+* **dns:** prefer DoH over HTTP/1 ([](https://github.com/robotnikz/sentinel-dns/commit/bb2679f9c1cc275f5b22d1080e79166e0a148a69))
+
 ## [0.6.1](https://github.com/robotnikz/sentinel-dns/compare/v0.6.0...v0.6.1) (2026-01-27)
 
 * Merge pull request #44 from robotnikz/fix/dns-forward-timeouts ([](https://github.com/robotnikz/sentinel-dns/commit/79893372d0bd5353db9731012d3c46c26d9d2729)), closes [#44](https://github.com/robotnikz/sentinel-dns/issues/44)
