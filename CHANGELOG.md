@@ -1,3 +1,9 @@
+## [0.5.6](https://github.com/robotnikz/sentinel-dns/compare/v0.5.5...v0.5.6) (2026-01-27)
+
+### fix
+
+* mention Tailscale Override DNS Servers ([](https://github.com/robotnikz/sentinel-dns/commit/9fd254b545ef2e4fb8a02c2815fbedd63b169d40))
+
 ## [0.5.5](https://github.com/robotnikz/sentinel-dns/compare/v0.5.4...v0.5.5) (2026-01-27)
 
 ### fix
