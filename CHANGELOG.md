@@ -1,3 +1,11 @@
+## <small>0.5.1 (2026-01-27)</small>
+
+* fix: client/subnet policy precedence and clients page rename ([3e429d6](https://github.com/robotnikz/sentinel-dns/commit/3e429d6)), closes [#39](https://github.com/robotnikz/sentinel-dns/issues/39)
+* Fix client/subnet rule precedence and cleanup ([c86ad93](https://github.com/robotnikz/sentinel-dns/commit/c86ad93))
+* Fix e2e navigation after Clients rename ([1eded14](https://github.com/robotnikz/sentinel-dns/commit/1eded14))
+* Merge pull request #39 from robotnikz/fix/quick-fixes ([3dbbd61](https://github.com/robotnikz/sentinel-dns/commit/3dbbd61)), closes [#39](https://github.com/robotnikz/sentinel-dns/issues/39)
+* Remove Network Map graph tab and rename menu ([557b240](https://github.com/robotnikz/sentinel-dns/commit/557b240))
+
 ## 0.5.0 (2026-01-26)
 
 * Merge pull request #38 from robotnikz/feat/dashboard-toplists-timeframe ([9099fa4](https://github.com/robotnikz/sentinel-dns/commit/9099fa4)), closes [#38](https://github.com/robotnikz/sentinel-dns/issues/38)
