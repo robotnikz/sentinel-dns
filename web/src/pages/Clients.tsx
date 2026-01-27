@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Smartphone, Laptop, Tv, Gamepad2, Tablet, Search, Shield, GlobeLock, X, Filter, Lock, Skull, Heart, MessageCircle, Play, ShoppingCart, Ban, Grid, HelpCircle, Info, Moon, Clock, Calendar, Check, Pause, ChevronDown, ChevronUp, WifiOff, Power, Youtube, Network, Router, Sliders, Plus, Save, Fingerprint, RefreshCw, Pencil, Trash2 } from 'lucide-react';
-import { ClientProfile, ContentCategory, AppService, ScheduleModeType, BlocklistMode } from '../types';
+import { ClientProfile, ContentCategory, AppService, ScheduleModeType, BlocklistMode, Schedule } from '../types';
 import { AppLogo } from '../components/AppLogo';
 import { useClients } from '../contexts/ClientsContext';
 import Modal from '../components/Modal';
@@ -26,6 +26,7 @@ const Clients: React.FC = () => {
   const [addMode, setAddMode] = useState<'manual' | 'scan'>('manual'); // New: Switch between manual and scan
     const [editingClient, setEditingClient] = useState<ClientProfile | null>(null);
         const [clientToDelete, setClientToDelete] = useState<ClientProfile | null>(null);
+                const [scheduleToDelete, setScheduleToDelete] = useState<Schedule | null>(null);
 
     // Discovered clients (best-effort from DNS logs + optional reverse DNS)
     const [discovered, setDiscovered] = useState<Array<{ ip: string; hostname: string | null; lastSeen?: string | null }>>([]);
@@ -521,6 +522,17 @@ const Clients: React.FC = () => {
       setClientToDelete(null);
   };
 
+  const confirmDeleteSchedule = () => {
+      if (!selectedClient || !scheduleToDelete) return;
+
+      const scheduleId = scheduleToDelete.id;
+      const updatedSchedules = selectedClient.schedules.filter((s) => s.id !== scheduleId);
+      if (editingScheduleId === scheduleId) setEditingScheduleId(null);
+
+      handleUpdateClient({ ...selectedClient, schedules: updatedSchedules });
+      setScheduleToDelete(null);
+  };
+
   // Wrapper for updating client that updates both local view state and global state
   const handleUpdateClient = (updated: ClientProfile) => {
       setSelectedClient(updated);
@@ -826,7 +838,7 @@ const Clients: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+        <div className={`space-y-6 animate-fade-in ${selectedClient ? 'xl:pr-[520px]' : ''}`}>
       {/* Header & Controls */}
       <div className="flex flex-col gap-6">
         <div className="flex justify-between items-end">
@@ -1185,10 +1197,25 @@ const Clients: React.FC = () => {
               </div>
       </Modal>
 
-      {/* DETAIL SIDEBAR MODAL (Simplified for brevity - logic remains same but using handleUpdateClient) */}
-        {selectedClient && (
-            <Modal open={true} onClose={() => setSelectedClient(null)} zIndex={1100}>
-                <div className={`w-full max-w-5xl h-[85vh] max-h-[calc(100vh-2rem)] flex flex-col rounded-lg overflow-hidden shadow-2xl bg-[#09090b] relative border animate-fade-in ${selectedClient.isInternetPaused ? 'border-rose-900' : 'border-[#27272a]'}`}>
+            {/* CLIENT DETAILS SIDEBAR (slides in from the right; hidden by default) */}
+            {selectedClient ? (
+                <div
+                    className="fixed inset-0 z-[1099] bg-black/70 backdrop-blur-sm xl:hidden"
+                    onMouseDown={() => setSelectedClient(null)}
+                />
+            ) : null}
+
+            <div
+                className={`fixed top-0 right-0 z-[1100] h-full w-full max-w-[520px] transition-transform duration-300 ease-out ${
+                    selectedClient ? 'translate-x-0' : 'translate-x-full'
+                }`}
+            >
+                {selectedClient ? (
+                    <div
+                        className={`h-full flex flex-col overflow-hidden shadow-2xl bg-[#09090b] border-l ${
+                            selectedClient.isInternetPaused ? 'border-rose-900' : 'border-[#27272a]'
+                        }`}
+                    >
                     {/* Header */}
                     <div className="p-5 border-b border-[#27272a] bg-[#121214] flex items-start justify-between gap-6">
                         <div className="flex items-start gap-4 min-w-0">
@@ -1504,11 +1531,29 @@ const Clients: React.FC = () => {
                                                   onChange={(e) => updateScheduleFields(schedule.id, { name: e.target.value })}
                                                   className="bg-transparent border border-transparent focus:border-[#27272a] rounded px-2 py-1 text-sm font-bold text-zinc-200 w-full"
                                               />
-                                              <div
-                                                  onClick={() => toggleScheduleActive(schedule.id)}
-                                                  className={`w-10 h-5 rounded-full relative cursor-pointer transition-colors flex-shrink-0 ${schedule.active ? 'bg-emerald-600' : 'bg-zinc-700'}`}
-                                              >
-                                                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${schedule.active ? 'right-0.5' : 'left-0.5'}`}></div>
+                                              <div className="flex items-center gap-1 flex-shrink-0">
+                                                  <button
+                                                      onClick={() => setEditingScheduleId((prev) => (prev === schedule.id ? null : schedule.id))}
+                                                      className="p-1.5 rounded text-zinc-500 hover:text-white hover:bg-[#18181b]"
+                                                      title="Edit schedule"
+                                                      aria-label={`Edit schedule ${schedule.name}`}
+                                                  >
+                                                      <Pencil className="w-3.5 h-3.5" />
+                                                  </button>
+                                                  <button
+                                                      onClick={() => setScheduleToDelete(schedule)}
+                                                      className="p-1.5 rounded text-zinc-500 hover:text-rose-300 hover:bg-[#18181b]"
+                                                      title="Delete schedule"
+                                                      aria-label={`Delete schedule ${schedule.name}`}
+                                                  >
+                                                      <Trash2 className="w-3.5 h-3.5" />
+                                                  </button>
+                                                  <div
+                                                      onClick={() => toggleScheduleActive(schedule.id)}
+                                                      className={`w-10 h-5 rounded-full relative cursor-pointer transition-colors flex-shrink-0 ${schedule.active ? 'bg-emerald-600' : 'bg-zinc-700'}`}
+                                                  >
+                                                      <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${schedule.active ? 'right-0.5' : 'left-0.5'}`}></div>
+                                                  </div>
                                               </div>
                                           </div>
 
@@ -1603,8 +1648,8 @@ const Clients: React.FC = () => {
                          )}
                     </div>
                 </div>
-            </Modal>
-      )}
+                ) : null}
+            </div>
 
       {/* DELETE CONFIRMATION MODAL */}
       {clientToDelete && (
@@ -1636,6 +1681,45 @@ const Clients: React.FC = () => {
                       </button>
                       <button
                           onClick={confirmDeleteClient}
+                          className="px-6 py-2 rounded text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white"
+                      >
+                          DELETE
+                      </button>
+                  </div>
+              </div>
+          </Modal>
+      )}
+
+      {/* DELETE SCHEDULE CONFIRMATION MODAL */}
+      {scheduleToDelete && selectedClient && (
+          <Modal open={true} onClose={() => setScheduleToDelete(null)} zIndex={1200}>
+              <div className="w-full max-w-md bg-[#09090b] border border-[#27272a] rounded-lg overflow-hidden shadow-2xl animate-fade-in">
+                  <div className="p-5 border-b border-[#27272a] flex justify-between items-center bg-[#121214]">
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                          <Trash2 className="w-4 h-4 text-rose-500" />
+                          Delete Schedule
+                      </h3>
+                      <button onClick={() => setScheduleToDelete(null)} className="text-zinc-500 hover:text-white" aria-label="Close">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  <div className="p-6 space-y-3">
+                      <div className="text-sm text-zinc-200">
+                          Delete <span className="font-bold">{scheduleToDelete.name}</span>?
+                      </div>
+                      <div className="text-xs text-zinc-500">
+                          This removes the schedule from <span className="font-bold">{selectedClient.name}</span>. You can recreate it anytime.
+                      </div>
+                  </div>
+                  <div className="p-5 border-t border-[#27272a] bg-[#121214] flex flex-col sm:flex-row justify-end gap-3">
+                      <button
+                          onClick={() => setScheduleToDelete(null)}
+                          className="px-4 py-2 rounded text-xs font-bold text-zinc-400 hover:text-white"
+                      >
+                          CANCEL
+                      </button>
+                      <button
+                          onClick={confirmDeleteSchedule}
                           className="px-6 py-2 rounded text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white"
                       >
                           DELETE

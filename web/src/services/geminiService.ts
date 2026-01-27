@@ -1,7 +1,7 @@
+import { apiFetch, getAuthHeaders } from './apiClient';
+
 export const analyzeDomain = async (domain: string): Promise<string> => {
   try {
-    const { apiFetch, getAuthHeaders } = await import('./apiClient');
-
     const res = await apiFetch('/api/ai/analyze-domain', {
       method: 'POST',
       headers: {

@@ -1,0 +1,5 @@
+services:
+  sentinel:
+    build:
+      context: ../..
+      dockerfile: docker/single/Dockerfile

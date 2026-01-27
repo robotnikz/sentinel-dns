@@ -170,6 +170,58 @@ docker compose logs -f
 curl -fsS http://<server-ip>:8080/api/health
 ```
 
+## Debugging DNS upstream (resolver switching)
+
+Sentinel stores your upstream selection in Postgres (`settings.key = dns_settings`) and the DNS runtime reloads it periodically.
+
+### Option A: API (recommended)
+
+After logging into the UI as admin, you can open the DNS status endpoint in the same browser session:
+
+- `http://<server-ip>:8080/api/dns/status`
+
+It includes an `upstream` object with:
+
+- `configured`: what is stored/selected (`unbound` vs `forward` + transport)
+- `effective`: what the DNS runtime is currently using (host/port or DoH URL)
+- `refreshedAt`: when it last reloaded from the DB
+
+If you prefer CLI, you can also login and reuse the cookie:
+
+```bash
+# 1) Login (writes cookie file)
+curl -sS -c cookies.txt \
+  -H 'content-type: application/json' \
+  -d '{"username":"<admin>","password":"<password>"}' \
+  http://<server-ip>:8080/api/auth/login
+
+# 2) Fetch status using the cookie
+curl -sS -b cookies.txt http://<server-ip>:8080/api/dns/status
+```
+
+### Option B: Container-level checks (no API auth required)
+
+Read the persisted value from inside the container:
+
+```bash
+docker exec sentinel-dns \
+  psql -h localhost -U sentinel -d sentinel -X -q -t -A -P pager=off \
+  -c "select value::text from settings where key='dns_settings';"
+```
+
+Generate a few DNS queries and check outbound connections (transport proof):
+
+```bash
+# DoH (443)
+docker exec sentinel-dns ss -tn state time-wait | grep ':443' | head
+
+# DoT (853)
+docker exec sentinel-dns ss -tn state time-wait | grep ':853' | head
+
+# TCP upstream (53)
+docker exec sentinel-dns ss -tn state time-wait | grep ':53' | head
+```
+
 ## Smoke test (Docker Compose)
 
 For a quick end-to-end sanity check (container starts, API health responds, DNS answers over UDP):

@@ -236,6 +236,52 @@ type UpstreamCache = {
     | { transport: 'doh'; dohUrl: string };
 };
 
+export type DnsUpstreamConfigured =
+  | { upstreamMode: 'unbound' }
+  | {
+      upstreamMode: 'forward';
+      forward: {
+        transport: 'udp' | 'tcp' | 'dot' | 'doh';
+        host?: string;
+        port?: number;
+        dohUrl?: string;
+      };
+    };
+
+export type DnsUpstreamDebug = {
+  refreshedAt: string | null;
+  refreshedAtMs: number;
+  refreshIntervalMs: number;
+  configured: DnsUpstreamConfigured | null;
+  effective: UpstreamCache['upstream'] | null;
+  lastForwardOkAt: string | null;
+  lastForwardOkAtMs: number;
+  lastForwardError:
+    | {
+        at: string;
+        atMs: number;
+        transport: UpstreamCache['upstream']['transport'];
+        target: string;
+        name?: string;
+        code?: string;
+        message: string;
+      }
+    | null;
+};
+
+const DNS_CACHE_REFRESH_INTERVAL_MS = 5000;
+
+export const dnsUpstreamDebug: DnsUpstreamDebug = {
+  refreshedAt: null,
+  refreshedAtMs: 0,
+  refreshIntervalMs: DNS_CACHE_REFRESH_INTERVAL_MS,
+  configured: null,
+  effective: null,
+  lastForwardOkAt: null,
+  lastForwardOkAtMs: 0,
+  lastForwardError: null
+};
+
 type ProtectionPauseState =
   | { mode: 'OFF' }
   | { mode: 'FOREVER' }
@@ -1514,6 +1560,8 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       const value = dnsSettings.rows?.[0]?.value;
       const mode = value?.upstreamMode === 'forward' ? 'forward' : 'unbound';
+
+      let configured: DnsUpstreamConfigured = mode === 'forward' ? { upstreamMode: 'forward', forward: { transport: 'udp' } } : { upstreamMode: 'unbound' };
       if (mode === 'forward') {
         const transport =
           value?.forward?.transport === 'tcp'
@@ -1524,15 +1572,20 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
                 ? 'doh'
                 : 'udp';
 
+        configured = { upstreamMode: 'forward', forward: { transport } };
+
         if (transport === 'doh') {
           const dohUrl = typeof value?.forward?.dohUrl === 'string' ? String(value.forward.dohUrl) : '';
           if (dohUrl) {
+            configured.forward.dohUrl = dohUrl;
             upstreamCache.upstream = { transport: 'doh', dohUrl };
           }
         } else {
           const host = typeof value?.forward?.host === 'string' ? String(value.forward.host) : '';
           const port = Number(value?.forward?.port);
           if (host && Number.isFinite(port) && port > 0) {
+            configured.forward.host = host;
+            configured.forward.port = Math.min(65535, Math.floor(port));
             upstreamCache.upstream = { host, port: Math.min(65535, Math.floor(port)), transport };
           }
         }
@@ -1542,6 +1595,11 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       upstreamCache.loadedAt = Date.now();
+
+      dnsUpstreamDebug.refreshedAtMs = upstreamCache.loadedAt;
+      dnsUpstreamDebug.refreshedAt = new Date(upstreamCache.loadedAt).toISOString();
+      dnsUpstreamDebug.configured = configured;
+      dnsUpstreamDebug.effective = upstreamCache.upstream;
     } catch {
       // keep last good caches
     }
@@ -1549,7 +1607,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
   await refreshCaches();
   await refreshProtectionPause();
-  const refreshTimer = setInterval(refreshCaches, 5000);
+  const refreshTimer = setInterval(refreshCaches, DNS_CACHE_REFRESH_INTERVAL_MS);
   const pauseTimer = setInterval(refreshProtectionPause, 1000);
 
   const resolveDnsBindHosts = (
@@ -1594,6 +1652,48 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const q = query.questions?.[0];
       const name = q?.name ? String(q.name) : '';
       const qtype = q?.type ? String(q.type) : 'A';
+
+      const forwardUpstream = async (upstream: UpstreamCache['upstream']): Promise<Buffer> => {
+        return upstream.transport === 'tcp'
+          ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
+          : upstream.transport === 'dot'
+            ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
+            : upstream.transport === 'doh'
+              ? await forwardDoh(upstream.dohUrl, msg)
+              : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+      };
+
+      const forwardActiveUpstreamWithTelemetry = async (): Promise<Buffer> => {
+        const upstream = upstreamCache.upstream;
+        try {
+          const resp = await forwardUpstream(upstream);
+          const now = Date.now();
+          dnsUpstreamDebug.lastForwardOkAtMs = now;
+          dnsUpstreamDebug.lastForwardOkAt = new Date(now).toISOString();
+          dnsUpstreamDebug.lastForwardError = null;
+          return resp;
+        } catch (e: any) {
+          const now = Date.now();
+          const err = e instanceof Error ? e : new Error(typeof e === 'string' ? e : 'UPSTREAM_ERROR');
+          const code = typeof e?.code === 'string' ? String(e.code) : undefined;
+          const target =
+            upstream.transport === 'doh' ? upstream.dohUrl : `${upstream.host}:${String(upstream.port ?? '')}`;
+          dnsUpstreamDebug.lastForwardError = {
+            at: new Date(now).toISOString(),
+            atMs: now,
+            transport: upstream.transport,
+            target,
+            name: err.name || undefined,
+            code,
+            message: err.message || String(err)
+          };
+          throw e;
+        }
+      };
+
+      const forwardActiveUpstreamNoTelemetry = async (): Promise<Buffer> => {
+        return await forwardUpstream(upstreamCache.upstream);
+      };
 
       // Local rewrites (exact + wildcard) handled before block/allow evaluation.
       const normalizedName = normalizeName(name);
@@ -1656,15 +1756,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       // Global protection pause: bypass all filtering and allow queries through.
       // (Rewrites are still handled above; internet-paused remains a hard kill-switch.)
       if (isProtectionPaused(protectionPause)) {
-        const upstream = upstreamCache.upstream;
-        const upstreamResp =
-          upstream.transport === 'tcp'
-            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-            : upstream.transport === 'dot'
-              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-              : upstream.transport === 'doh'
-                ? await forwardDoh(upstream.dohUrl, msg)
-                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+        const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
         const answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
         await insertQueryLog(db, {
@@ -1713,15 +1805,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       if (clientManual === 'ALLOWED') {
-        const upstream = upstreamCache.upstream;
-        const upstreamResp =
-          upstream.transport === 'tcp'
-            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-            : upstream.transport === 'dot'
-              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-              : upstream.transport === 'doh'
-                ? await forwardDoh(upstream.dohUrl, msg)
-                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+        const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
         await insertQueryLog(db, {
           id: crypto.randomUUID(),
@@ -1762,15 +1846,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       if (subnetManual === 'ALLOWED') {
-        const upstream = upstreamCache.upstream;
-        const upstreamResp =
-          upstream.transport === 'tcp'
-            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-            : upstream.transport === 'dot'
-              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-              : upstream.transport === 'doh'
-                ? await forwardDoh(upstream.dohUrl, msg)
-                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+        const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
         await insertQueryLog(db, {
           id: crypto.randomUUID(),
@@ -1805,15 +1881,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       if (globalManual === 'ALLOWED') {
-        const upstream = upstreamCache.upstream;
-        const upstreamResp =
-          upstream.transport === 'tcp'
-            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-            : upstream.transport === 'dot'
-              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-              : upstream.transport === 'doh'
-                ? await forwardDoh(upstream.dohUrl, msg)
-                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+        const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
         await insertQueryLog(db, {
           id: crypto.randomUUID(),
@@ -2062,15 +2130,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         let answerIps: string[] | undefined;
         if (config.SHADOW_RESOLVE_BLOCKED) {
           try {
-            const upstream = upstreamCache.upstream;
-            const upstreamResp =
-              upstream.transport === 'tcp'
-                ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-                : upstream.transport === 'dot'
-                  ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-                  : upstream.transport === 'doh'
-                    ? await forwardDoh(upstream.dohUrl, msg)
-                    : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+            const upstreamResp = await forwardActiveUpstreamNoTelemetry();
             answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
           } catch {
             // ignore: blocked response should still be fast/reliable
@@ -2092,15 +2152,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         return resp;
       }
 
-      const upstream = upstreamCache.upstream;
-      const upstreamResp =
-        upstream.transport === 'tcp'
-          ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-          : upstream.transport === 'dot'
-            ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-            : upstream.transport === 'doh'
-              ? await forwardDoh(upstream.dohUrl, msg)
-              : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+      const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
       const finalStatus: 'SHADOW_BLOCKED' | 'PERMITTED' =
         decision === 'SHADOW_BLOCKED' || !!appShadowHit ? 'SHADOW_BLOCKED' : 'PERMITTED';
