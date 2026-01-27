@@ -1,3 +1,13 @@
+## [0.6.1](https://github.com/robotnikz/sentinel-dns/compare/v0.6.0...v0.6.1) (2026-01-27)
+
+* Merge pull request #44 from robotnikz/fix/dns-forward-timeouts ([](https://github.com/robotnikz/sentinel-dns/commit/79893372d0bd5353db9731012d3c46c26d9d2729)), closes [#44](https://github.com/robotnikz/sentinel-dns/issues/44)
+
+### fix
+
+* **dns:** configurable forward timeouts ([](https://github.com/robotnikz/sentinel-dns/commit/fba135b8be8cacc738befa2b96e55dd600a4b7dd))
+* **dns:** default forward timeouts when missing ([](https://github.com/robotnikz/sentinel-dns/commit/e547639594efaf56ce8ef931465b55afd1361231))
+* **dns:** raise default DoH forward timeout ([](https://github.com/robotnikz/sentinel-dns/commit/17ff7a3d231db36473fca306264a45508c48c6b3))
+
 ## [0.6.0](https://github.com/robotnikz/sentinel-dns/compare/v0.5.6...v0.6.0) (2026-01-27)
 
 * Merge pull request #43 from robotnikz/fix/dns-upstream-telemetry ([](https://github.com/robotnikz/sentinel-dns/commit/966810e6ff2a2520308bd00493d55a5d4bd744c7)), closes [#43](https://github.com/robotnikz/sentinel-dns/issues/43)
