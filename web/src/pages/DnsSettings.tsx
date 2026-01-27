@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Server, Lock, Edit3, Plus, Trash2, Settings, Route, Wifi, Router, Info, Save, RotateCcw, Network, Asterisk, ShieldCheck, Zap, Globe, Check, Shield, UserPlus, Clock } from 'lucide-react';
-import { getAuthHeaders } from '../services/apiClient';
+import { apiFetch, getAuthHeaders } from '../services/apiClient';
 import Modal from '../components/Modal';
 
 type DnsRewrite = {
@@ -20,6 +20,40 @@ interface Resolver {
     selected: boolean;
     isCustom?: boolean;
 }
+
+type DnsUpstreamConfigured =
+    | { upstreamMode: 'unbound' }
+    | {
+          upstreamMode: 'forward';
+          forward: {
+              transport: 'udp' | 'tcp' | 'dot' | 'doh';
+              host?: string;
+              port?: number;
+              dohUrl?: string;
+          };
+      };
+
+type DnsUpstreamEffective =
+    | { transport: 'udp' | 'tcp' | 'dot'; host: string; port: number }
+    | { transport: 'doh'; dohUrl: string };
+
+type DnsUpstreamDebug = {
+    refreshedAt: string | null;
+    refreshIntervalMs: number;
+    configured: DnsUpstreamConfigured | null;
+    effective: DnsUpstreamEffective | null;
+    lastForwardOkAt?: string | null;
+    lastForwardError?:
+        | {
+              at: string;
+              transport: 'udp' | 'tcp' | 'dot' | 'doh';
+              target: string;
+              name?: string;
+              code?: string;
+              message: string;
+          }
+        | null;
+};
 
 const DnsSettings: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'upstream' | 'records' | 'discovery'>('upstream');
@@ -68,7 +102,77 @@ const DnsSettings: React.FC = () => {
   const [newHostname, setNewHostname] = useState(''); // Essential for TLS
   const [isVerifying, setIsVerifying] = useState(false);
 
+        // Debug: runtime-effective upstream (read-only)
+        const [upstreamDebug, setUpstreamDebug] = useState<DnsUpstreamDebug | null>(null);
+        const [upstreamDebugLoading, setUpstreamDebugLoading] = useState(false);
+        const [upstreamDebugError, setUpstreamDebugError] = useState<string | null>(null);
+
     const selectedResolver = useMemo(() => resolvers.find(r => r.selected), [resolvers]);
+
+    const loadUpstreamDebug = async () => {
+        setUpstreamDebugLoading(true);
+        setUpstreamDebugError(null);
+
+        try {
+            const res = await apiFetch('/api/dns/status', {
+                headers: {
+                    ...getAuthHeaders()
+                }
+            });
+            const data = await res.json().catch(() => ({} as any));
+            if (!res.ok) {
+                setUpstreamDebug(null);
+                setUpstreamDebugError(data?.message || data?.error || (res.status === 401 ? 'Please login as admin to view runtime status.' : 'Failed to load DNS status.'));
+                return;
+            }
+
+            setUpstreamDebug((data?.upstream ?? null) as any);
+        } catch {
+            setUpstreamDebug(null);
+            setUpstreamDebugError('Backend not reachable.');
+        } finally {
+            setUpstreamDebugLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab === 'upstream') {
+            void loadUpstreamDebug();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeTab]);
+
+    const upstreamDebugText = useMemo(() => {
+        const cfg = upstreamDebug?.configured ?? null;
+        const eff = upstreamDebug?.effective ?? null;
+        const lastOkAt = upstreamDebug?.lastForwardOkAt ?? null;
+        const lastErr = upstreamDebug?.lastForwardError ?? null;
+
+        const formatConfigured = (): string => {
+            if (!cfg) return 'Unknown';
+            if (cfg.upstreamMode === 'unbound') return 'unbound';
+            const t = cfg.forward?.transport;
+            if (t === 'doh') return `forward/doh ${cfg.forward?.dohUrl || ''}`.trim();
+            const host = cfg.forward?.host || '';
+            const port = cfg.forward?.port;
+            return `forward/${t} ${host}${port ? `:${port}` : ''}`.trim();
+        };
+
+        const formatEffective = (): string => {
+            if (!eff) return 'Unknown';
+            if (eff.transport === 'doh') return `doh ${eff.dohUrl}`;
+            return `${eff.transport} ${eff.host}:${eff.port}`;
+        };
+
+        return {
+            configured: formatConfigured(),
+            effective: formatEffective(),
+            refreshedAt: upstreamDebug?.refreshedAt || null,
+            refreshEveryMs: Number(upstreamDebug?.refreshIntervalMs ?? 0),
+            lastOkAt,
+            lastErr
+        };
+    }, [upstreamDebug]);
 
     const effectiveStatus = useMemo(() => {
         const r = selectedResolver;
@@ -415,6 +519,8 @@ const DnsSettings: React.FC = () => {
             }
 
             showPageMsg('Saved', 'success');
+            // Best-effort: refresh runtime debug (DNS worker reloads settings periodically).
+            void loadUpstreamDebug();
         } catch {
             showPageMsg('Backend not reachable.', 'error');
         }
@@ -424,8 +530,7 @@ const DnsSettings: React.FC = () => {
       setResolvers(prev => prev.map(r => ({ ...r, selected: r.id === id })));
   };
 
-  const deleteResolver = (id: number, e: React.MouseEvent) => {
-      e.stopPropagation();
+  const deleteResolver = (id: number) => {
       setResolvers(prev => prev.filter(r => r.id !== id));
   };
 
@@ -642,12 +747,16 @@ const DnsSettings: React.FC = () => {
                 )}
                 
                 <div className="space-y-2 flex-1 overflow-y-auto max-h-[400px]">
-                   {resolvers.map((server) => {
+                                     {resolvers.map((server) => {
                       const isUnbound = server.type === 'Recursive';
                       return (
-                      <label 
+                                            <div 
                         key={server.id} 
-                        onClick={() => toggleResolver(server.id)}
+                                                onClick={(e) => {
+                                                        const target = e.target as HTMLElement | null;
+                                                        if (target?.closest?.('button[data-action="delete-resolver"]')) return;
+                                                        toggleResolver(server.id);
+                                                }}
                         className={`relative flex items-center justify-between p-3 rounded border cursor-pointer transition-all group ${server.selected ? 'bg-[#18181b] border-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.1)]' : 'bg-[#09090b] border-[#27272a] hover:border-zinc-600'}`}
                       >
                          <div className="flex items-center gap-3">
@@ -685,8 +794,18 @@ const DnsSettings: React.FC = () => {
                          <div className="flex flex-col items-end gap-1.5">
                             {server.isCustom && (
                                 <button 
-                                    onClick={(e) => deleteResolver(server.id, e)}
-                                    className="p-1.5 text-zinc-600 hover:text-rose-500 transition-colors opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
+                                    type="button"
+                                    data-action="delete-resolver"
+                                    onPointerDown={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                    }}
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        deleteResolver(server.id);
+                                    }}
+                                    className="h-8 w-8 inline-flex items-center justify-center text-zinc-600 hover:text-rose-500 transition-colors opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto"
                                     aria-label={`Delete resolver ${server.name}`}
                                     title="Delete resolver"
                                 >
@@ -694,7 +813,7 @@ const DnsSettings: React.FC = () => {
                                 </button>
                             )}
                          </div>
-                      </label>
+                      </div>
                    )})}
                 </div>
              </div>
@@ -734,6 +853,69 @@ const DnsSettings: React.FC = () => {
                             </div>
                         );
                     })}
+                </div>
+
+                <div className="mt-6 p-4 bg-[#0b0b0d] border border-[#27272a] rounded-lg">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <div className="text-xs font-bold text-zinc-300 flex items-center gap-2">
+                                <Network className="w-4 h-4 text-emerald-400" /> Effective Upstream (Runtime)
+                            </div>
+                            <div className="text-[10px] text-zinc-500 mt-1">
+                                Loaded from <span className="font-mono text-zinc-400">/api/dns/status</span>. Applies within ~{Math.max(1, Math.round((upstreamDebugText.refreshEveryMs || 5000) / 1000))}s after saving.
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => void loadUpstreamDebug()}
+                            disabled={upstreamDebugLoading}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 text-zinc-200 border border-zinc-700 rounded text-[11px] font-bold hover:bg-white hover:text-black transition-colors disabled:opacity-60 disabled:hover:bg-zinc-800 disabled:hover:text-zinc-200"
+                        >
+                            <RotateCcw className={`w-3.5 h-3.5 ${upstreamDebugLoading ? 'animate-spin' : ''}`} />
+                            REFRESH
+                        </button>
+                    </div>
+
+                    {upstreamDebugError ? (
+                        <div className="mt-3 text-xs text-rose-400">{upstreamDebugError}</div>
+                    ) : (
+                        <div className="mt-3 grid grid-cols-1 gap-2">
+                            <div className="flex items-center justify-between gap-3 text-[11px]">
+                                <span className="text-zinc-500">Configured</span>
+                                <span className="text-zinc-200 font-mono truncate max-w-[70%]">{upstreamDebugText.configured}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 text-[11px]">
+                                <span className="text-zinc-500">Effective</span>
+                                <span className="text-zinc-200 font-mono truncate max-w-[70%]">{upstreamDebugText.effective}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 text-[11px]">
+                                <span className="text-zinc-500">Last reload</span>
+                                <span className="text-zinc-400 font-mono">{upstreamDebugText.refreshedAt || 'Unknown'}</span>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3 text-[11px]">
+                                <span className="text-zinc-500">Last success</span>
+                                <span className="text-zinc-400 font-mono">{upstreamDebugText.lastOkAt || 'Never'}</span>
+                            </div>
+
+                            {upstreamDebugText.lastErr ? (
+                                <div className="mt-1 p-2 rounded border border-rose-500/30 bg-rose-950/10">
+                                    <div className="flex items-center justify-between gap-3 text-[11px]">
+                                        <span className="text-rose-300">Last error</span>
+                                        <span className="text-rose-300 font-mono">{upstreamDebugText.lastErr.at}</span>
+                                    </div>
+                                    <div className="mt-1 text-[10px] text-rose-200 font-mono break-all">
+                                        {upstreamDebugText.lastErr.transport} {upstreamDebugText.lastErr.target}
+                                    </div>
+                                    <div className="mt-1 text-[10px] text-rose-200 font-mono break-words">
+                                        {upstreamDebugText.lastErr.code ? `${upstreamDebugText.lastErr.code}: ` : ''}
+                                        {upstreamDebugText.lastErr.message}
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+                    )}
                 </div>
 
                 <div className="mt-8 p-4 bg-indigo-900/10 border border-indigo-500/20 rounded-lg">
