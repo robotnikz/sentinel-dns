@@ -826,7 +826,7 @@ const Clients: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+        <div className={`space-y-6 animate-fade-in ${selectedClient ? 'xl:pr-[520px]' : ''}`}>
       {/* Header & Controls */}
       <div className="flex flex-col gap-6">
         <div className="flex justify-between items-end">
@@ -1185,10 +1185,25 @@ const Clients: React.FC = () => {
               </div>
       </Modal>
 
-      {/* DETAIL SIDEBAR MODAL (Simplified for brevity - logic remains same but using handleUpdateClient) */}
-        {selectedClient && (
-            <Modal open={true} onClose={() => setSelectedClient(null)} zIndex={1100}>
-                <div className={`w-full max-w-5xl h-[85vh] max-h-[calc(100vh-2rem)] flex flex-col rounded-lg overflow-hidden shadow-2xl bg-[#09090b] relative border animate-fade-in ${selectedClient.isInternetPaused ? 'border-rose-900' : 'border-[#27272a]'}`}>
+            {/* CLIENT DETAILS SIDEBAR (slides in from the right; hidden by default) */}
+            {selectedClient ? (
+                <div
+                    className="fixed inset-0 z-[1099] bg-black/70 backdrop-blur-sm xl:hidden"
+                    onMouseDown={() => setSelectedClient(null)}
+                />
+            ) : null}
+
+            <div
+                className={`fixed top-0 right-0 z-[1100] h-full w-full max-w-[520px] transition-transform duration-300 ease-out ${
+                    selectedClient ? 'translate-x-0' : 'translate-x-full'
+                }`}
+            >
+                {selectedClient ? (
+                    <div
+                        className={`h-full flex flex-col overflow-hidden shadow-2xl bg-[#09090b] border-l ${
+                            selectedClient.isInternetPaused ? 'border-rose-900' : 'border-[#27272a]'
+                        }`}
+                    >
                     {/* Header */}
                     <div className="p-5 border-b border-[#27272a] bg-[#121214] flex items-start justify-between gap-6">
                         <div className="flex items-start gap-4 min-w-0">
@@ -1603,8 +1618,8 @@ const Clients: React.FC = () => {
                          )}
                     </div>
                 </div>
-            </Modal>
-      )}
+                ) : null}
+            </div>
 
       {/* DELETE CONFIRMATION MODAL */}
       {clientToDelete && (
