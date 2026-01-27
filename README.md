@@ -198,6 +198,20 @@ If you enable **Exit Node** in the UI, Sentinel can act as your “VPN back home
 
 To route DNS through Sentinel for your tailnet devices, set your tailnet DNS nameserver(s) to Sentinel's Tailscale IP.
 
+### Tailscale clients + Query Logs
+
+If your tailnet devices use Sentinel as DNS but you **don't see any queries** in Query Logs, check the IP family used for DNS.
+
+- Some Tailscale clients prefer the **IPv6 tailnet address** of the resolver (e.g. `fd7a:...`).
+- Sentinel's DNS server must be listening on **IPv4 and IPv6** to see and log those requests.
+
+Per-client policies for Tailscale work the same as LAN devices:
+
+- Add each device as a client using its stable Tailscale IP (usually in `100.64.0.0/10`, or an IPv6 tailnet address).
+- Or add a CIDR client for a whole tailnet range if you want one shared policy.
+
+Once the DNS requests are logged, the Query Logs view can be used to identify the client IPs you should add.
+
 Exit nodes are **not required** for tailnet DNS (DNS-only routing), but they work well together.
 
 ## 🗺️ GeoIP database

@@ -1483,7 +1483,39 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
   const refreshTimer = setInterval(refreshCaches, 5000);
   const pauseTimer = setInterval(refreshProtectionPause, 1000);
 
-  const udp = dgram.createSocket('udp4');
+  const resolveDnsBindHosts = (
+    hostRaw: string
+  ):
+    | { mode: 'v4'; udpHosts: string[]; tcpHosts: string[] }
+    | { mode: 'v6'; udpHosts: string[]; tcpHosts: string[] }
+    | { mode: 'dual'; udpHosts: { v4: string; v6: string }; tcpHosts: { v4: string; v6: string } } => {
+    const host = String(hostRaw ?? '').trim();
+
+    // Explicit IPv6 bind.
+    if (host && host.includes(':') && host !== '0.0.0.0') {
+      return { mode: 'v6', udpHosts: [host], tcpHosts: [host] };
+    }
+
+    // Explicit IPv4 bind.
+    if (host && host !== '0.0.0.0') {
+      return { mode: 'v4', udpHosts: [host], tcpHosts: [host] };
+    }
+
+    // Default: bind both stacks. (Important for Tailscale clients that use IPv6 tailnet IPs.)
+    return { mode: 'dual', udpHosts: { v4: '0.0.0.0', v6: '::' }, tcpHosts: { v4: '0.0.0.0', v6: '::' } };
+  };
+
+  const bindCfg = resolveDnsBindHosts(config.DNS_HOST);
+
+  const udpSockets: dgram.Socket[] = [];
+  if (bindCfg.mode === 'dual') {
+    udpSockets.push(dgram.createSocket('udp4'));
+    udpSockets.push(dgram.createSocket({ type: 'udp6', ipv6Only: true }));
+  } else if (bindCfg.mode === 'v6') {
+    udpSockets.push(dgram.createSocket({ type: 'udp6', ipv6Only: true }));
+  } else {
+    udpSockets.push(dgram.createSocket('udp4'));
+  }
 
   async function handleQuery(msg: Buffer, clientIp: string): Promise<Buffer> {
     const start = Date.now();
@@ -2031,84 +2063,119 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     }
   }
 
-  udp.on('message', async (msg, rinfo) => {
-    try {
-      const resp = await handleQuery(msg, rinfo.address);
-      udp.send(resp, rinfo.port, rinfo.address);
-    } catch {
-      // ignore
-    }
-  });
-
-  const tcp = net.createServer((socket) => {
-    socket.setTimeout(5000);
-    socket.setNoDelay(true);
-
-    let buf = Buffer.alloc(0);
-
-    socket.on('data', async (data) => {
-      buf = Buffer.concat([buf, data]);
-      while (buf.length >= 2) {
-        const len = buf.readUInt16BE(0);
-        if (buf.length < 2 + len) return;
-        const msg = buf.subarray(2, 2 + len);
-        buf = buf.subarray(2 + len);
-
-        try {
-          const ipRaw = socket.remoteAddress ?? '0.0.0.0';
-          const ip = ipRaw.startsWith('::ffff:') ? ipRaw.slice('::ffff:'.length) : ipRaw;
-          const resp = await handleQuery(msg, ip);
-          const outLen = Buffer.alloc(2);
-          outLen.writeUInt16BE(resp.length, 0);
-          socket.write(Buffer.concat([outLen, resp]));
-        } catch {
-          // ignore
-        }
-      }
-    });
-
-    socket.on('timeout', () => {
+  for (const udp of udpSockets) {
+    udp.on('message', async (msg, rinfo) => {
       try {
-        socket.end();
+        const resp = await handleQuery(msg, rinfo.address);
+        udp.send(resp, rinfo.port, rinfo.address);
       } catch {
         // ignore
       }
     });
-  });
+  }
 
-  await new Promise<void>((resolve, reject) => {
-    udp.once('error', reject);
-    udp.bind(config.DNS_PORT, config.DNS_HOST, () => {
-      udp.off('error', reject);
-      resolve();
-    });
-  });
+  const createTcpServer = (): net.Server =>
+    net.createServer((socket) => {
+      socket.setTimeout(5000);
+      socket.setNoDelay(true);
 
-  await new Promise<void>((resolve, reject) => {
-    tcp.once('error', reject);
-    tcp.listen(config.DNS_PORT, config.DNS_HOST, () => {
-      tcp.off('error', reject);
-      resolve();
+      let buf = Buffer.alloc(0);
+
+      socket.on('data', async (data) => {
+        buf = Buffer.concat([buf, data]);
+        while (buf.length >= 2) {
+          const len = buf.readUInt16BE(0);
+          if (buf.length < 2 + len) return;
+          const msg = buf.subarray(2, 2 + len);
+          buf = buf.subarray(2 + len);
+
+          try {
+            const ipRaw = socket.remoteAddress ?? '0.0.0.0';
+            const ip = ipRaw.startsWith('::ffff:') ? ipRaw.slice('::ffff:'.length) : ipRaw;
+            const resp = await handleQuery(msg, ip);
+            const outLen = Buffer.alloc(2);
+            outLen.writeUInt16BE(resp.length, 0);
+            socket.write(Buffer.concat([outLen, resp]));
+          } catch {
+            // ignore
+          }
+        }
+      });
+
+      socket.on('timeout', () => {
+        try {
+          socket.end();
+        } catch {
+          // ignore
+        }
+      });
     });
-  });
+
+  const tcpServers: net.Server[] = [];
+  if (bindCfg.mode === 'dual') {
+    tcpServers.push(createTcpServer());
+    tcpServers.push(createTcpServer());
+  } else {
+    tcpServers.push(createTcpServer());
+  }
+
+  const bindUdp = (udp: dgram.Socket, host: string): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      udp.once('error', reject);
+      udp.bind(config.DNS_PORT, host, () => {
+        udp.off('error', reject);
+        resolve();
+      });
+    });
+
+  const listenTcp = (tcp: net.Server, host: string, opts?: { ipv6Only?: boolean }): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      tcp.once('error', reject);
+      tcp.listen({ port: config.DNS_PORT, host, ipv6Only: opts?.ipv6Only }, () => {
+        tcp.off('error', reject);
+        resolve();
+      });
+    });
+
+  if (bindCfg.mode === 'dual') {
+    // UDP
+    await bindUdp(udpSockets[0], bindCfg.udpHosts.v4);
+    await bindUdp(udpSockets[1], bindCfg.udpHosts.v6);
+
+    // TCP (separate v4/v6 servers to avoid dual-stack quirks)
+    await listenTcp(tcpServers[0], bindCfg.tcpHosts.v4);
+    await listenTcp(tcpServers[1], bindCfg.tcpHosts.v6, { ipv6Only: true });
+  } else {
+    const host = bindCfg.udpHosts[0] ?? config.DNS_HOST;
+    await bindUdp(udpSockets[0], host);
+
+    const tcpHost = bindCfg.tcpHosts[0] ?? config.DNS_HOST;
+    await listenTcp(tcpServers[0], tcpHost, { ipv6Only: bindCfg.mode === 'v6' ? true : undefined });
+  }
 
   async function close(): Promise<void> {
     clearInterval(refreshTimer);
     clearInterval(pauseTimer);
-    await new Promise<void>((resolve) => {
-      try {
-        udp.close(() => resolve());
-      } catch {
-        resolve();
-      }
-    });
-    await new Promise<void>((resolve) => {
-      try {
-        tcp.close(() => resolve());
-      } catch {
-        resolve();
-      }
-    });
+
+    for (const udp of udpSockets) {
+      await new Promise<void>((resolve) => {
+        try {
+          udp.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      });
+    }
+
+    for (const tcp of tcpServers) {
+      await new Promise<void>((resolve) => {
+        try {
+          tcp.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      });
+    }
   }
 
   return { close };
