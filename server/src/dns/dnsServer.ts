@@ -10,6 +10,66 @@ import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { refreshBlocklist } from '../blocklists/refresh.js';
 
+export type DnsRuntimeStats = {
+  startedAt: string | null;
+  lastQueryAt: string | null;
+  lastClientIp: string | null;
+  lastTransport: 'udp' | 'tcp' | null;
+  totalQueries: number;
+  tailscaleQueries: number;
+  tailscaleV4Queries: number;
+  tailscaleV6Queries: number;
+};
+
+export const dnsRuntimeStats: DnsRuntimeStats = {
+  startedAt: null,
+  lastQueryAt: null,
+  lastClientIp: null,
+  lastTransport: null,
+  totalQueries: 0,
+  tailscaleQueries: 0,
+  tailscaleV4Queries: 0,
+  tailscaleV6Queries: 0
+};
+
+const TS_V4_CIDR = ipaddr.parseCIDR('100.64.0.0/10') as [ipaddr.IPv4, number];
+const TS_V6_CIDR = ipaddr.parseCIDR('fd7a:115c:a1e0::/48') as [ipaddr.IPv6, number];
+
+function normalizeClientIp(ipRaw: string): string {
+  const raw = String(ipRaw ?? '').trim();
+  if (!raw) return '0.0.0.0';
+  // Drop zone id (e.g. fe80::1%eth0). Not expected for Tailscale, but harmless.
+  const noZone = raw.includes('%') ? raw.slice(0, raw.indexOf('%')) : raw;
+  // Normalize IPv4-mapped IPv6.
+  return noZone.startsWith('::ffff:') ? noZone.slice('::ffff:'.length) : noZone;
+}
+
+function isTailscaleClientIp(ip: string): { isTailscale: boolean; version: 'v4' | 'v6' | null } {
+  try {
+    const addr = ipaddr.parse(ip);
+    if (addr.kind() === 'ipv4') {
+      return { isTailscale: (addr as ipaddr.IPv4).match(TS_V4_CIDR), version: 'v4' };
+    }
+    return { isTailscale: (addr as ipaddr.IPv6).match(TS_V6_CIDR), version: 'v6' };
+  } catch {
+    return { isTailscale: false, version: null };
+  }
+}
+
+function recordDnsQuerySeen(clientIp: string, transport: 'udp' | 'tcp'): void {
+  dnsRuntimeStats.totalQueries += 1;
+  dnsRuntimeStats.lastQueryAt = new Date().toISOString();
+  dnsRuntimeStats.lastClientIp = clientIp;
+  dnsRuntimeStats.lastTransport = transport;
+
+  const ts = isTailscaleClientIp(clientIp);
+  if (ts.isTailscale) {
+    dnsRuntimeStats.tailscaleQueries += 1;
+    if (ts.version === 'v4') dnsRuntimeStats.tailscaleV4Queries += 1;
+    if (ts.version === 'v6') dnsRuntimeStats.tailscaleV6Queries += 1;
+  }
+}
+
 type RuleMatchDecision = {
   decision: 'ALLOWED' | 'BLOCKED' | 'SHADOW_BLOCKED' | 'NONE';
   blocklistId?: string;
@@ -1140,6 +1200,15 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     return { close: async () => {} };
   }
 
+  dnsRuntimeStats.startedAt = new Date().toISOString();
+  dnsRuntimeStats.lastQueryAt = null;
+  dnsRuntimeStats.lastClientIp = null;
+  dnsRuntimeStats.lastTransport = null;
+  dnsRuntimeStats.totalQueries = 0;
+  dnsRuntimeStats.tailscaleQueries = 0;
+  dnsRuntimeStats.tailscaleV4Queries = 0;
+  dnsRuntimeStats.tailscaleV6Queries = 0;
+
   function logRulesIndexReload(stats: {
     selectedBlocklistCount: number;
     maxId: number;
@@ -2066,7 +2135,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
   for (const udp of udpSockets) {
     udp.on('message', async (msg, rinfo) => {
       try {
-        const resp = await handleQuery(msg, rinfo.address);
+        const clientIp = normalizeClientIp(rinfo.address);
+        recordDnsQuerySeen(clientIp, 'udp');
+        const resp = await handleQuery(msg, clientIp);
         udp.send(resp, rinfo.port, rinfo.address);
       } catch {
         // ignore
@@ -2091,7 +2162,8 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
           try {
             const ipRaw = socket.remoteAddress ?? '0.0.0.0';
-            const ip = ipRaw.startsWith('::ffff:') ? ipRaw.slice('::ffff:'.length) : ipRaw;
+            const ip = normalizeClientIp(ipRaw);
+            recordDnsQuerySeen(ip, 'tcp');
             const resp = await handleQuery(msg, ip);
             const outLen = Buffer.alloc(2);
             outLen.writeUInt16BE(resp.length, 0);
