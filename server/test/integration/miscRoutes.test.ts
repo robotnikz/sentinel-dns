@@ -247,5 +247,15 @@ describe('integration: misc routes (clients + dns + query-logs)', () => {
     expect(list.statusCode).toBe(200);
     const items = Array.isArray(list.json()?.items) ? list.json().items : [];
     expect(items.length).toBe(3);
+
+    const flush = await app.inject({ method: 'POST', url: '/api/query-logs/flush', headers: { cookie } });
+    expect(flush.statusCode).toBe(200);
+    expect(flush.json()).toMatchObject({ ok: true });
+    expect(Number(flush.json()?.deleted)).toBeGreaterThanOrEqual(3);
+
+    const listAfter = await app.inject({ method: 'GET', url: '/api/query-logs?limit=500', headers: { cookie } });
+    expect(listAfter.statusCode).toBe(200);
+    const itemsAfter = Array.isArray(listAfter.json()?.items) ? listAfter.json().items : [];
+    expect(itemsAfter.length).toBe(0);
   });
 });

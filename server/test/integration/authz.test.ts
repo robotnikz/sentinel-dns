@@ -56,6 +56,7 @@ describe('integration: authz gates', () => {
       { method: 'GET', url: '/api/settings' },
       { method: 'PUT', url: '/api/settings/test_key', payload: { any: 'value' } },
       { method: 'GET', url: '/api/query-logs' },
+      { method: 'POST', url: '/api/query-logs/flush' },
       { method: 'GET', url: '/api/suspicious/ignored' },
       { method: 'PUT', url: '/api/suspicious/ignored', payload: { signature: 'Device|Test' } },
       { method: 'DELETE', url: '/api/suspicious/ignored?signature=Device%7CTest' },

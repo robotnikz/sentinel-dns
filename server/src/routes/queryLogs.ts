@@ -134,6 +134,25 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
   );
 
   app.post(
+    '/api/query-logs/flush',
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      await requireAdmin(db, _request);
+
+      const res = await db.pool.query('DELETE FROM query_logs');
+      return {
+        ok: true,
+        deleted: typeof res.rowCount === 'number' ? res.rowCount : 0
+      };
+    }
+  );
+
+  app.post(
     '/api/query-logs/ingest',
     {
         config: {
