@@ -1,3 +1,12 @@
+## [0.6.3](https://github.com/robotnikz/sentinel-dns/compare/v0.6.2...v0.6.3) (2026-01-27)
+
+* Merge pull request #46 from robotnikz/fix/trigger-release ([](https://github.com/robotnikz/sentinel-dns/commit/c2fbc7d4b1e9f86546220f0aed665934790bd18e)), closes [#46](https://github.com/robotnikz/sentinel-dns/issues/46)
+
+### fix
+
+* **dns:** fix DoH IPv4-first lookup for undici ([](https://github.com/robotnikz/sentinel-dns/commit/6262ae640b9b21a84729abab7e61ed30519ded7d))
+* **release:** trigger patch release ([](https://github.com/robotnikz/sentinel-dns/commit/aad150889d9a9f24429ba5f98f1b2f79048ad3af))
+
 ## [0.6.2](https://github.com/robotnikz/sentinel-dns/compare/v0.6.1...v0.6.2) (2026-01-27)
 
 * Merge pull request #45 from robotnikz/fix/dns-forward-timeouts ([](https://github.com/robotnikz/sentinel-dns/commit/80083934449881d512ce346eb0c99d97baa55daa)), closes [#45](https://github.com/robotnikz/sentinel-dns/issues/45)
