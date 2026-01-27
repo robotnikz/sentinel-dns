@@ -110,9 +110,10 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, []);
 
   const addClient = async (client: ClientProfile): Promise<boolean> => {
-    setClients(prev => (prev.some(c => c.id === client.id) ? prev : [...prev, client]));
+    const prev = clients;
+    setClients((cur) => (cur.some((c) => c.id === client.id) ? cur : [...cur, client]));
 
-    return persistClient(`/api/clients/${encodeURIComponent(client.id)}`,
+    const ok = await persistClient(`/api/clients/${encodeURIComponent(client.id)}`,
       {
         method: 'PUT',
         headers: {
@@ -122,12 +123,16 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
         body: JSON.stringify(client)
       }
     );
+
+    if (!ok) setClients(prev);
+    return ok;
   };
 
   const updateClient = async (updatedClient: ClientProfile): Promise<boolean> => {
-    setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+    const prev = clients;
+    setClients((cur) => cur.map((c) => (c.id === updatedClient.id ? updatedClient : c)));
 
-    return persistClient(`/api/clients/${encodeURIComponent(updatedClient.id)}`,
+    const ok = await persistClient(`/api/clients/${encodeURIComponent(updatedClient.id)}`,
       {
         method: 'PUT',
         headers: {
@@ -137,12 +142,16 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
         body: JSON.stringify(updatedClient)
       }
     );
+
+    if (!ok) setClients(prev);
+    return ok;
   };
 
   const removeClient = async (id: string): Promise<boolean> => {
-    setClients(prev => prev.filter(c => c.id !== id));
+    const prev = clients;
+    setClients((cur) => cur.filter((c) => c.id !== id));
 
-    return persistClient(`/api/clients/${encodeURIComponent(id)}`,
+    const ok = await persistClient(`/api/clients/${encodeURIComponent(id)}`,
       {
         method: 'DELETE',
         headers: {
@@ -150,6 +159,9 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
       }
     );
+
+    if (!ok) setClients(prev);
+    return ok;
   };
 
   const getClientByIp = (ip: string) => {

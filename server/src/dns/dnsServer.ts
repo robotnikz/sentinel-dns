@@ -1730,6 +1730,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       // Compute effective policy (base + schedules).
       const now = new Date();
+      const policyPrefix = (scope: 'client' | 'subnet' | 'global'): string =>
+        scope === 'client' ? 'ClientPolicy' : scope === 'subnet' ? 'SubnetPolicy' : 'GlobalPolicy';
+
       const effectiveBlockedCategories = new Set<ContentCategory>();
       const shouldUseGlobalCategories = exactClient?.useGlobalCategories === false ? false : subnetClient?.useGlobalCategories === false ? false : true;
       const shouldUseGlobalApps = exactClient?.useGlobalApps === false ? false : subnetClient?.useGlobalApps === false ? false : true;
@@ -1751,8 +1754,10 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
       let blockAll = false;
 
-      for (const s of [...(subnetClient?.schedules ?? []), ...(exactClient?.schedules ?? [])]) {
-        if (!isScheduleActiveNow(s, now)) continue;
+      const activeSubnetSchedules = (subnetClient?.schedules ?? []).filter((s) => isScheduleActiveNow(s, now));
+      const activeClientSchedules = (exactClient?.schedules ?? []).filter((s) => isScheduleActiveNow(s, now));
+
+      for (const s of [...activeSubnetSchedules, ...activeClientSchedules]) {
         if (s.blockAll) blockAll = true;
         for (const c of s.blockedCategories ?? []) effectiveBlockedCategories.add(c);
         for (const a of s.blockedApps ?? []) effectiveActiveApps.add(a);
@@ -1761,6 +1766,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
 
       if (blockAll) {
+        const blockAllScope: 'client' | 'subnet' = activeClientSchedules.some((s) => s.blockAll) ? 'client' : 'subnet';
         const resp = buildNxDomainResponse(query);
         await insertQueryLog(db, {
           id: crypto.randomUUID(),
@@ -1771,13 +1777,39 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           status: 'BLOCKED',
           type: qtype,
           durationMs: Date.now() - start,
-          blocklistId: 'ClientPolicy:BlockAll'
+          blocklistId: `${policyPrefix(blockAllScope)}:BlockAll`
         });
         return resp;
       }
 
-      const blockedApp = isAppBlockedByPolicy(name, Array.from(effectiveActiveApps));
-      if (blockedApp) {
+      const clientScheduleApps = activeClientSchedules.flatMap((s) => s.blockedApps ?? []);
+      const subnetScheduleApps = activeSubnetSchedules.flatMap((s) => s.blockedApps ?? []);
+      const clientBaseApps = exactClient?.useGlobalApps === false ? (exactClient?.blockedApps ?? []) : [];
+      const subnetBaseApps = subnetClient?.useGlobalApps === false ? (subnetClient?.blockedApps ?? []) : [];
+      const globalBaseApps = shouldUseGlobalApps ? globalAppsCache.activeApps : [];
+      const globalShadowApps = shouldUseGlobalApps ? globalAppsCache.shadowApps : [];
+
+      const findBlockedAppWithScope = (): { app: AppService; scope: 'client' | 'subnet' | 'global' } | null => {
+        const clientScheduleHit = isAppBlockedByPolicy(name, clientScheduleApps);
+        if (clientScheduleHit) return { app: clientScheduleHit, scope: 'client' };
+
+        const clientBaseHit = isAppBlockedByPolicy(name, clientBaseApps);
+        if (clientBaseHit) return { app: clientBaseHit, scope: 'client' };
+
+        const subnetScheduleHit = isAppBlockedByPolicy(name, subnetScheduleApps);
+        if (subnetScheduleHit) return { app: subnetScheduleHit, scope: 'subnet' };
+
+        const subnetBaseHit = isAppBlockedByPolicy(name, subnetBaseApps);
+        if (subnetBaseHit) return { app: subnetBaseHit, scope: 'subnet' };
+
+        const globalHit = isAppBlockedByPolicy(name, globalBaseApps);
+        if (globalHit) return { app: globalHit, scope: 'global' };
+
+        return null;
+      };
+
+      const blockedAppHit = findBlockedAppWithScope();
+      if (blockedAppHit) {
         const resp = buildNxDomainResponse(query);
         await insertQueryLog(db, {
           id: crypto.randomUUID(),
@@ -1788,16 +1820,14 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           status: 'BLOCKED',
           type: qtype,
           durationMs: Date.now() - start,
-          blocklistId: `ClientPolicy:App:${blockedApp}`
+          blocklistId: `${policyPrefix(blockedAppHit.scope)}:App:${blockedAppHit.app}`
         });
         return resp;
       }
 
       let appShadowHit: string | undefined;
-      const shadowApp = isAppBlockedByPolicy(name, Array.from(effectiveShadowApps));
-      if (shadowApp) {
-        appShadowHit = `ClientPolicy:AppShadow:${shadowApp}`;
-      }
+      const shadowApp = isAppBlockedByPolicy(name, globalShadowApps);
+      if (shadowApp) appShadowHit = `${policyPrefix('global')}:AppShadow:${shadowApp}`;
 
       // Determine which blocklists are active for this client.
       const selectedBlocklists = new Set<string>();
@@ -1841,6 +1871,14 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       // App-blocklists are evaluated independently from normal blocklists.
       if (effectiveActiveApps.size || effectiveShadowApps.size) {
+        const appScopeByApp = new Map<AppService, 'client' | 'subnet' | 'global'>();
+        for (const a of globalBaseApps) appScopeByApp.set(a, 'global');
+        for (const a of globalShadowApps) appScopeByApp.set(a, 'global');
+        for (const a of subnetBaseApps) appScopeByApp.set(a, 'subnet');
+        for (const a of subnetScheduleApps) appScopeByApp.set(a, 'subnet');
+        for (const a of clientBaseApps) appScopeByApp.set(a, 'client');
+        for (const a of clientScheduleApps) appScopeByApp.set(a, 'client');
+
         const selectedActiveAppBlocklists = new Set<string>();
         const selectedShadowAppBlocklists = new Set<string>();
         const blocklistIdToApp = new Map<string, AppService>();
@@ -1869,6 +1907,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
             const resp = buildNxDomainResponse(query);
             const id = appDecision.blocklistId ?? '';
             const app = id ? blocklistIdToApp.get(id) : undefined;
+            const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
             await insertQueryLog(db, {
               id: crypto.randomUUID(),
               timestamp: new Date().toISOString(),
@@ -1879,7 +1918,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
               type: qtype,
               durationMs: Date.now() - start,
               blocklistId: app
-                ? `ClientPolicy:AppList:${app}`
+                ? `${policyPrefix(scope)}:AppList:${app}`
                 : id
                   ? formatBlocklistCategory(id, blocklistsCache.byId.get(id)?.name)
                   : undefined
@@ -1890,8 +1929,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           if (appDecision.decision === 'SHADOW_BLOCKED' && !appShadowHit) {
             const id = appDecision.blocklistId ?? '';
             const app = id ? blocklistIdToApp.get(id) : undefined;
+            const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
             appShadowHit = app
-              ? `ClientPolicy:AppListShadow:${app}`
+              ? `${policyPrefix(scope)}:AppListShadow:${app}`
               : id
                 ? formatBlocklistCategory(id, blocklistsCache.byId.get(id)?.name)
                 : undefined;
@@ -1903,8 +1943,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           if ((shadowDecision.decision === 'BLOCKED' || shadowDecision.decision === 'SHADOW_BLOCKED') && !appShadowHit) {
             const id = shadowDecision.blocklistId ?? '';
             const app = id ? blocklistIdToApp.get(id) : undefined;
+            const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
             appShadowHit = app
-              ? `ClientPolicy:AppListShadow:${app}`
+              ? `${policyPrefix(scope)}:AppListShadow:${app}`
               : id
                 ? formatBlocklistCategory(id, blocklistsCache.byId.get(id)?.name)
                 : undefined;

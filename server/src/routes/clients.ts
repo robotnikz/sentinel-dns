@@ -76,6 +76,20 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
         }
       }
 
+      // Prevent ambiguous matching: only one non-subnet client should own a given IP.
+      const ip = typeof (profile as any).ip === 'string' ? String((profile as any).ip).trim() : '';
+      if (ip && profile.type !== 'subnet') {
+        await db.pool.query(
+          `
+          DELETE FROM clients
+          WHERE id <> $1
+            AND profile->>'ip' = $2
+            AND COALESCE(profile->>'type', '') <> 'subnet'
+          `,
+          [id, ip]
+        );
+      }
+
       const res = await db.pool.query(
         `INSERT INTO clients(id, profile, updated_at)
          VALUES ($1, $2, NOW())

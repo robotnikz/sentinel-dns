@@ -506,10 +506,18 @@ const Clients: React.FC = () => {
 
   const confirmDeleteClient = () => {
       if (!clientToDelete) return;
-      void removeClient(clientToDelete.id);
-      if (selectedClient?.id === clientToDelete.id) {
-          setSelectedClient(null);
-      }
+
+      const id = clientToDelete.id;
+      const wasSelected = selectedClient?.id === id;
+
+      const seq = ++saveSeqRef.current;
+      setClientSaveMsg('Deleting…');
+      void removeClient(id).then((ok) => {
+          if (seq !== saveSeqRef.current) return;
+          setClientSaveMsg(ok ? 'Deleted' : 'Delete failed');
+          if (ok && wasSelected) setSelectedClient(null);
+      });
+
       setClientToDelete(null);
   };
 
