@@ -1000,7 +1000,7 @@ function extractAnswerIpsFromDnsResponse(resp: Buffer): string[] {
   }
 }
 
-async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer): Promise<Buffer> {
+async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   return await new Promise<Buffer>((resolve, reject) => {
     const socket = dgram.createSocket('udp4');
     const timer = setTimeout(() => {
@@ -1010,7 +1010,7 @@ async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer)
         // ignore
       }
       reject(new Error('UPSTREAM_TIMEOUT'));
-    }, 2000);
+    }, timeoutMs);
 
     socket.once('message', (data) => {
       clearTimeout(timer);
@@ -1036,12 +1036,12 @@ async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer)
   });
 }
 
-async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer): Promise<Buffer> {
+async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   return await new Promise<Buffer>((resolve, reject) => {
     const socket = net.createConnection({ host: upstream.host, port: upstream.port });
     const timer = setTimeout(() => {
       socket.destroy(new Error('UPSTREAM_TIMEOUT'));
-    }, 4000);
+    }, timeoutMs);
 
     let chunks: Buffer[] = [];
     let expected: number | null = null;
@@ -1073,18 +1073,18 @@ async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer)
   });
 }
 
-async function forwardDot(upstream: { host: string; port: number }, msg: Buffer): Promise<Buffer> {
+async function forwardDot(upstream: { host: string; port: number }, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   return await new Promise<Buffer>((resolve, reject) => {
     const socket = tls.connect({
       host: upstream.host,
       port: upstream.port,
       servername: upstream.host,
-      timeout: 4000
+      timeout: timeoutMs
     });
 
     const timer = setTimeout(() => {
       socket.destroy(new Error('UPSTREAM_TIMEOUT'));
-    }, 4000);
+    }, timeoutMs);
 
     let chunks: Buffer[] = [];
     let expected: number | null = null;
@@ -1116,29 +1116,34 @@ async function forwardDot(upstream: { host: string; port: number }, msg: Buffer)
   });
 }
 
-async function forwardDohHttp1(dohUrl: string, msg: Buffer): Promise<Buffer> {
+async function forwardDohHttp1(dohUrl: string, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 4000);
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const res = await fetch(dohUrl, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/dns-message',
-        accept: 'application/dns-message',
-        'user-agent': 'sentinel-dns/0.1'
-      },
-      body: msg,
-      signal: ac.signal
-    });
-    if (!res.ok) throw new Error(`HTTP_${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    return buf;
+    try {
+      const res = await fetch(dohUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/dns-message',
+          accept: 'application/dns-message',
+          'user-agent': 'sentinel-dns/0.1'
+        },
+        body: msg,
+        signal: ac.signal
+      });
+      if (!res.ok) throw new Error(`HTTP_${res.status}`);
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf;
+    } catch (e: any) {
+      if (ac.signal.aborted) throw new Error('UPSTREAM_TIMEOUT');
+      throw e;
+    }
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function forwardDohHttp2(dohUrl: string, msg: Buffer): Promise<Buffer> {
+async function forwardDohHttp2(dohUrl: string, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   const url = new URL(dohUrl);
   const origin = `${url.protocol}//${url.host}`;
   const path = `${url.pathname}${url.search}` || '/';
@@ -1149,7 +1154,7 @@ async function forwardDohHttp2(dohUrl: string, msg: Buffer): Promise<Buffer> {
     });
     const timer = setTimeout(() => {
       client.destroy(new Error('UPSTREAM_TIMEOUT'));
-    }, 4000);
+    }, timeoutMs);
 
     client.on('error', (err) => {
       clearTimeout(timer);
@@ -1196,16 +1201,18 @@ async function forwardDohHttp2(dohUrl: string, msg: Buffer): Promise<Buffer> {
   });
 }
 
-async function forwardDoh(dohUrl: string, msg: Buffer): Promise<Buffer> {
+async function forwardDoh(dohUrl: string, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   if (dohUrl.startsWith('https://')) {
+    const started = Date.now();
     try {
-      return await forwardDohHttp2(dohUrl, msg);
+      return await forwardDohHttp2(dohUrl, msg, timeoutMs);
     } catch {
-      return await forwardDohHttp1(dohUrl, msg);
+      const remaining = Math.max(250, timeoutMs - (Date.now() - started));
+      return await forwardDohHttp1(dohUrl, msg, remaining);
     }
   }
 
-  return await forwardDohHttp1(dohUrl, msg);
+  return await forwardDohHttp1(dohUrl, msg, timeoutMs);
 }
 
 function buildNxDomainResponse(query: any): Buffer {
@@ -1654,13 +1661,38 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const qtype = q?.type ? String(q.type) : 'A';
 
       const forwardUpstream = async (upstream: UpstreamCache['upstream']): Promise<Buffer> => {
+        const getTimeoutMs = (): number => {
+          const defaults = {
+            udp: 2000,
+            tcp: 4000,
+            dot: 4000,
+            doh: 15000
+          } as const;
+
+          const raw =
+            upstream.transport === 'udp'
+              ? (config as any).DNS_FORWARD_UDP_TIMEOUT_MS
+              : upstream.transport === 'tcp'
+                ? (config as any).DNS_FORWARD_TCP_TIMEOUT_MS
+                : upstream.transport === 'dot'
+                  ? (config as any).DNS_FORWARD_DOT_TIMEOUT_MS
+                  : (config as any).DNS_FORWARD_DOH_TIMEOUT_MS;
+
+          const fallback = defaults[upstream.transport];
+          const n = Number(raw);
+          if (!Number.isFinite(n)) return fallback;
+          return Math.max(250, Math.floor(n));
+        };
+
+        const timeoutMs = getTimeoutMs();
+
         return upstream.transport === 'tcp'
-          ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
+          ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg, timeoutMs)
           : upstream.transport === 'dot'
-            ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
+            ? await forwardDot({ host: upstream.host, port: upstream.port }, msg, timeoutMs)
             : upstream.transport === 'doh'
-              ? await forwardDoh(upstream.dohUrl, msg)
-              : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+              ? await forwardDoh(upstream.dohUrl, msg, timeoutMs)
+              : await forwardUdp({ host: upstream.host, port: upstream.port }, msg, timeoutMs);
       };
 
       const forwardActiveUpstreamWithTelemetry = async (): Promise<Buffer> => {

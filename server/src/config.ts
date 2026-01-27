@@ -19,6 +19,12 @@ const schema = z.object({
   UPSTREAM_DNS: z.string().optional().default('127.0.0.1:5335'),
   ENABLE_DNS: z.coerce.boolean().optional().default(true),
 
+  // DNS forwarding timeouts (ms). Tune when upstream networks are slow/filtered.
+  DNS_FORWARD_UDP_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(2000),
+  DNS_FORWARD_TCP_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(4000),
+  DNS_FORWARD_DOT_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(4000),
+  DNS_FORWARD_DOH_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(15000),
+
   // Optional: when a query is BLOCKED (we return NXDOMAIN), also resolve it upstream
   // only for analytics/logging so the World Map can show blocked destinations.
   // This will contact the upstream resolver for blocked domains.
