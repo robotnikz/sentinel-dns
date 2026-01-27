@@ -21,8 +21,8 @@ Datum: 2026-01-27
 **Top-Risiken (priorisiert):**
 
 - **P0/P1 Security/Hardening:** Single-Container benötigt starke Capabilities (NET_ADMIN, /dev/net/tun). Das ist für LAN-Appliances ok, aber sollte explizit gehärtet/abgesichert werden.
-- **P1 Performance:** `POST /api/query-logs/ingest` schreibt aktuell **Eintrag pro INSERT** in einer Schleife (bis zu 2000). Das skaliert schlecht und erzeugt unnötige DB-Last.
-- **P1 Supply Chain:** Root `npm audit` meldete High-Severity Findings in **Dev/CI tooling** (semantic-release → npm libs). Das betrifft primär CI/Build-Umgebung, ist aber trotzdem zu adressieren.
+- **P1 Performance (behoben):** `POST /api/query-logs/ingest` wurde auf Batch-Insert (1 Query) umgestellt, inkl. defensiver Limits.
+- **P1 Supply Chain (reduziert):** Root `npm audit` Findings in **Dev/CI tooling** (semantic-release Toolchain) wurden reduziert; verbleibende Findings sind transitiv/upstream.
 
 Supply-Chain Baseline (Root):
 
@@ -78,8 +78,8 @@ Supply-Chain Baseline (Root):
 
 - `trustProxy: true` ist global gesetzt. In reinen LAN-HTTP Deployments ist das ok, aber bei Direktzugriff können X-Forwarded-* Header unerwartete Effekte haben.
 - Empfehlung:
-  - `TRUST_PROXY` Konfigflag, default: `false` (oder heuristisch nur in Docker/behind-proxy).
-  - Cookie `secure` idealerweise über Fastify `request.protocol` + korrekt konfigurierten `trustProxy` ermitteln.
+  - `TRUST_PROXY` Konfigflag. Default sollte so gewählt werden, dass Reverse Proxies ohne Extra-Konfiguration funktionieren (und optional für direkten LAN-Zugriff deaktivierbar ist).
+  - Cookie `secure` über Fastify `request.protocol` + korrekt konfigurierten `trustProxy` ermitteln (statt direkt `x-forwarded-proto` zu vertrauen).
 
 #### P2 – Mittel
 

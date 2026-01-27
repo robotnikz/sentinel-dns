@@ -27,7 +27,7 @@ Hinweis: Viele dieser Fälle sind bereits automatisiert umgesetzt (insbesondere 
 
 ### P2
 
-- (Unit) Cookie `secure` Verhalten abhängig von `request.protocol`/`x-forwarded-proto` (nur wenn `trustProxy` korrekt gesetzt ist).
+- (Unit) Cookie `secure` Verhalten abhängig von `request.protocol` (wird bei Reverse Proxy nur korrekt, wenn `trustProxy`/`TRUST_PROXY` passend gesetzt ist).
 
 ## 2) Settings
 
