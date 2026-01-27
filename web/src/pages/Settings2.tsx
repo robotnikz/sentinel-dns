@@ -1096,7 +1096,8 @@ const Settings2: React.FC<{
                 </div>
 
                 <div className="mt-3 text-[11px] text-zinc-500">
-                  In the Tailscale admin console: DNS → Nameservers → Add nameserver → use the IP above. Then enable “Use Tailscale DNS” on clients.
+                  In the Tailscale admin console: DNS → Nameservers → Add nameserver → use the IP above. Make sure “Override DNS Servers” is enabled.
+                  Then enable “Use Tailscale DNS” on clients.
                 </div>
               </div>
             </div>

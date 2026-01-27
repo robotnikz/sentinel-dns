@@ -198,6 +198,8 @@ If you enable **Exit Node** in the UI, Sentinel can act as your “VPN back home
 
 To route DNS through Sentinel for your tailnet devices, set your tailnet DNS nameserver(s) to Sentinel's Tailscale IP.
 
+In the Tailscale admin console, ensure **Override DNS Servers** is enabled.
+
 ### Tailscale clients + Query Logs
 
 If your tailnet devices use Sentinel as DNS but you **don't see any queries** in Query Logs, check the IP family used for DNS.
