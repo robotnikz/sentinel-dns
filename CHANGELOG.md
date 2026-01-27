@@ -1,3 +1,9 @@
+## [0.5.5](https://github.com/robotnikz/sentinel-dns/compare/v0.5.4...v0.5.5) (2026-01-27)
+
+### fix
+
+* add DNS status + normalize client IPs ([](https://github.com/robotnikz/sentinel-dns/commit/cee3b5b051d2ec546f4ea8db493faed83fca444d))
+
 ## [0.5.4](https://github.com/robotnikz/sentinel-dns/compare/v0.5.3...v0.5.4) (2026-01-27)
 
 ### fix
