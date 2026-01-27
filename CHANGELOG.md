@@ -1,3 +1,32 @@
+## [0.6.0](https://github.com/robotnikz/sentinel-dns/compare/v0.5.6...v0.6.0) (2026-01-27)
+
+* Merge pull request #43 from robotnikz/fix/dns-upstream-telemetry ([](https://github.com/robotnikz/sentinel-dns/commit/966810e6ff2a2520308bd00493d55a5d4bd744c7)), closes [#43](https://github.com/robotnikz/sentinel-dns/issues/43)
+
+### feat
+
+* **dns:** add upstream forward telemetry ([](https://github.com/robotnikz/sentinel-dns/commit/953c76e7e75ef7b5097397c87fd36d4f05df280c))
+* **server:** add maintenance endpoints ([](https://github.com/robotnikz/sentinel-dns/commit/51e079bb26edac8a288865aa0b938277fe232262))
+* **server:** add query logs flush endpoint ([](https://github.com/robotnikz/sentinel-dns/commit/245fd13e15d1136611475a3cfd497f3cc4730dea))
+* **web:** add maintenance settings UI ([](https://github.com/robotnikz/sentinel-dns/commit/e03144fe31cf61a037533106854c48e1a5d143ff))
+* **web:** add reusable modal components ([](https://github.com/robotnikz/sentinel-dns/commit/6b18b9338b7fe3791013df94bc9e951f11df6f6f))
+* **web:** slide-in client details sidebar ([](https://github.com/robotnikz/sentinel-dns/commit/738463df143f62c39ca1b354a22e937eaec239e2))
+* **web:** slide-in network map details panel ([](https://github.com/robotnikz/sentinel-dns/commit/207cff0c2bcac2bd98d617c2bfa8aef31dbdb8e9))
+
+### fix
+
+* **web:** allow deleting schedules ([](https://github.com/robotnikz/sentinel-dns/commit/149f5114a35212fe10886239e2ac78a9e259d40d))
+* **web:** avoid mixed dynamic import warning ([](https://github.com/robotnikz/sentinel-dns/commit/f53a96932af7c362be7767ca38cc05f418262aa1))
+* **web:** keep custom upstream resolvers on select ([](https://github.com/robotnikz/sentinel-dns/commit/746411835c6c4a715796f9cb03595913e15a6c32))
+* **web:** prevent custom upstream from disappearing on select ([](https://github.com/robotnikz/sentinel-dns/commit/0e5a97cc2f2b1bcc99d9ac08e2c1be4d033f4be0))
+
+### refactor
+
+* **web:** standardize query log modals ([](https://github.com/robotnikz/sentinel-dns/commit/e26727d3e99288fef46e5cdd1bac3af83a2c7753))
+
+### chore
+
+* **deploy:** add local compose override ([](https://github.com/robotnikz/sentinel-dns/commit/a02c0c705527d1332a9569616821d387281ffb68))
+
 ## [0.5.6](https://github.com/robotnikz/sentinel-dns/compare/v0.5.5...v0.5.6) (2026-01-27)
 
 ### fix
