@@ -29,6 +29,11 @@ type ClientDetailQuerystring = {
   client?: string;
 };
 
+type CacheEntry = {
+  expiresAt: number;
+  value: unknown;
+};
+
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -150,6 +155,34 @@ async function getUpstreamDomainsToExclude(db: Db): Promise<Set<string>> {
 }
 
 export async function registerMetricsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
+  const ttlMsRaw = Number((config as any).METRICS_CACHE_TTL_MS ?? 0);
+  const ttlMs = Number.isFinite(ttlMsRaw) ? Math.max(0, Math.floor(ttlMsRaw)) : 0;
+
+  const cache = new Map<string, CacheEntry>();
+
+  const getCacheKey = (request: FastifyRequest) => {
+    // request.url includes the querystring; metrics are admin-only so shared caching is OK.
+    return `${request.method}:${request.url}`;
+  };
+
+  const cacheGet = (key: string): unknown | undefined => {
+    if (ttlMs <= 0) return undefined;
+    const hit = cache.get(key);
+    if (!hit) return undefined;
+    if (hit.expiresAt <= Date.now()) {
+      cache.delete(key);
+      return undefined;
+    }
+    return hit.value;
+  };
+
+  const cacheSet = (key: string, value: unknown): void => {
+    if (ttlMs <= 0) return;
+    // Safety guard against accidental unbounded growth.
+    if (cache.size > 1000) cache.clear();
+    cache.set(key, { expiresAt: Date.now() + ttlMs, value });
+  };
+
   app.get(
     '/api/metrics/clients',
     {
@@ -160,6 +193,11 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
     },
     async (request: FastifyRequest<{ Querystring: ClientsQuerystring }>) => {
       await requireAdmin(db, request);
+
+      const cacheKey = getCacheKey(request);
+      const cached = cacheGet(cacheKey);
+      if (cached) return cached as any;
+
       const hours = clampInt(request.query.hours, 24, 1, 168);
       const limit = clampInt(request.query.limit, 200, 1, 500);
 
@@ -178,7 +216,7 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
         [String(hours), limit]
       );
 
-      return {
+      const out = {
         windowHours: hours,
         items: res.rows.map((r) => ({
           client: String(r.client ?? 'Unknown'),
@@ -188,6 +226,9 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
           lastSeen: r.last_seen ? (r.last_seen as Date).toISOString() : null
         }))
       };
+
+      cacheSet(cacheKey, out);
+      return out;
     }
   );
 
@@ -201,6 +242,11 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
     },
     async (request: FastifyRequest<{ Querystring: ClientDetailQuerystring }>) => {
       await requireAdmin(db, request);
+
+      const cacheKey = getCacheKey(request);
+      const cached = cacheGet(cacheKey);
+      if (cached) return cached as any;
+
       const hours = clampInt(request.query.hours, 24, 1, 168);
       const limit = clampInt(request.query.limit, 10, 1, 50);
       const client = typeof request.query.client === 'string' ? request.query.client.trim() : '';
@@ -237,7 +283,7 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
         [String(hours), client, limit]
       );
 
-      return {
+      const out = {
         windowHours: hours,
         client,
         topAllowed: topAllowedRes.rows
@@ -247,6 +293,9 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
           .filter((r) => typeof r.domain === 'string' && r.domain.length > 0)
           .map((r) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }))
       };
+
+      cacheSet(cacheKey, out);
+      return out;
     }
   );
 
@@ -260,6 +309,11 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
     },
     async (request: FastifyRequest<{ Querystring: SummaryQuerystring }>) => {
       await requireAdmin(db, request);
+
+      const cacheKey = getCacheKey(request);
+      const cached = cacheGet(cacheKey);
+      if (cached) return cached as any;
+
       const hours = clampInt(request.query.hours, 24, 1, 168);
 
       const totalRes = await db.pool.query(
@@ -284,12 +338,15 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
         [String(hours)]
       );
 
-      return {
+      const out = {
         windowHours: hours,
         totalQueries: Number(totalRes.rows[0]?.total ?? 0),
         blockedQueries: Number(blockedRes.rows[0]?.blocked ?? 0),
         activeClients: Number(clientsRes.rows[0]?.clients ?? 0)
       };
+
+      cacheSet(cacheKey, out);
+      return out;
     }
   );
 
@@ -303,6 +360,11 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
     },
     async (request: FastifyRequest<{ Querystring: TimeseriesQuerystring }>) => {
       await requireAdmin(db, request);
+
+      const cacheKey = getCacheKey(request);
+      const cached = cacheGet(cacheKey);
+      if (cached) return cached as any;
+
       const hours = clampInt(request.query.hours, 24, 1, 168);
 
       // Smaller buckets for small windows so the timeline isn't just 1-6 points.
@@ -340,7 +402,7 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
         [String(hours)]
       );
 
-      return {
+      const out = {
         windowHours: hours,
         items: res.rows.map((r) => ({
           ts: (r.bucket as Date).toISOString(),
@@ -348,6 +410,9 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
           ads: Number(r.ads ?? 0)
         }))
       };
+
+      cacheSet(cacheKey, out);
+      return out;
     }
   );
 
@@ -361,6 +426,11 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
     },
     async (request: FastifyRequest<{ Querystring: TopQuerystring }>) => {
       await requireAdmin(db, request);
+
+      const cacheKey = getCacheKey(request);
+      const cached = cacheGet(cacheKey);
+      if (cached) return cached as any;
+
       const hours = clampInt(request.query.hours, 24, 1, 168);
       const limit = clampInt(request.query.limit, 10, 1, 100);
       const excludeUpstreams = parseBool(request.query.excludeUpstreams);
@@ -383,7 +453,7 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
         [String(hours), queryLimit]
       );
 
-      return {
+      const out = {
         windowHours: hours,
         items: res.rows
           .filter((r) => typeof r.domain === 'string' && r.domain.length > 0)
@@ -394,6 +464,9 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
           })
           .slice(0, limit)
       };
+
+      cacheSet(cacheKey, out);
+      return out;
     }
   );
 
@@ -407,6 +480,11 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
     },
     async (request: FastifyRequest<{ Querystring: TopQuerystring }>) => {
       await requireAdmin(db, request);
+
+      const cacheKey = getCacheKey(request);
+      const cached = cacheGet(cacheKey);
+      if (cached) return cached as any;
+
       const hours = clampInt(request.query.hours, 24, 1, 168);
       const limit = clampInt(request.query.limit, 10, 1, 100);
 
@@ -423,12 +501,15 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
         [String(hours), limit]
       );
 
-      return {
+      const out = {
         windowHours: hours,
         items: res.rows
           .filter((r) => typeof r.domain === 'string' && r.domain.length > 0)
           .map((r) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }))
       };
+
+      cacheSet(cacheKey, out);
+      return out;
     }
   );
 

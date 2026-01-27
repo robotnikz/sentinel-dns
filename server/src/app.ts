@@ -35,6 +35,7 @@ import { registerDiscoveryRoutes } from './routes/discovery.js';
 import { registerOpenApiRoutes } from './routes/openapi.js';
 import { startDnsServer } from './dns/dnsServer.js';
 import { requireAdmin } from './auth.js';
+import { startMaintenanceJobs } from './maintenance.js';
 
 export type BuildAppOptions = {
   enableStatic?: boolean;
@@ -55,7 +56,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
             level: config.NODE_ENV === 'production' ? 'info' : 'debug'
           },
     // Needed so Fastify derives protocol from X-Forwarded-* when behind a reverse proxy.
-    trustProxy: true
+    trustProxy: config.TRUST_PROXY
   });
 
   // IMPORTANT:
@@ -79,6 +80,8 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
 
   const db = createDb(config);
   await db.init();
+
+  const maintenance = startMaintenanceJobs(config, db);
 
   // First-run convenience: seed a small baseline set of enabled blocklists.
   // Safe to call repeatedly; it only runs when no blocklists exist.
@@ -216,6 +219,11 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   async function close(): Promise<void> {
     if (refreshTimeout) clearTimeout(refreshTimeout);
     if (refreshInterval) clearInterval(refreshInterval);
+    try {
+      await maintenance.close();
+    } catch {
+      // ignore
+    }
     try {
       await dns?.close();
     } catch {

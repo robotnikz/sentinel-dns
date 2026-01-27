@@ -140,6 +140,9 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
           rateLimit: { max: 30, timeWindow: '1 minute' }
         },
         preHandler: app.rateLimit(),
+      // Defense-in-depth: avoid excessively large JSON bodies.
+      // Needs to be high enough for normal ingest bursts.
+      bodyLimit: 5 * 1024 * 1024,
       schema: {
         body: {
           type: 'object',
@@ -173,19 +176,14 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
         return { error: 'NO_ITEMS', message: 'Provide body.items[] or body.item.' };
       }
 
-      const client = await db.pool.connect();
-      try {
-        await client.query('BEGIN');
-        for (const entry of entries) {
-          await client.query('INSERT INTO query_logs(entry) VALUES ($1)', [entry]);
-        }
-        await client.query('COMMIT');
-      } catch (e) {
-        await client.query('ROLLBACK');
-        throw e;
-      } finally {
-        client.release();
-      }
+      // Batch insert for performance: avoid N roundtrips for large ingest payloads.
+      // We pass a JSON array and let Postgres expand it server-side.
+      await db.pool.query(
+        `INSERT INTO query_logs(entry)
+         SELECT value
+         FROM jsonb_array_elements($1::jsonb) AS value`,
+        [JSON.stringify(entries)]
+      );
 
       reply.code(202);
       return { ok: true, ingested: entries.length };

@@ -3,17 +3,31 @@ import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { hasSecret, setSecret } from '../secretsStore.js';
+import 'fastify-rate-limit';
 
 export async function registerSecretsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
-  app.get('/api/secrets/status', async (request) => {
+  app.get(
+    '/api/secrets/status',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request) => {
     await requireAdmin(db, request);
     const [gemini, openai] = await Promise.all([hasSecret(db, 'gemini_api_key'), hasSecret(db, 'openai_api_key')]);
     return { configured: { gemini, openai } };
-  });
+    }
+  );
 
   app.put(
     '/api/secrets/:name',
     {
+      config: {
+        rateLimit: { max: 30, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
       schema: {
         params: {
           type: 'object',
@@ -33,7 +47,7 @@ export async function registerSecretsRoutes(app: FastifyInstance, config: AppCon
       }
     },
     async (request: FastifyRequest<{ Params: { name: string }; Body: { value: string } }>, reply: FastifyReply) => {
-          await requireAdmin(db, request);
+      await requireAdmin(db, request);
 
       if (!config.SECRETS_KEY) {
         reply.code(500);
