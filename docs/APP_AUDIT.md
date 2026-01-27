@@ -1,147 +1,147 @@
 # Sentinel-DNS – Audit (Performance · Code Quality · Security)
 
-Datum: 2026-01-27
+Date: 2026-01-27
 
-## Ziele
+## Goals
 
-- **Performance:** Engpässe/Hotpaths identifizieren, messbare Optimierungen ableiten.
-- **Code-Qualität:** Robustheit, Wartbarkeit, Typ-Sicherheit, Fehlerbehandlung verbessern.
-- **Security:** Bedrohungsmodell + konkrete Hardening-Maßnahmen (App + Container/Deploy).
+- **Performance:** Identify bottlenecks/hot paths and derive measurable optimizations.
+- **Code quality:** Improve robustness, maintainability, type-safety, and error handling.
+- **Security:** Establish a threat model and concrete hardening measures (app + container/deploy).
 
-## Kurzfazit (Executive Summary)
+## Executive Summary
 
-**Stärken (bereits gut gelöst):**
+**Strengths (already in good shape):**
 
-- Klare Trennung von **Server** (Fastify) und **UI** (Vite/React).
-- **Zod-basierte Config-Validierung** im Backend.
-- **Session-Konzept**: zufälliger Session-Token im Cookie, serverseitig als **SHA-256 Hash** gespeichert.
-- **Rate-Limits** sind an vielen Endpoints vorhanden.
-- **Testpyramide** existiert bereits: Unit + Docker-Integration + Playwright E2E.
+- Clear separation between **Server** (Fastify) and **UI** (Vite/React).
+- **Zod-based config validation** on the backend.
+- **Session design**: random session token in a cookie, stored server-side as a **SHA-256 hash**.
+- **Rate limits** are present on many endpoints.
+- A **test pyramid** already exists: unit + Docker integration + Playwright E2E.
 
-**Top-Risiken (priorisiert):**
+**Top risks (prioritized):**
 
-- **P0/P1 Security/Hardening:** Single-Container benötigt starke Capabilities (NET_ADMIN, /dev/net/tun). Das ist für LAN-Appliances ok, aber sollte explizit gehärtet/abgesichert werden.
-- **P1 Performance (behoben):** `POST /api/query-logs/ingest` wurde auf Batch-Insert (1 Query) umgestellt, inkl. defensiver Limits.
-- **P1 Supply Chain (reduziert):** Root `npm audit` Findings in **Dev/CI tooling** (semantic-release Toolchain) wurden reduziert; verbleibende Findings sind transitiv/upstream.
+- **P0/P1 Security/Hardening:** The single-container deployment needs strong capabilities (NET_ADMIN, /dev/net/tun). That is acceptable for LAN appliances, but it should be explicitly hardened and documented.
+- **P1 Performance (fixed):** `POST /api/query-logs/ingest` was switched to a batch insert (single query), including defensive limits.
+- **P1 Supply chain (reduced):** Root `npm audit` findings in **dev/CI tooling** (semantic-release toolchain) were reduced; remaining findings are transitive/upstream.
 
-Supply-Chain Baseline (Root):
+Supply-chain baseline (root):
 
-- `npm audit --audit-level=moderate` meldet aktuell **4 moderate Findings** – transitiv über `@semantic-release/npm` → `@actions/http-client` → `undici`.
-- Server `npm audit` ist aktuell **0 vulnerabilities**.
+- `npm audit --audit-level=moderate` currently reports **4 moderate findings** – transitive via `@semantic-release/npm` → `@actions/http-client` → `undici`.
+- Server `npm audit` is currently **0 vulnerabilities**.
 
 ## Scope / Entry Points
 
 - Server entry: `server/src/index.ts` → `buildApp`.
-- Fastify Setup: `server/src/app.ts`.
-- Auth / Sessions: `server/src/auth.ts`, `server/src/routes/auth.ts`, `server/src/authStore.ts`.
+- Fastify setup: `server/src/app.ts`.
+- Auth / sessions: `server/src/auth.ts`, `server/src/routes/auth.ts`, `server/src/authStore.ts`.
 - Single-container runtime: `docker/single/Dockerfile`, `docker/single/entrypoint.sh`, `docker/single/supervisord.conf`.
 
 ## Security (Threat Model & Findings)
 
-### Angriffsflächen
+### Attack surfaces
 
 - **HTTP API** (Admin UI, Settings, Secrets, AI, Tailscale)
-- **DNS Service** (UDP/TCP 53)
+- **DNS service** (UDP/TCP 53)
 - **Embedded Tailscale** (VPN, Exit Node, iptables)
-- **Persistenz** in `/data` (Postgres, Secrets, tokens, GeoIP)
+- **Persistence** in `/data` (Postgres, secrets, tokens, GeoIP)
 
-### Findings & Empfehlungen
+### Findings & recommendations
 
-#### P0 – Kritisch
+#### P0 – Critical
 
-1) **Container-Capabilities / Privilegien**
+1) **Container capabilities / privileges**
 
-- Der Default-Compose benötigt `cap_add: NET_ADMIN` + `/dev/net/tun`.
-- Empfehlung:
-  - Dokumentiert klar: **LAN/VPN only**; niemals Port 53 ins Internet.
-  - Optional: Compose-Variante ohne Tailscale, die **ohne NET_ADMIN** auskommt.
-  - Ergänzt Defense-in-depth: `read_only: true` (wo möglich), `tmpfs` für `/tmp`, restriktive `security_opt`, minimierte `cap_drop`.
+- The default compose needs `cap_add: NET_ADMIN` + `/dev/net/tun`.
+- Recommendation:
+  - Document clearly: **LAN/VPN only**; never expose port 53 to the internet.
+  - Optional: provide a compose variant without Tailscale that works **without NET_ADMIN**.
+  - Add defense-in-depth: `read_only: true` (where possible), `tmpfs` for `/tmp`, restrictive `security_opt`, minimal `cap_drop`.
 
-#### P1 – Hoch
+#### P1 – High
 
-2) **`/api/query-logs/ingest` DB-Schreibpfad (Perf/DoS-Risiko)**
+2) **`/api/query-logs/ingest` DB write path (perf/DoS risk)**
 
-- Bis zu 2000 Items → 2000 `INSERT` Statements in einer TX.
-- Empfehlung:
-  - Batch-Insert in **1 Query** (z.B. JSONB Array → `jsonb_array_elements`).
-  - Zusätzlich: serverseitige Größenlimits (Body size), evtl. separate Queue/Buffer.
+- Up to 2000 items → 2000 `INSERT` statements in one transaction.
+- Recommendation:
+  - Batch insert in **one query** (e.g. JSONB array → `jsonb_array_elements`).
+  - Additionally: enforce server-side size limits (body size), optionally a separate queue/buffer.
 
-3) **Supply Chain / CI Tooling**
+3) **Supply chain / CI tooling**
 
-- Root `npm audit` meldete High-Severity Issues in devDependencies (semantic-release → npm libs wie `tar`, `glob`).
-- Empfehlung:
-  - `semantic-release` / `@semantic-release/npm` auf Versionen aktualisieren, die nicht die verwundbaren npm-lib Stacks ziehen.
-  - Verbleibende moderate Findings aktuell upstream (`@actions/http-client`/`undici`); bis Fix verfügbar ist: CI isolieren, least privilege, keine untrusted inputs in Release-Jobs.
-  - CI isolieren (least privilege) und Secrets exposure minimieren.
+- Root `npm audit` reported high-severity issues in devDependencies (semantic-release → npm libs like `tar`, `glob`).
+- Recommendation:
+  - Upgrade `semantic-release` / `@semantic-release/npm` to versions that do not pull the vulnerable npm-lib stacks.
+  - Remaining moderate findings are currently upstream (`@actions/http-client`/`undici`); until fixed: isolate CI, least privilege, avoid untrusted inputs in release jobs.
+  - Isolate CI (least privilege) and minimize secret exposure.
 
-4) **Trust Proxy / Header Trust (Potential correctness + hardening)**
+4) **Trust proxy / header trust (potential correctness + hardening)**
 
-- `trustProxy: true` ist global gesetzt. In reinen LAN-HTTP Deployments ist das ok, aber bei Direktzugriff können X-Forwarded-* Header unerwartete Effekte haben.
-- Empfehlung:
-  - `TRUST_PROXY` Konfigflag. Default sollte so gewählt werden, dass Reverse Proxies ohne Extra-Konfiguration funktionieren (und optional für direkten LAN-Zugriff deaktivierbar ist).
-  - Cookie `secure` über Fastify `request.protocol` + korrekt konfigurierten `trustProxy` ermitteln (statt direkt `x-forwarded-proto` zu vertrauen).
+- `trustProxy: true` is set globally. In pure LAN-HTTP deployments this is fine, but with direct access X-Forwarded-* headers can have unexpected effects.
+- Recommendation:
+  - Add a `TRUST_PROXY` config flag. The default should be chosen so reverse proxies work without extra configuration (and can optionally be disabled for direct LAN access).
+  - Determine cookie `secure` via Fastify `request.protocol` + properly configured `trustProxy` (instead of trusting `x-forwarded-proto` directly).
 
-#### P2 – Mittel
+#### P2 – Medium
 
-5) **Settings API ist sehr frei**
+5) **Settings API is very permissive**
 
-- `PUT /api/settings/:key` akzeptiert beliebige JSON Bodies und `:key` ist nicht validiert.
-- Empfehlung:
-  - `params` Schema: erlaubte key-Pattern (z.B. `^[a-z0-9_\-]{1,64}$`).
-  - Optional: Allowlist bekannter keys.
+- `PUT /api/settings/:key` accepts arbitrary JSON bodies and `:key` is not validated.
+- Recommendation:
+  - `params` schema: allowed key pattern (e.g. `^[a-z0-9_\-]{1,64}$`).
+  - Optional: allow-list known keys.
 
-6) **Secrets API ohne explizites Rate-Limit/Schema-Härtung**
+6) **Secrets API without explicit rate limiting / schema hardening**
 
-- `PUT /api/secrets/:name` hat Schema, aber kein rateLimit.
-- Empfehlung:
-  - Rate-Limit hinzufügen.
-  - Audit/Logging vermeiden: keine Secret Values loggen.
+- `PUT /api/secrets/:name` has a schema but no rateLimit.
+- Recommendation:
+  - Add rate limiting.
+  - Avoid audit/logging of secret values: never log secret contents.
 
-## Code-Qualität (Server)
+## Code Quality (Server)
 
-- Positiv: Viele Endpoints nutzen bereits rateLimit + `requireAdmin`.
-- Verbesserungspunkte:
-  - Konsistente Schema-Validierung (params/query/body) über alle Routes.
-  - Mehr modulare Helper-Funktionen für DB-Hotpaths (Batching, Paging).
-  - Einheitliches Error-Handling (Fastify error handler) + stabile Error Codes.
+- Positive: Many endpoints already use rateLimit + `requireAdmin`.
+- Improvements:
+  - Consistent schema validation (params/query/body) across all routes.
+  - More modular helper functions for DB hot paths (batching, paging).
+  - Unified error handling (Fastify error handler) + stable error codes.
 
 ## Performance
 
 ### Server
 
-- Hotspots typischerweise:
-  - Query Logs: ingest + aggregations (`metrics/*`).
+- Typical hotspots:
+  - Query logs: ingest + aggregations (`metrics/*`).
   - DNS pipeline: matching/rules + logging.
 
-Empfehlungen:
+Recommendations:
 
-- **DB Indizes** prüfen/ergänzen: `query_logs(ts)` und ggf. JSONB indexes je nach Queries.
-- `query_logs/ingest`: Batch Insert.
-- Aggregations: ggf. Materialized views / Pre-aggregation (optional, wenn scale).
+- Review/add **DB indexes**: `query_logs(ts)` and potentially JSONB indexes depending on query patterns.
+- `query_logs/ingest`: batch insert.
+- Aggregations: consider materialized views / pre-aggregation (optional, if scaling).
 
 ### Frontend
 
-- Aktionspunkte (typisch für React/Context):
-  - Re-render Hotspots in Contexts (Clients/Rules).
-  - Virtualisierung bei langen Listen (Query Logs).
-  - Memoization der teuren Map/Chart Komponenten.
+- Action items (typical for React/Context):
+  - Re-render hotspots in contexts (Clients/Rules).
+  - Virtualization for long lists (Query Logs).
+  - Memoization for expensive map/chart components.
 
-Zusätzliches Finding (Correctness/Dev-UX):
+Additional finding (correctness/dev UX):
 
-- API Calls werden im Frontend teils direkt via `fetch('/api/...')` gemacht.
-- Für Cookie-basierte Sessions über **Cross-Origin** (z.B. Dev UI `localhost:3000` → API `localhost:8080`) braucht es konsistent `credentials: 'include'`.
-- Empfehlung: zentrale `apiFetch()`-Helper-Funktion in `web/src/services/apiClient.ts`, die standardmäßig `credentials: 'include'` setzt, und Nutzung im gesamten Frontend vereinheitlichen.
+- Some API calls in the frontend use `fetch('/api/...')` directly.
+- For cookie-based sessions across **cross-origin** setups (e.g. dev UI `localhost:3000` → API `localhost:8080`), calls must consistently use `credentials: 'include'`.
+- Recommendation: a central `apiFetch()` helper in `web/src/services/apiClient.ts` that defaults to `credentials: 'include'`, and unify usage across the frontend.
 
-## Observability / Messbarkeit
+## Observability / Measurement
 
 - Server:
-  - Request-Logging (bereits vorhanden), ergänzt um correlation id.
-  - Optional: Prometheus Metrics (wenn gewünscht) oder zumindest strukturierte Logs.
+  - Request logging (already present), optionally add a correlation id.
+  - Optional: Prometheus metrics (if desired) or at least structured logs.
 
 - Frontend:
-  - Web Vitals / Performance marks für Query Logs rendering.
+  - Web Vitals / performance marks for Query Logs rendering.
 
-## Nächste Schritte
+## Next steps
 
-- Aus diesem Audit: priorisierte Fix-Liste (P0/P1 zuerst) + Tests.
-- Siehe Testfall-Katalog in `docs/TEST_CASES.md`.
+- From this audit: prioritized fix list (P0/P1 first) + tests.
+- See the test case catalog in `docs/TEST_CASES.md`.
