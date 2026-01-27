@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Anomaly, DnsQuery, QueryStatus, ClientProfile } from '../types';
 import { Search, Filter, Sparkles, X, Terminal, CheckCircle, XCircle, AlertTriangle, ShieldCheck, ChevronDown, Users, Shield, Eye, UserPlus, Save, Smartphone, Laptop, Tv, Gamepad2, Info, Ban, ShieldOff, Check, AlertOctagon, Zap, EyeOff } from 'lucide-react';
@@ -636,6 +636,97 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     return filteredQueries.slice(start, end);
   }, [filteredQueries, currentPage, pageSize]);
 
+  // Smooth live updates: animate rows shifting down when new items arrive.
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const prevRowTopsRef = useRef<Map<string, number>>(new Map());
+  const prevRowIdsRef = useRef<string[]>([]);
+
+  const setRowRef = useCallback(
+    (id: string) => (el: HTMLTableRowElement | null) => {
+      if (el) rowRefs.current.set(id, el);
+      else rowRefs.current.delete(id);
+    },
+    []
+  );
+
+  useLayoutEffect(() => {
+    if (activeTab !== 'queries') return;
+    if (!liveMode) return;
+    if (currentPage !== 1) return;
+    if (typeof window === 'undefined') return;
+
+    const reduceMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) return;
+
+    const nextIds = pagedQueries.map((q) => q.id);
+    const prevIds = prevRowIdsRef.current;
+
+    // Only animate when the top row changes (i.e. new live entries arrived).
+    if (prevIds.length > 0 && nextIds.length > 0 && nextIds[0] === prevIds[0]) {
+      // Still refresh cached positions for the next diff.
+      const refreshed = new Map<string, number>();
+      for (const [id, el] of rowRefs.current.entries()) {
+        if (!el) continue;
+        refreshed.set(id, el.getBoundingClientRect().top);
+      }
+      prevRowTopsRef.current = refreshed;
+      prevRowIdsRef.current = nextIds;
+      return;
+    }
+
+    const prevTops = prevRowTopsRef.current;
+    const nextTops = new Map<string, number>();
+    for (const [id, el] of rowRefs.current.entries()) {
+      if (!el) continue;
+      nextTops.set(id, el.getBoundingClientRect().top);
+    }
+
+    // Cap work to avoid excessive animations on very large pages.
+    const maxAnimated = 120;
+    let animated = 0;
+    for (const id of nextIds) {
+      const el = rowRefs.current.get(id);
+      if (!el) continue;
+      if (animated >= maxAnimated) break;
+      animated += 1;
+
+      const prevTop = prevTops.get(id);
+      const nextTop = nextTops.get(id);
+      if (nextTop == null) continue;
+
+      const animate = (keyframes: Keyframe[], options: KeyframeAnimationOptions) => {
+        const fn = (el as any).animate;
+        if (typeof fn !== 'function') return;
+        try {
+          fn.call(el, keyframes, options);
+        } catch {
+          // ignore
+        }
+      };
+
+      if (prevTop == null) {
+        // New row: glide in from above.
+        animate(
+          [{ opacity: 0, transform: 'translateY(-12px)' }, { opacity: 1, transform: 'translateY(0px)' }],
+          { duration: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' }
+        );
+        continue;
+      }
+
+      const delta = prevTop - nextTop;
+      if (!Number.isFinite(delta) || Math.abs(delta) < 1) continue;
+      animate(
+        [{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0px)' }],
+        { duration: 180, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' }
+      );
+    }
+
+    prevRowTopsRef.current = nextTops;
+    prevRowIdsRef.current = nextIds;
+  }, [activeTab, liveMode, currentPage, pagedQueries]);
+
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Header & Controls */}
@@ -833,12 +924,12 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
                     <th className="p-3 text-[10px] font-bold text-zinc-500 uppercase tracking-wider font-mono text-right pr-4">Analysis</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#27272a]">
+                <tbody className="divide-y divide-[#27272a] bg-[#18181b]">
                   {pagedQueries.length > 0 ? (
                     pagedQueries.map((query) => {
                       const isKnown = !!getClientByIp(query.clientIp);
                       return (
-                        <tr key={query.id} className="hover:bg-[#27272a]/40 transition-colors group">
+                        <tr ref={setRowRef(query.id)} key={query.id} className="hover:bg-[#27272a]/40 transition-colors group">
                           <td className="p-3 pl-4 text-xs text-zinc-400 font-mono">{query.timestamp}</td>
                           <td className="p-3">{getStatusBadge(query)}</td>
                           <td className="p-3 text-sm text-zinc-200 font-mono tracking-tight">{query.domain}</td>
