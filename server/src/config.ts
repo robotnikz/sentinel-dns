@@ -25,6 +25,9 @@ const schema = z.object({
   DNS_FORWARD_DOT_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(4000),
   DNS_FORWARD_DOH_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(15000),
 
+  // Prefer IPv4 when connecting to DoH endpoints (useful when IPv6 routing is slow/flaky).
+  DNS_FORWARD_DOH_PREFER_IPV4: z.coerce.boolean().optional().default(true),
+
   // Optional: when a query is BLOCKED (we return NXDOMAIN), also resolve it upstream
   // only for analytics/logging so the World Map can show blocked destinations.
   // This will contact the upstream resolver for blocked domains.
