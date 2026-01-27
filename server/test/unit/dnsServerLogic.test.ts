@@ -19,10 +19,14 @@ describe('dnsServer logic', () => {
     expect(__testing.buildCandidateDomains('')).toEqual([]);
   });
 
-  it('decideRuleIndexed: manual ALLOW wins over blocklist/manual block', () => {
+  it('decideRuleIndexed: ignores manual rules (handled earlier) and evaluates blocklists only', () => {
     const index = {
-      manualAllowed: new Set(['example.com']),
-      manualBlocked: new Set(['example.com']),
+      globalManualAllowed: new Set(['example.com']),
+      globalManualBlocked: new Set(['example.com']),
+      manualAllowedByClientId: new Map(),
+      manualBlockedByClientId: new Map(),
+      manualAllowedBySubnetId: new Map(),
+      manualBlockedBySubnetId: new Map(),
       blockedByDomain: new Map([['example.com', '1']])
     };
 
@@ -33,14 +37,19 @@ describe('dnsServer logic', () => {
     const selected = new Set(['1']);
 
     expect(__testing.decideRuleIndexed(index as any, 'example.com', blocklistsById as any, selected as any)).toEqual({
-      decision: 'ALLOWED'
+      decision: 'BLOCKED',
+      blocklistId: '1'
     });
   });
 
   it('decideRuleIndexed: returns BLOCKED for active selected blocklist', () => {
     const index = {
-      manualAllowed: new Set(),
-      manualBlocked: new Set(),
+      globalManualAllowed: new Set(),
+      globalManualBlocked: new Set(),
+      manualAllowedByClientId: new Map(),
+      manualBlockedByClientId: new Map(),
+      manualAllowedBySubnetId: new Map(),
+      manualBlockedBySubnetId: new Map(),
       blockedByDomain: new Map([['example.com', '1']])
     };
 
@@ -58,8 +67,12 @@ describe('dnsServer logic', () => {
 
   it('decideRuleIndexed: returns SHADOW_BLOCKED for shadow-only selection', () => {
     const index = {
-      manualAllowed: new Set(),
-      manualBlocked: new Set(),
+      globalManualAllowed: new Set(),
+      globalManualBlocked: new Set(),
+      manualAllowedByClientId: new Map(),
+      manualBlockedByClientId: new Map(),
+      manualAllowedBySubnetId: new Map(),
+      manualBlockedBySubnetId: new Map(),
       blockedByDomain: new Map([['example.com', '1']])
     };
 
@@ -77,8 +90,12 @@ describe('dnsServer logic', () => {
 
   it('decideRuleIndexed: prefers ACTIVE over SHADOW when both hit', () => {
     const index = {
-      manualAllowed: new Set(),
-      manualBlocked: new Set(),
+      globalManualAllowed: new Set(),
+      globalManualBlocked: new Set(),
+      manualAllowedByClientId: new Map(),
+      manualBlockedByClientId: new Map(),
+      manualAllowedBySubnetId: new Map(),
+      manualBlockedBySubnetId: new Map(),
       blockedByDomain: new Map([['example.com', ['1', '2']]])
     };
 

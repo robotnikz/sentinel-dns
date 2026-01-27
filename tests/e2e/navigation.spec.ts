@@ -11,14 +11,14 @@ test('sidebar navigation clickthrough renders all pages', async ({ page }) => {
   await page.getByRole('button', { name: 'Query Log' }).click();
   await expectHeaderTitle(page, 'Query Inspector');
 
-  await page.getByRole('button', { name: 'Network Map' }).click();
-  await expectHeaderTitle(page, 'Network Topology');
+  await page.getByRole('button', { name: 'Clients' }).click();
+  await expectHeaderTitle(page, 'Clients');
 
   await page.getByRole('button', { name: 'Filtering' }).click();
   await expectHeaderTitle(page, 'Filter Rules');
 
   await page.getByRole('button', { name: 'Client Policies' }).click();
-  await expectHeaderTitle(page, 'Client Inventory');
+  await expectHeaderTitle(page, 'Client Policies');
 
   await page.getByRole('button', { name: 'Local DNS' }).click();
   await expectHeaderTitle(page, 'DNS Configuration');

@@ -102,12 +102,49 @@ describe('integration: misc routes (clients + dns + query-logs)', () => {
     const items = Array.isArray(list.json()?.items) ? list.json().items : [];
     expect(items.some((x: any) => x?.id === id)).toBe(true);
 
+    // Seed scoped rules and ensure they are removed when deleting the client.
+    await pool.query('DELETE FROM rules');
+    await pool.query('INSERT INTO rules(domain, type, category) VALUES ($1, $2, $3)', [`scoped-${id}.test`, 'BLOCKED', `Client:${id}`]);
+    await pool.query('INSERT INTO rules(domain, type, category) VALUES ($1, $2, $3)', [`scoped2-${id}.test`, 'BLOCKED', `Client:${id}:Manual`]);
+    await pool.query('INSERT INTO rules(domain, type, category) VALUES ($1, $2, $3)', [`scoped3-${id}.test`, 'BLOCKED', `Subnet:${id}:Manual`]);
+
     const del = await app.inject({ method: 'DELETE', url: `/api/clients/${id}`, headers: { cookie } });
     expect(del.statusCode).toBe(204);
+
+    const remaining = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM rules WHERE category LIKE $1 OR category LIKE $2`,
+      [`Client:${id}%`, `Subnet:${id}%`]
+    );
+    expect(Number(remaining.rows?.[0]?.n ?? 0)).toBe(0);
 
     const del404 = await app.inject({ method: 'DELETE', url: `/api/clients/${id}`, headers: { cookie } });
     expect(del404.statusCode).toBe(404);
     expect(del404.json()).toMatchObject({ error: 'NOT_FOUND' });
+
+    // Same delete endpoint is used for subnet profiles. Ensure Subnet:<id> scoped rules are cleaned up too.
+    await pool.query('DELETE FROM clients');
+    await pool.query('DELETE FROM rules');
+
+    const subnetId = `s-${Date.now()}`;
+    const okSubnet = await app.inject({
+      method: 'PUT',
+      url: `/api/clients/${subnetId}`,
+      headers: { cookie, 'content-type': 'application/json' },
+      payload: { id: subnetId, name: 'Subnet', type: 'subnet', cidr: '10.0.0.0/24' }
+    });
+    expect(okSubnet.statusCode).toBe(200);
+
+    await pool.query('INSERT INTO rules(domain, type, category) VALUES ($1, $2, $3)', [
+      `scoped-${subnetId}.test`,
+      'BLOCKED',
+      `Subnet:${subnetId}:Manual`
+    ]);
+
+    const delSubnet = await app.inject({ method: 'DELETE', url: `/api/clients/${subnetId}`, headers: { cookie } });
+    expect(delSubnet.statusCode).toBe(204);
+
+    const remainingSubnet = await pool.query(`SELECT COUNT(*)::int AS n FROM rules WHERE category LIKE $1`, [`Subnet:${subnetId}%`]);
+    expect(Number(remainingSubnet.rows?.[0]?.n ?? 0)).toBe(0);
   });
 
   it('dns settings normalize defaults (udp/tcp/dot/doh)', async () => {
