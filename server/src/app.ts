@@ -33,6 +33,7 @@ import { registerGeoIpRoutes } from './routes/geoip.js';
 import { registerProtectionRoutes } from './routes/protection.js';
 import { registerDiscoveryRoutes } from './routes/discovery.js';
 import { registerOpenApiRoutes } from './routes/openapi.js';
+import { registerMaintenanceRoutes } from './routes/maintenance.js';
 import { startDnsServer } from './dns/dnsServer.js';
 import { requireAdmin } from './auth.js';
 import { startMaintenanceJobs } from './maintenance.js';
@@ -207,6 +208,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   await registerGeoRoutes(app, config, db);
   await registerGeoIpRoutes(app, config, db);
   await registerProtectionRoutes(app, config, db);
+  await registerMaintenanceRoutes(app, config, db);
   await registerOpenApiRoutes(app, config, db);
   await registerClusterRoutes(app, db);
   await registerTailscaleRoutes(app, config, db);
