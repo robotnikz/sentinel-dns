@@ -6,6 +6,7 @@ If you are installing Sentinel-DNS for the first time, start with the root READM
 ## End users / self-hosting
 
 - **Install / Quickstart:** [../README.md](../README.md)
+- **Which Docker Compose file to use:** [../deploy/compose/README.md](../deploy/compose/README.md)
 - **Operations (upgrades, backups, port 53 conflicts, reverse proxy):** [OPERATIONS.md](OPERATIONS.md)
 - **Sync + HA + VIP failover (2 nodes):** [CLUSTER_HA.md](CLUSTER_HA.md)
 - **Remote access (Tailscale):** [REMOTE_ACCESS_TAILSCALE.md](REMOTE_ACCESS_TAILSCALE.md)

@@ -93,6 +93,8 @@ If you want the “just tell me what to do” version:
 
 More docs (advanced / deeper): start here: [docs/README.md](docs/README.md)
 
+Not sure which Compose file to use? See [deploy/compose/README.md](deploy/compose/README.md)
+
 ### 🧰 Docker Prerequisites
 
 1. Docker Engine + Docker Compose installed
