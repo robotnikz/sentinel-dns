@@ -353,6 +353,12 @@ describe('integration: cluster/HA + sync (MVP)', () => {
     if (!dockerOk) return;
     if (!leader || !follower) throw new Error('apps not initialized');
 
+    // Simulate a stale lastSync so readiness cannot rely on recent sync.
+    await follower.db.pool.query(
+      "INSERT INTO settings(key, value) VALUES ('cluster_meta', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+      [{ lastSync: new Date(Date.now() - 60_000).toISOString() }]
+    );
+
     const roleFile = path.join(tempDir, `role-${Date.now()}.txt`);
     fs.writeFileSync(roleFile, 'leader\n', 'utf8');
 

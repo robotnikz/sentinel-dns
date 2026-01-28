@@ -273,6 +273,12 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
 
     if (configuredRole !== 'follower') return { ok: true, role, configuredRole };
 
+    // In VIP/VRRP HA mode, keepalived can temporarily override a configured follower
+    // to become effectively "leader" when it owns the VIP. In that state, follower sync
+    // is expected to stop, so lastSync may become stale. The VIP owner must still be
+    // considered ready, otherwise keepalived will drop the VIP after a few checks.
+    if (role === 'leader') return { ok: true, role, configuredRole };
+
     const last = status.lastSync ? Date.parse(status.lastSync) : 0;
     const ok = last > 0 && Date.now() - last < 20_000;
     return { ok, role, configuredRole, lastSync: status.lastSync ?? null };
@@ -291,9 +297,15 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
     let localOk = true;
     let localLastSync: string | null | undefined = undefined;
     if (clusterEnabled && configuredRole === 'follower') {
-      const last = status.lastSync ? Date.parse(status.lastSync) : 0;
-      localOk = last > 0 && Date.now() - last < 20_000;
-      localLastSync = status.lastSync ?? null;
+      // Mirror /api/cluster/ready: if we're effectively leader (VIP owner), we're ready.
+      if (role === 'leader') {
+        localOk = true;
+        localLastSync = null;
+      } else {
+        const last = status.lastSync ? Date.parse(status.lastSync) : 0;
+        localOk = last > 0 && Date.now() - last < 20_000;
+        localLastSync = status.lastSync ?? null;
+      }
     }
 
     // Load HA config to find unicast peers (best signal of the other node's IP).
