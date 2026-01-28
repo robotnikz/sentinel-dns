@@ -1,3 +1,23 @@
+## [0.8.4](https://github.com/robotnikz/sentinel-dns/compare/v0.8.3...v0.8.4) (2026-01-28)
+
+* Merge pull request #53 from robotnikz/chore/test-coverage-audit-2026-01-28 ([](https://github.com/robotnikz/sentinel-dns/commit/bd5015ff711771d937b2d0741edd7856ac6ac3d9)), closes [#53](https://github.com/robotnikz/sentinel-dns/issues/53)
+
+### docs
+
+* update testing notes ([](https://github.com/robotnikz/sentinel-dns/commit/c48a7f70b225d971314b64f9a3a5aabe0f975b42))
+
+### chore
+
+* **web:** expand frontend coverage scope ([](https://github.com/robotnikz/sentinel-dns/commit/a7cb2d14212df5891ea52d7f2956d0be9b65f1bd))
+
+### test
+
+* **web:** add frontend page smoke + regression tests ([](https://github.com/robotnikz/sentinel-dns/commit/058e01b53e1c9d596ac954f622f341945261a425))
+
+### fix
+
+* **web:** ignore non-ok protection pause poll ([](https://github.com/robotnikz/sentinel-dns/commit/46b7d41eed5528794f14779e15a1700158e324ff))
+
 ## [0.8.3](https://github.com/robotnikz/sentinel-dns/compare/v0.8.2...v0.8.3) (2026-01-28)
 
 ### fix
