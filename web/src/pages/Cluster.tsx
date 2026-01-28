@@ -316,6 +316,7 @@ const Cluster: React.FC = () => {
     }
     return { text: 'Standalone', className: `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30` };
   }, [effectiveRole, haEnabled]);
+  const warningOverride = status?.roleOverride ? `Role override active: ${status.roleOverride}` : '';
 
   const StatusCards = (
     <div className="space-y-6">
@@ -536,7 +537,6 @@ const Cluster: React.FC = () => {
   // In HA mode, keepalived may temporarily override the effective role (e.g. follower until VIP ownership),
   // but users still need the join code to enroll followers.
   const canShowJoinCode = status?.config.enabled && status?.config.role === 'leader' && !!status?.config.leaderUrl;
-  const warningOverride = status?.roleOverride ? `Role override active: ${status.roleOverride}` : '';
 
   const leaderUrlMismatchWarning = useMemo(() => {
     if (!haEnabled) return '';
