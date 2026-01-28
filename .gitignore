@@ -10,11 +10,19 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+web/dist
+web/dist-ssr
 *.local
 .env
 .env.*
 !.env.example
 !server/.env.example
+
+# Local Docker Compose overrides (keep repo compose templates tracked)
+docker-compose.override.yml
+docker-compose.*.override.yml
+deploy/compose/docker-compose.override.yml
+deploy/compose/docker-compose.*.override.yml
 
 # Server env files
 server/.env
@@ -40,6 +48,13 @@ coverage
 codeql-results.sarif
 scripts/codeql-build.cmd
 
+# Local shell env tooling
+.envrc
+.direnv/
+
+# Local History (VS Code extension)
+.history/
+
 # Playwright artifacts
 playwright-report
 test-results
@@ -64,3 +79,7 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Misc runtime artifacts
+*.pid
+*.pid.lock
