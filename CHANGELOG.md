@@ -1,3 +1,9 @@
+## [0.8.2](https://github.com/robotnikz/sentinel-dns/compare/v0.8.1...v0.8.2) (2026-01-28)
+
+### fix
+
+* release ([](https://github.com/robotnikz/sentinel-dns/commit/c11ee2e07a855372e514a9607868107a5975fc8d))
+
 ## [0.8.1](https://github.com/robotnikz/sentinel-dns/compare/v0.8.0...v0.8.1) (2026-01-28)
 
 ### fix
