@@ -1,3 +1,9 @@
+## [0.8.6](https://github.com/robotnikz/sentinel-dns/compare/v0.8.5...v0.8.6) (2026-01-28)
+
+### fix
+
+* **ha:** keep VIP owner ready after failover ([](https://github.com/robotnikz/sentinel-dns/commit/0a5848e8a2737dc03212887c1ab5d9476f22ccf1))
+
 ## [0.8.5](https://github.com/robotnikz/sentinel-dns/compare/v0.8.4...v0.8.5) (2026-01-28)
 
 * Merge pull request #54 from robotnikz/fix/cluster-ha-layout ([](https://github.com/robotnikz/sentinel-dns/commit/7af3e1b76663621742c3fcebdc284a2b7f42b06f)), closes [#54](https://github.com/robotnikz/sentinel-dns/issues/54)
