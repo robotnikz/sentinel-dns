@@ -16,7 +16,13 @@ export default defineConfig({
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: path.resolve(__dirname, '../coverage/frontend'),
       all: true,
-      include: ['src/components/**/*.{ts,tsx}', 'src/contexts/**/*.{ts,tsx}', 'src/services/**/*.{ts,tsx}'],
+      include: [
+        'src/components/**/*.{ts,tsx}',
+        'src/contexts/**/*.{ts,tsx}',
+        'src/services/**/*.{ts,tsx}',
+        'src/pages/**/*.{ts,tsx}',
+        'src/App.tsx'
+      ],
       exclude: ['src/test/**', '**/*.d.ts']
     }
   }
