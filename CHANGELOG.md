@@ -1,3 +1,9 @@
+## [0.8.9](https://github.com/robotnikz/sentinel-dns/compare/v0.8.8...v0.8.9) (2026-01-28)
+
+### fix
+
+* **cluster:** allow query log + notification writes on follower ([](https://github.com/robotnikz/sentinel-dns/commit/633e01ae887a0140bc81eeb7f7a17e897b15c6fc))
+
 ## [0.8.8](https://github.com/robotnikz/sentinel-dns/compare/v0.8.7...v0.8.8) (2026-01-28)
 
 ### fix
