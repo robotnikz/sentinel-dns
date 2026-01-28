@@ -28,6 +28,11 @@ const schema = z.object({
   // Prefer IPv4 when connecting to DoH endpoints (useful when IPv6 routing is slow/flaky).
   DNS_FORWARD_DOH_PREFER_IPV4: z.coerce.boolean().optional().default(true),
 
+  // Bootstrap DNS servers used ONLY to resolve DoH/DoT endpoint hostnames (e.g. dns.google).
+  // This prevents a failover deadlock when the node's system DNS points at the VIP.
+  // Comma/space separated list of IPs.
+  DNS_FORWARD_BOOTSTRAP_DNS: z.string().optional().default('1.1.1.1,8.8.8.8'),
+
   // Optional: when a query is BLOCKED (we return NXDOMAIN), also resolve it upstream
   // only for analytics/logging so the World Map can show blocked destinations.
   // This will contact the upstream resolver for blocked domains.

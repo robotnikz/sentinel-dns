@@ -1411,13 +1411,19 @@ async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer,
   });
 }
 
-async function forwardDot(upstream: { host: string; port: number }, msg: Buffer, timeoutMs: number): Promise<Buffer> {
+async function forwardDot(
+  upstream: { host: string; port: number },
+  msg: Buffer,
+  timeoutMs: number,
+  lookup?: any
+): Promise<Buffer> {
   return await new Promise<Buffer>((resolve, reject) => {
     const socket = tls.connect({
       host: upstream.host,
       port: upstream.port,
       servername: upstream.host,
-      timeout: timeoutMs
+      timeout: timeoutMs,
+      ...(lookup ? { lookup } : {})
     });
 
     const timer = setTimeout(() => {
@@ -1460,56 +1466,134 @@ async function forwardDohHttp1(dohUrl: string, msg: Buffer, timeoutMs: number): 
 
 type DohHttp1Options = {
   preferIpv4: boolean;
+  bootstrapServers?: string[];
 };
 
-const dohHttpAgentDefault = new Agent({
-  connections: 32,
-  pipelining: 1,
-  keepAliveTimeout: 30_000,
-  keepAliveMaxTimeout: 60_000
-});
+type LookupAddress = { address: string; family: 4 | 6 };
 
-const dohHttpAgentPreferIpv4 = new Agent({
-  connections: 32,
-  pipelining: 1,
-  keepAliveTimeout: 30_000,
-  keepAliveMaxTimeout: 60_000,
-  connect: {
-    lookup: (hostname: string, options: any, callback: any) => {
-      const requestedFamily = typeof options?.family === 'number' ? options.family : 0;
-      if (requestedFamily === 4 || requestedFamily === 6) {
-        dns.lookup(hostname, { ...options, family: requestedFamily }, callback);
+function parseBootstrapServers(raw: string): string[] {
+  const list = String(raw || '')
+    .split(/[,\s]+/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Keep only IP literals to avoid recursive lookups.
+  return list.filter((s) => net.isIP(s) === 4 || net.isIP(s) === 6);
+}
+
+function createBootstrapLookup(opts: { bootstrapServers: string[]; preferIpv4: boolean }) {
+  const servers = Array.isArray(opts.bootstrapServers) ? opts.bootstrapServers : [];
+  if (servers.length === 0) return null;
+
+  const resolver = new dns.Resolver();
+  try {
+    resolver.setServers(servers);
+  } catch {
+    return null;
+  }
+
+  const resolveAll = async (hostname: string): Promise<LookupAddress[]> => {
+    let v4: string[] = [];
+    let v6: string[] = [];
+
+    try {
+      v4 = await new Promise<string[]>((resolve, reject) => {
+        resolver.resolve4(hostname, (err, addresses) => {
+          if (err) reject(err);
+          else resolve(Array.isArray(addresses) ? (addresses as string[]) : []);
+        });
+      });
+    } catch {
+      v4 = [];
+    }
+
+    try {
+      v6 = await new Promise<string[]>((resolve, reject) => {
+        resolver.resolve6(hostname, (err, addresses) => {
+          if (err) reject(err);
+          else resolve(Array.isArray(addresses) ? (addresses as string[]) : []);
+        });
+      });
+    } catch {
+      v6 = [];
+    }
+
+    const as4 = (Array.isArray(v4) ? v4 : []).map((address) => ({ address, family: 4 as const }));
+    const as6 = (Array.isArray(v6) ? v6 : []).map((address) => ({ address, family: 6 as const }));
+    return opts.preferIpv4 ? [...as4, ...as6] : [...as6, ...as4];
+  };
+
+  // Callback-style lookup function compatible with net/tls/http2.
+  return (hostname: string, options: any, callback: any) => {
+    const requestedFamily = typeof options?.family === 'number' ? options.family : 0;
+    const wantsAll = Boolean(options?.all);
+
+    // If hostname is already an IP literal, skip DNS.
+    const ipFamily = net.isIP(hostname);
+    if (ipFamily === 4 || ipFamily === 6) {
+      if (wantsAll) {
+        callback(null, [{ address: hostname, family: ipFamily }]);
         return;
       }
-
-      const wantsAll = Boolean(options?.all);
-
-      dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
-        if (err) {
-          callback(err);
-          return;
-        }
-
-        const list = Array.isArray(addresses) ? addresses : [];
-        const v4 = list.filter((a: any) => a && a.family === 4);
-        const v6 = list.filter((a: any) => a && a.family === 6);
-        const reordered = [...v4, ...v6];
-
-        if (wantsAll) {
-          callback(null, reordered);
-          return;
-        }
-
-        const chosen = reordered[0];
-        if (!chosen?.address || !chosen?.family) {
-          callback(new Error('DNS_LOOKUP_FAILED'));
-          return;
-        }
-        callback(null, chosen.address, chosen.family);
-      });
+      callback(null, hostname, ipFamily);
+      return;
     }
-  }
-});
+
+    (async () => {
+      const all = await resolveAll(hostname);
+      const filtered =
+        requestedFamily === 4 ? all.filter((a) => a.family === 4) : requestedFamily === 6 ? all.filter((a) => a.family === 6) : all;
+
+      if (filtered.length === 0) throw new Error('DNS_LOOKUP_FAILED');
+      if (wantsAll) return filtered;
+      return filtered[0];
+    })()
+      .then((result: any) => {
+        if (Array.isArray(result)) {
+          callback(null, result);
+          return;
+        }
+        callback(null, result.address, result.family);
+      })
+      .catch((err) => callback(err));
+  };
+}
+
+const dohAgentCache = new Map<string, Agent>();
+const bootstrapLookupCache = new Map<string, any>();
+
+function getBootstrapLookupCached(opts: { bootstrapServers: string[]; preferIpv4: boolean }) {
+  const servers = Array.isArray(opts.bootstrapServers) ? opts.bootstrapServers : [];
+  const key = JSON.stringify({ servers, preferIpv4: opts.preferIpv4 });
+  if (bootstrapLookupCache.has(key)) return bootstrapLookupCache.get(key);
+  const created = createBootstrapLookup({ bootstrapServers: servers, preferIpv4: opts.preferIpv4 });
+  bootstrapLookupCache.set(key, created);
+  return created;
+}
+
+function getDohAgent(opts: { preferIpv4: boolean; bootstrapServers: string[] }): Agent {
+  const servers = Array.isArray(opts.bootstrapServers) ? opts.bootstrapServers : [];
+  const key = JSON.stringify({ servers, preferIpv4: opts.preferIpv4 });
+  const existing = dohAgentCache.get(key);
+  if (existing) return existing;
+
+  const lookup = getBootstrapLookupCached({ bootstrapServers: servers, preferIpv4: opts.preferIpv4 });
+  const agent = new Agent({
+    connections: 32,
+    pipelining: 1,
+    keepAliveTimeout: 30_000,
+    keepAliveMaxTimeout: 60_000,
+    ...(lookup
+      ? {
+          connect: {
+            lookup
+          }
+        }
+      : {})
+  });
+
+  dohAgentCache.set(key, agent);
+  return agent;
+}
 
 async function forwardDohHttp1WithOptions(
   dohUrl: string,
@@ -1518,6 +1602,7 @@ async function forwardDohHttp1WithOptions(
   options: DohHttp1Options
 ): Promise<Buffer> {
   const started = Date.now();
+  const bootstrapServers = parseBootstrapServers(String(options.bootstrapServers?.join(',') || ''));
   const attempt = async (dispatcher: Agent, budgetMs: number): Promise<Buffer> => {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), budgetMs);
@@ -1555,7 +1640,8 @@ async function forwardDohHttp1WithOptions(
   };
 
   try {
-    return await attempt(options.preferIpv4 ? dohHttpAgentPreferIpv4 : dohHttpAgentDefault, timeoutMs);
+    const primary = getDohAgent({ preferIpv4: options.preferIpv4, bootstrapServers });
+    return await attempt(primary, timeoutMs);
   } catch (e: any) {
     // If IPv4 is preferred but fails (e.g. v4 route blackhole) allow a single retry
     // with the default agent to let IPv6 succeed within the remaining time budget.
@@ -1565,18 +1651,29 @@ async function forwardDohHttp1WithOptions(
     if (msgText === 'UPSTREAM_TIMEOUT') throw e;
 
     const remaining = Math.max(250, timeoutMs - (Date.now() - started));
-    return await attempt(dohHttpAgentDefault, remaining);
+    const fallback = getDohAgent({ preferIpv4: false, bootstrapServers });
+    return await attempt(fallback, remaining);
   }
 }
 
-async function forwardDohHttp2(dohUrl: string, msg: Buffer, timeoutMs: number): Promise<Buffer> {
+async function forwardDohHttp2(
+  dohUrl: string,
+  msg: Buffer,
+  timeoutMs: number,
+  opts?: { bootstrapServers?: string[]; preferIpv4?: boolean }
+): Promise<Buffer> {
   const url = new URL(dohUrl);
   const origin = `${url.protocol}//${url.host}`;
   const path = `${url.pathname}${url.search}` || '/';
 
+  const servers = parseBootstrapServers(String(opts?.bootstrapServers?.join(',') || ''));
+  const preferIpv4 = Boolean(opts?.preferIpv4);
+  const lookup = servers.length ? getBootstrapLookupCached({ bootstrapServers: servers, preferIpv4 }) : null;
+
   return await new Promise<Buffer>((resolve, reject) => {
     const client = http2.connect(origin, {
-      servername: url.hostname
+      servername: url.hostname,
+      ...(lookup ? { lookup } : {})
     });
     const timer = setTimeout(() => {
       client.destroy(new Error('UPSTREAM_TIMEOUT'));
@@ -1627,14 +1724,20 @@ async function forwardDohHttp2(dohUrl: string, msg: Buffer, timeoutMs: number): 
   });
 }
 
-async function forwardDoh(dohUrl: string, msg: Buffer, timeoutMs: number, preferIpv4: boolean): Promise<Buffer> {
+async function forwardDoh(
+  dohUrl: string,
+  msg: Buffer,
+  timeoutMs: number,
+  preferIpv4: boolean,
+  bootstrapServers: string[]
+): Promise<Buffer> {
   if (dohUrl.startsWith('https://')) {
     // Prefer HTTP/1.1: it's generally more compatible on constrained networks.
     // (HTTP/2 can stall due to middleboxes, IPv6 routing issues, or ALPN handling.)
-    return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4 });
+    return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4, bootstrapServers });
   }
 
-  return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4 });
+  return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4, bootstrapServers });
 }
 
 function buildNxDomainResponse(query: any): Buffer {
@@ -1710,6 +1813,8 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     loadedAt: 0,
     upstream: { ...parseHostPort(config.UPSTREAM_DNS), transport: 'udp' }
   };
+
+  const bootstrapServers = parseBootstrapServers(String((config as any).DNS_FORWARD_BOOTSTRAP_DNS || ''));
 
   const rulesCache: RulesCache = {
     loadedAt: 0,
@@ -2110,12 +2215,17 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
         const preferIpv4 = Boolean((config as any).DNS_FORWARD_DOH_PREFER_IPV4);
 
+        const lookup =
+          bootstrapServers.length > 0
+            ? getBootstrapLookupCached({ bootstrapServers, preferIpv4: Boolean((config as any).DNS_FORWARD_DOH_PREFER_IPV4) })
+            : null;
+
         return upstream.transport === 'tcp'
           ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg, timeoutMs)
           : upstream.transport === 'dot'
-            ? await forwardDot({ host: upstream.host, port: upstream.port }, msg, timeoutMs)
+            ? await forwardDot({ host: upstream.host, port: upstream.port }, msg, timeoutMs, lookup)
             : upstream.transport === 'doh'
-              ? await forwardDoh(upstream.dohUrl, msg, timeoutMs, preferIpv4)
+              ? await forwardDoh(upstream.dohUrl, msg, timeoutMs, preferIpv4, bootstrapServers)
               : await forwardUdp({ host: upstream.host, port: upstream.port }, msg, timeoutMs);
       };
 
