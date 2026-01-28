@@ -1,3 +1,9 @@
+## [0.7.7](https://github.com/robotnikz/sentinel-dns/compare/v0.7.6...v0.7.7) (2026-01-28)
+
+### fix
+
+* **dns:** bootstrap resolve DoH/DoT endpoints ([](https://github.com/robotnikz/sentinel-dns/commit/4be1abb5a7e70263dc738f623b7a7f52499629ac))
+
 ## [0.7.6](https://github.com/robotnikz/sentinel-dns/compare/v0.7.5...v0.7.6) (2026-01-28)
 
 ### fix
