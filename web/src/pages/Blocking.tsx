@@ -6,9 +6,14 @@ import { BlocklistMode, QueryStatus, Blocklist, AppService } from '../types';
 import Modal from '../components/Modal';
 import { getAuthHeaders } from '../services/apiClient';
 import { AppLogo } from '../components/AppLogo';
+import { ReadOnlyFollowerBanner } from '../components/ReadOnlyFollowerBanner';
+import { isReadOnlyFollower, useClusterStatus } from '../hooks/useClusterStatus';
 
 const Blocking: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'gravity' | 'categories' | 'apps' | 'domains' | 'audit' | 'regex'>('gravity');
+
+    const { status: clusterStatus } = useClusterStatus();
+    const readOnlyFollower = isReadOnlyFollower(clusterStatus);
   
   // Gravity List State Management
     const [blocklists, setBlocklists] = useState<Blocklist[]>([]);
@@ -798,6 +803,8 @@ const Blocking: React.FC = () => {
                      {isSyncing ? 'UPDATING…' : 'UPDATE LISTS'}
                 </button>
       </div>
+
+    <ReadOnlyFollowerBanner show={readOnlyFollower} />
 
             {blocklistsError && (
                 <div className="p-3 rounded border border-rose-900/40 bg-rose-950/20 text-xs text-rose-300">

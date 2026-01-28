@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Server, Lock, Edit3, Plus, Trash2, Settings, Route, Wifi, Router, Info, Save, RotateCcw, Network, Asterisk, ShieldCheck, Zap, Globe, Check, Shield, UserPlus, Clock } from 'lucide-react';
 import { apiFetch, getAuthHeaders } from '../services/apiClient';
 import Modal from '../components/Modal';
+import { ReadOnlyFollowerBanner } from '../components/ReadOnlyFollowerBanner';
+import { isReadOnlyFollower, useClusterStatus } from '../hooks/useClusterStatus';
 
 type DnsRewrite = {
     id: string;
@@ -57,6 +59,9 @@ type DnsUpstreamDebug = {
 
 const DnsSettings: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'upstream' | 'records' | 'discovery'>('upstream');
+
+    const { status: clusterStatus } = useClusterStatus();
+    const readOnlyFollower = isReadOnlyFollower(clusterStatus);
 
         const [pageMsg, setPageMsg] = useState<string | null>(null);
         const [pageMsgKind, setPageMsgKind] = useState<'success' | 'error'>('success');
@@ -603,6 +608,8 @@ const DnsSettings: React.FC = () => {
              ) : null}
          </div>
       </div>
+
+    <ReadOnlyFollowerBanner show={readOnlyFollower} />
 
       {/* Tabs */}
       <div className="border-b border-[#27272a] flex gap-1">

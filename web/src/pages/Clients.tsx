@@ -5,13 +5,15 @@ import { AppLogo } from '../components/AppLogo';
 import { useClients } from '../contexts/ClientsContext';
 import Modal from '../components/Modal';
 import { getAuthHeaders } from '../services/apiClient';
+import { ReadOnlyFollowerBanner } from '../components/ReadOnlyFollowerBanner';
+import { isReadOnlyFollower as isReadOnlyFollowerFn, useClusterStatus } from '../hooks/useClusterStatus';
 
 const Clients: React.FC = () => {
   // Use global client context
     const { clients, addClient, updateClient, removeClient } = useClients();
 
-    // Best-effort cluster role detection (used to disable writes on followers).
-    const [clusterStatus, setClusterStatus] = useState<{ config?: { enabled?: boolean; role?: string } } | null>(null);
+        // Best-effort cluster role detection (used to disable writes on followers).
+        const { status: clusterStatus } = useClusterStatus();
   
   const [activeView, setActiveView] = useState<'devices' | 'networks'>('devices');
   const [searchTerm, setSearchTerm] = useState('');
@@ -419,29 +421,13 @@ const Clients: React.FC = () => {
       // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAddModal, activeView, addMode]);
 
-  useEffect(() => {
-      // Best-effort: detect cluster role so we can prevent confusing writes on followers.
-      let cancelled = false;
-      (async () => {
-          try {
-              const res = await fetch('/api/cluster/status', { headers: { ...getAuthHeaders() }, credentials: 'include' });
-              const data = await res.json().catch(() => null);
-              if (!cancelled) setClusterStatus(data as any);
-          } catch {
-              if (!cancelled) setClusterStatus(null);
-          }
-      })();
-      return () => {
-          cancelled = true;
-      };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // cluster status is loaded by useClusterStatus()
 
   const resetNewNodeData = () => {
       setNewNodeData({ name: '', mac: '', ip: '', cidr: '', deviceIcon: 'smartphone' });
   };
 
-    const isReadOnlyFollower = !!(clusterStatus?.config?.enabled && String(clusterStatus?.config?.role || '') === 'follower');
+    const isReadOnlyFollower = isReadOnlyFollowerFn(clusterStatus);
 
   const openCreateModal = () => {
       if (isReadOnlyFollower) {
@@ -927,15 +913,7 @@ const Clients: React.FC = () => {
            </button>
         </div>
 
-        {isReadOnlyFollower ? (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 flex items-start gap-2">
-                <Lock className="w-4 h-4 mt-0.5" />
-                <div>
-                    <div className="font-medium">Follower is read-only</div>
-                    <div className="text-xs text-zinc-400 mt-1">Add/edit/delete devices & subnets on the leader. This node will sync and serve DNS automatically.</div>
-                </div>
-            </div>
-        ) : null}
+        <ReadOnlyFollowerBanner show={isReadOnlyFollower} />
         
         <div className="flex flex-col sm:flex-row justify-between gap-4 border-b border-[#27272a]">
             {/* View Tabs (match Filtering-style tab bar) */}

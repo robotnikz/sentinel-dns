@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { getAuthHeaders } from '../services/apiClient';
 import ConfirmModal, { type ConfirmVariant } from '../components/ConfirmModal';
+import { ReadOnlyFollowerBanner } from '../components/ReadOnlyFollowerBanner';
+import { isReadOnlyFollower, useClusterStatus } from '../hooks/useClusterStatus';
 
 type GeoIpStatus = {
   geoip: { available: boolean; dbPath: string };
@@ -115,6 +117,9 @@ const Settings2: React.FC<{
   onPresetConsumed?: () => void;
 }> = ({ presetTab, onPresetConsumed }) => {
   const [tab, setTab] = useState<'general' | 'geoip' | 'remote' | 'notifications' | 'maintenance'>('general');
+
+  const { status: clusterStatus } = useClusterStatus();
+  const readOnlyFollower = isReadOnlyFollower(clusterStatus);
 
   useEffect(() => {
     if (!presetTab) return;
@@ -1111,6 +1116,10 @@ const Settings2: React.FC<{
               <div className="text-xs text-zinc-500">Configure integrations, remote access, and notifications.</div>
             </div>
           </div>
+        </div>
+
+        <div className="px-6 pt-4">
+          <ReadOnlyFollowerBanner show={readOnlyFollower} />
         </div>
 
         <div className="border-b border-[#27272a] flex gap-1">
