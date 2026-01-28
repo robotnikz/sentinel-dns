@@ -22,6 +22,7 @@ import { registerVersionRoutes } from './routes/version.js';
 import { registerNotificationRoutes } from './routes/notifications.js';
 import { registerClientsRoutes } from './routes/clients.js';
 import { registerQueryLogsRoutes } from './routes/queryLogs.js';
+import { registerPolicyRoutes } from './routes/policy.js';
 import { registerSecretsRoutes } from './routes/secrets.js';
 import { registerDnsRoutes } from './routes/dns.js';
 import { registerAuthRoutes } from './routes/auth.js';
@@ -200,6 +201,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   await registerNotificationRoutes(app, config, db);
   await registerClientsRoutes(app, config, db);
   await registerQueryLogsRoutes(app, config, db);
+  await registerPolicyRoutes(app, config, db);
   await registerSecretsRoutes(app, config, db);
   await registerDnsRoutes(app, config, db);
   await registerRewritesRoutes(app, config, db);

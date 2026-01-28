@@ -113,12 +113,31 @@ type ContentCategory =
   | 'gambling'
   | 'social'
   | 'piracy'
-  | 'dating'
   | 'crypto'
   | 'shopping'
   | 'news'
   | 'game'
   | 'video';
+
+const CONTENT_CATEGORIES: ContentCategory[] = [
+  'adult',
+  'gambling',
+  'social',
+  'piracy',
+  'crypto',
+  'shopping',
+  'news',
+  'game',
+  'video'
+];
+
+function isContentCategory(v: string): v is ContentCategory {
+  return (CONTENT_CATEGORIES as string[]).includes(v);
+}
+
+function isAppService(v: string): v is AppService {
+  return Object.prototype.hasOwnProperty.call(APP_DOMAIN_SUFFIXES, v);
+}
 
 type AppService =
   | '9gag'
@@ -308,18 +327,18 @@ function isProtectionPaused(state: ProtectionPauseState): boolean {
 }
 
 function parseGlobalBlockedAppsSetting(value: any): AppService[] {
-  if (Array.isArray(value)) return value.map((x: any) => String(x)).filter(Boolean) as any;
+  if (Array.isArray(value)) return value.map((x: any) => String(x)).filter(isAppService);
   if (!value || typeof value !== 'object') return [];
   const raw = (value as any).blockedApps;
   if (!Array.isArray(raw)) return [];
-  return raw.map((x: any) => String(x)).filter(Boolean) as any;
+  return raw.map((x: any) => String(x)).filter(isAppService);
 }
 
 function parseGlobalShadowAppsSetting(value: any): AppService[] {
   if (!value || typeof value !== 'object') return [];
   const raw = (value as any).shadowApps;
   if (!Array.isArray(raw)) return [];
-  return raw.map((x: any) => String(x)).filter(Boolean) as any;
+  return raw.map((x: any) => String(x)).filter(isAppService);
 }
 
 function parseHostPort(value: string): { host: string; port: number } {
@@ -441,7 +460,6 @@ const CATEGORY_BLOCKLIST_URLS: Record<ContentCategory, string[]> = {
   gambling: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/gambling.txt'],
   social: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt'],
   piracy: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt'],
-  dating: ['https://raw.githubusercontent.com/nextdns/services/main/services/tinder'],
   crypto: [],
   shopping: [],
   news: [],
@@ -776,9 +794,9 @@ async function loadClients(db: Db): Promise<ClientProfile[]> {
         : [],
       isInternetPaused: p.isInternetPaused === true,
       blockedCategories: Array.isArray(p.blockedCategories)
-        ? p.blockedCategories.map((x: any) => String(x)).filter(Boolean)
+        ? p.blockedCategories.map((x: any) => String(x)).filter(isContentCategory)
         : [],
-      blockedApps: Array.isArray(p.blockedApps) ? p.blockedApps.map((x: any) => String(x)).filter(Boolean) : [],
+      blockedApps: Array.isArray(p.blockedApps) ? p.blockedApps.map((x: any) => String(x)).filter(isAppService) : [],
       schedules: Array.isArray(p.schedules)
         ? p.schedules
             .filter((s: any) => s && typeof s === 'object')
@@ -792,9 +810,9 @@ async function loadClients(db: Db): Promise<ClientProfile[]> {
                 active: s.active === true,
                 mode: normalizeScheduleMode(s.mode),
                 blockedCategories: Array.isArray(s.blockedCategories)
-                  ? s.blockedCategories.map((x: any) => String(x)).filter(Boolean)
+                  ? s.blockedCategories.map((x: any) => String(x)).filter(isContentCategory)
                   : [],
-                blockedApps: Array.isArray(s.blockedApps) ? s.blockedApps.map((x: any) => String(x)).filter(Boolean) : [],
+                blockedApps: Array.isArray(s.blockedApps) ? s.blockedApps.map((x: any) => String(x)).filter(isAppService) : [],
                 blockAll: s.blockAll === true
               })
             )
@@ -802,6 +820,324 @@ async function loadClients(db: Db): Promise<ClientProfile[]> {
         : []
     }))
     .filter((c) => c.id && c.name);
+}
+
+export type DomainPolicyCheckDecision = 'ALLOWED' | 'BLOCKED' | 'SHADOW_BLOCKED' | 'NONE';
+
+export type DomainPolicyCheckResponse = {
+  domain: string;
+  decision: DomainPolicyCheckDecision;
+  reason: string | null;
+  blocklist?: { id: string; name: string; mode: 'ACTIVE' | 'SHADOW' } | null;
+};
+
+export async function domainPolicyCheck(
+  db: Db,
+  inputDomain: string,
+  opts?: { clientIp?: string }
+): Promise<DomainPolicyCheckResponse> {
+  const domain = normalizeName(inputDomain);
+  const clientIp = normalizeClientIp(opts?.clientIp ?? '0.0.0.0');
+
+  if (!domain) return { domain, decision: 'NONE', reason: null, blocklist: null };
+
+  const [clients, blocklistsById, categoryBlocklistsByCategory, appBlocklistsByApp, globalBlockedAppsRes] =
+    await Promise.all([
+      loadClients(db),
+      loadBlocklists(db),
+      loadCategoryBlocklists(db),
+      loadAppBlocklists(db),
+      db.pool.query('SELECT value FROM settings WHERE key = $1', ['global_blocked_apps'])
+    ]);
+
+  const exactClient = findExactClient(clients, clientIp);
+  const subnetClient = exactClient ? null : findBestCidrClient(clients, clientIp);
+  const effectiveClient = exactClient ?? subnetClient;
+
+  const policyPrefix = (scope: 'client' | 'subnet' | 'global'): string =>
+    scope === 'client' ? 'ClientPolicy' : scope === 'subnet' ? 'SubnetPolicy' : 'GlobalPolicy';
+
+  if (exactClient?.isInternetPaused || subnetClient?.isInternetPaused) {
+    return {
+      domain,
+      decision: 'BLOCKED',
+      reason: exactClient?.isInternetPaused ? 'ClientPolicy:InternetPaused' : 'SubnetPolicy:InternetPaused',
+      blocklist: null
+    };
+  }
+
+  const globalAppsValue = globalBlockedAppsRes.rows?.[0]?.value;
+  const globalActiveApps = parseGlobalBlockedAppsSetting(globalAppsValue);
+  const globalShadowApps = parseGlobalShadowAppsSetting(globalAppsValue).filter((a) => !globalActiveApps.includes(a));
+
+  // Precompute category/app id sets so we can exclude them from normal blocklist selection.
+  const categoryIds = new Set<string>();
+  for (const ids of categoryBlocklistsByCategory.values()) for (const id of ids) categoryIds.add(String(id));
+  const appIds = new Set<string>();
+  for (const ids of appBlocklistsByApp.values()) for (const id of ids) appIds.add(String(id));
+
+  // Compute effective policy (base + schedules) for this client/subnet/global.
+  const now = new Date();
+  const effectiveBlockedCategories = new Set<ContentCategory>();
+
+  const shouldUseGlobalCategories =
+    exactClient?.useGlobalCategories === false ? false : subnetClient?.useGlobalCategories === false ? false : true;
+  const shouldUseGlobalApps =
+    exactClient?.useGlobalApps === false ? false : subnetClient?.useGlobalApps === false ? false : true;
+
+  if (!shouldUseGlobalCategories) {
+    const base = exactClient?.useGlobalCategories === false ? exactClient : subnetClient;
+    for (const c of base?.blockedCategories ?? []) effectiveBlockedCategories.add(c);
+  }
+
+  const effectiveActiveApps = new Set<AppService>(shouldUseGlobalApps ? globalActiveApps : []);
+  const effectiveShadowApps = new Set<AppService>(shouldUseGlobalApps ? globalShadowApps : []);
+
+  if (!shouldUseGlobalApps) {
+    const base = exactClient?.useGlobalApps === false ? exactClient : subnetClient;
+    for (const a of base?.blockedApps ?? []) effectiveActiveApps.add(a);
+  }
+
+  for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
+
+  let blockAll = false;
+  const activeSubnetSchedules = (subnetClient?.schedules ?? []).filter((s) => isScheduleActiveNow(s, now));
+  const activeClientSchedules = (exactClient?.schedules ?? []).filter((s) => isScheduleActiveNow(s, now));
+
+  for (const s of [...activeSubnetSchedules, ...activeClientSchedules]) {
+    if (s.blockAll) blockAll = true;
+    for (const c of s.blockedCategories ?? []) effectiveBlockedCategories.add(c);
+    for (const a of s.blockedApps ?? []) effectiveActiveApps.add(a);
+  }
+
+  for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
+
+  // Manual rules (Allow/Block) + per-client/subnet rules.
+  // We load only the rules for the actually-selected blocklists below.
+
+  if (blockAll) {
+    const scope: 'client' | 'subnet' | 'global' = activeClientSchedules.some((s) => s.blockAll)
+      ? 'client'
+      : activeSubnetSchedules.some((s) => s.blockAll)
+        ? 'subnet'
+        : 'global';
+    return { domain, decision: 'BLOCKED', reason: `${policyPrefix(scope)}:BlockAll`, blocklist: null };
+  }
+
+  // Fast app suffix blocking has highest priority inside the policy phase.
+  const clientScheduleApps = activeClientSchedules.flatMap((s) => s.blockedApps ?? []);
+  const subnetScheduleApps = activeSubnetSchedules.flatMap((s) => s.blockedApps ?? []);
+  const clientBaseApps = exactClient?.useGlobalApps === false ? (exactClient?.blockedApps ?? []) : [];
+  const subnetBaseApps = subnetClient?.useGlobalApps === false ? (subnetClient?.blockedApps ?? []) : [];
+  const globalBaseApps = shouldUseGlobalApps ? globalActiveApps : [];
+
+  const findBlockedAppWithScope = (): { app: AppService; scope: 'client' | 'subnet' | 'global' } | null => {
+    const clientScheduleHit = isAppBlockedByPolicy(domain, clientScheduleApps);
+    if (clientScheduleHit) return { app: clientScheduleHit, scope: 'client' };
+
+    const clientBaseHit = isAppBlockedByPolicy(domain, clientBaseApps);
+    if (clientBaseHit) return { app: clientBaseHit, scope: 'client' };
+
+    const subnetScheduleHit = isAppBlockedByPolicy(domain, subnetScheduleApps);
+    if (subnetScheduleHit) return { app: subnetScheduleHit, scope: 'subnet' };
+
+    const subnetBaseHit = isAppBlockedByPolicy(domain, subnetBaseApps);
+    if (subnetBaseHit) return { app: subnetBaseHit, scope: 'subnet' };
+
+    const globalHit = isAppBlockedByPolicy(domain, globalBaseApps);
+    if (globalHit) return { app: globalHit, scope: 'global' };
+
+    return null;
+  };
+
+  const blockedAppHit = findBlockedAppWithScope();
+  if (blockedAppHit) {
+    return {
+      domain,
+      decision: 'BLOCKED',
+      reason: `${policyPrefix(blockedAppHit.scope)}:App:${blockedAppHit.app}`,
+      blocklist: null
+    };
+  }
+
+  // Determine selected blocklists for this client.
+  const selectedBlocklists = new Set<string>();
+  const shouldUseGlobalBlocklists =
+    exactClient?.useGlobalSettings === false ? false : subnetClient?.useGlobalSettings === false ? false : true;
+
+  if (!shouldUseGlobalBlocklists) {
+    const base = exactClient?.useGlobalSettings === false ? exactClient : subnetClient;
+    for (const id of base?.assignedBlocklists ?? []) {
+      const sid = String(id).trim();
+      if (!sid) continue;
+      if (categoryIds.has(sid) || appIds.has(sid)) continue;
+      selectedBlocklists.add(sid);
+    }
+  } else {
+    for (const [id, st] of blocklistsById.entries()) {
+      if (categoryIds.has(id) || appIds.has(id)) continue;
+      if (st.enabled) selectedBlocklists.add(id);
+    }
+  }
+
+  if (shouldUseGlobalCategories) {
+    for (const id of categoryIds) {
+      const st = blocklistsById.get(id);
+      if (st?.enabled) selectedBlocklists.add(id);
+    }
+  }
+
+  for (const cat of effectiveBlockedCategories) {
+    const ids = categoryBlocklistsByCategory.get(cat) ?? [];
+    for (const id of ids) selectedBlocklists.add(String(id));
+  }
+
+  // App blocklists are evaluated independently.
+  const selectedActiveAppBlocklists = new Set<string>();
+  const selectedShadowAppBlocklists = new Set<string>();
+  const blocklistIdToApp = new Map<string, AppService>();
+
+  for (const app of effectiveActiveApps) {
+    const ids = appBlocklistsByApp.get(app) ?? [];
+    for (const id of ids) {
+      const sid = String(id);
+      selectedActiveAppBlocklists.add(sid);
+      if (!blocklistIdToApp.has(sid)) blocklistIdToApp.set(sid, app);
+    }
+  }
+
+  for (const app of effectiveShadowApps) {
+    const ids = appBlocklistsByApp.get(app) ?? [];
+    for (const id of ids) {
+      const sid = String(id);
+      selectedShadowAppBlocklists.add(sid);
+      if (!blocklistIdToApp.has(sid)) blocklistIdToApp.set(sid, app);
+    }
+  }
+
+  // Load only the rule index required for this check.
+  const neededIds: number[] = [];
+  for (const id of new Set<string>([...selectedBlocklists, ...selectedActiveAppBlocklists, ...selectedShadowAppBlocklists])) {
+    const n = Number(id);
+    if (Number.isFinite(n)) neededIds.push(n);
+  }
+
+  const index = await loadRulesIndex(db, neededIds);
+  const candidates = buildCandidateDomains(domain);
+
+  // Per-client / subnet manual allow/block rules.
+  if (exactClient) {
+    const clientManual = decideManualRule(
+      candidates,
+      index.manualAllowedByClientId.get(exactClient.id),
+      index.manualBlockedByClientId.get(exactClient.id)
+    );
+    if (clientManual === 'BLOCKED') return { domain, decision: 'BLOCKED', reason: `ClientRule:${exactClient.id}`, blocklist: null };
+    if (clientManual === 'ALLOWED') return { domain, decision: 'ALLOWED', reason: `ClientRule:${exactClient.id}`, blocklist: null };
+  }
+
+  if (subnetClient) {
+    const subnetManual = decideManualRule(
+      candidates,
+      index.manualAllowedBySubnetId.get(subnetClient.id),
+      index.manualBlockedBySubnetId.get(subnetClient.id)
+    );
+    if (subnetManual === 'BLOCKED') return { domain, decision: 'BLOCKED', reason: `SubnetRule:${subnetClient.id}`, blocklist: null };
+    if (subnetManual === 'ALLOWED') return { domain, decision: 'ALLOWED', reason: `SubnetRule:${subnetClient.id}`, blocklist: null };
+  }
+
+  const globalManual = decideManualRule(candidates, index.globalManualAllowed, index.globalManualBlocked);
+  if (globalManual === 'BLOCKED') return { domain, decision: 'BLOCKED', reason: 'Manual', blocklist: null };
+  if (globalManual === 'ALLOWED') return { domain, decision: 'ALLOWED', reason: 'Manual', blocklist: null };
+
+  let shadowHit: string | null = null;
+
+  // Evaluate app blocklists (active, then shadow).
+  const globalShadowAppsList = shouldUseGlobalApps ? globalShadowApps : [];
+  let appShadowHit: string | undefined;
+  const shadowApp = isAppBlockedByPolicy(domain, globalShadowAppsList);
+  if (shadowApp) appShadowHit = `${policyPrefix('global')}:AppShadow:${shadowApp}`;
+
+  const appScopeByApp = new Map<AppService, 'client' | 'subnet' | 'global'>();
+  for (const a of globalBaseApps) appScopeByApp.set(a, 'global');
+  for (const a of globalShadowAppsList) appScopeByApp.set(a, 'global');
+  for (const a of subnetBaseApps) appScopeByApp.set(a, 'subnet');
+  for (const a of subnetScheduleApps) appScopeByApp.set(a, 'subnet');
+  for (const a of clientBaseApps) appScopeByApp.set(a, 'client');
+  for (const a of clientScheduleApps) appScopeByApp.set(a, 'client');
+
+  if (selectedActiveAppBlocklists.size) {
+    const appDecision = decideRuleIndexed(index, domain, blocklistsById, selectedActiveAppBlocklists);
+    if (appDecision.decision === 'BLOCKED') {
+      const id = appDecision.blocklistId ?? '';
+      const app = id ? blocklistIdToApp.get(id) : undefined;
+      const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
+      return {
+        domain,
+        decision: 'BLOCKED',
+        reason: app ? `${policyPrefix(scope)}:AppList:${app}` : id ? formatBlocklistCategory(id, blocklistsById.get(id)?.name) : null,
+        blocklist: id ? { id, name: blocklistsById.get(id)?.name ?? 'Blocklist', mode: blocklistsById.get(id)?.mode ?? 'ACTIVE' } : null
+      };
+    }
+    if (appDecision.decision === 'SHADOW_BLOCKED' && !appShadowHit) {
+      const id = appDecision.blocklistId ?? '';
+      const app = id ? blocklistIdToApp.get(id) : undefined;
+      const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
+      appShadowHit = app
+        ? `${policyPrefix(scope)}:AppListShadow:${app}`
+        : id
+          ? formatBlocklistCategory(id, blocklistsById.get(id)?.name)
+          : undefined;
+    }
+  }
+
+  if (selectedShadowAppBlocklists.size) {
+    const shadowDecision = decideRuleIndexed(index, domain, blocklistsById, selectedShadowAppBlocklists);
+    if ((shadowDecision.decision === 'BLOCKED' || shadowDecision.decision === 'SHADOW_BLOCKED') && !appShadowHit) {
+      const id = shadowDecision.blocklistId ?? '';
+      const app = id ? blocklistIdToApp.get(id) : undefined;
+      const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
+      appShadowHit = app
+        ? `${policyPrefix(scope)}:AppListShadow:${app}`
+        : id
+          ? formatBlocklistCategory(id, blocklistsById.get(id)?.name)
+          : undefined;
+    }
+  }
+
+  // Evaluate normal blocklists.
+  const { decision, blocklistId } = decideRuleIndexed(index, domain, blocklistsById, selectedBlocklists);
+  if (decision === 'BLOCKED') {
+    const id = blocklistId ?? '';
+    const st = id ? blocklistsById.get(id) : undefined;
+    return {
+      domain,
+      decision: 'BLOCKED',
+      reason: id ? formatBlocklistCategory(id, st?.name) : null,
+      blocklist: id ? { id, name: st?.name ?? 'Blocklist', mode: st?.mode ?? 'ACTIVE' } : null
+    };
+  }
+
+  if (decision === 'SHADOW_BLOCKED' && blocklistId) {
+    const st = blocklistsById.get(blocklistId);
+    shadowHit = formatBlocklistCategory(blocklistId, st?.name);
+  }
+
+  if (appShadowHit) shadowHit = appShadowHit;
+
+  if (shadowHit) {
+    const id = extractBlocklistId(shadowHit) ?? null;
+    const st = id ? blocklistsById.get(id) : undefined;
+    return {
+      domain,
+      decision: 'SHADOW_BLOCKED',
+      reason: shadowHit,
+      blocklist: id && st ? { id, name: st.name, mode: 'SHADOW' } : null
+    };
+  }
+
+  void effectiveClient;
+  return { domain, decision: 'NONE', reason: null, blocklist: null };
 }
 
 async function loadCategoryBlocklists(db: Db): Promise<Map<ContentCategory, string[]>> {
