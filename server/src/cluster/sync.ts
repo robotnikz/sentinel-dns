@@ -152,6 +152,19 @@ export async function applySnapshot(config: AppConfig, db: Db, snapshot: Cluster
   try {
     await client.query('BEGIN');
 
+    // Preserve local admin sessions on followers.
+    // We want the admin password/hash to follow the leader, but sessions are node-local.
+    // If we overwrite auth_admin blindly, the UI will intermittently get 401s because sync runs every few seconds.
+    let existingAuthValue: any = null;
+    try {
+      const authRes = await client.query('SELECT value FROM settings WHERE key = $1', ['auth_admin']);
+      existingAuthValue = authRes.rows?.[0]?.value ?? null;
+    } catch {
+      existingAuthValue = null;
+    }
+    const existingAuthSessions: any[] = Array.isArray(existingAuthValue?.sessions) ? existingAuthValue.sessions : [];
+    const existingAuthPassword = existingAuthValue?.adminUser?.password ?? existingAuthValue?.adminPassword ?? null;
+
     // Settings (excluding secrets and cluster internals). Keep updatedAt for incremental extension later.
     for (const item of snapshot.settings || []) {
       const key = String((item as any).key || '');
@@ -163,11 +176,23 @@ export async function applySnapshot(config: AppConfig, db: Db, snapshot: Cluster
       if (key.startsWith('cluster_')) continue;
       if (key.startsWith('secret:')) continue;
 
-      // Avoid carrying active sessions across nodes.
-      const normalizedValue =
-        key === 'auth_admin' && value && typeof value === 'object'
-          ? { ...(value as any), sessions: [] }
-          : value;
+      // Avoid carrying leader sessions across nodes, but preserve *local* follower sessions.
+      let normalizedValue = value;
+      if (key === 'auth_admin' && value && typeof value === 'object') {
+        const incoming: any = value;
+        const incomingPassword = incoming?.adminUser?.password ?? incoming?.adminPassword ?? null;
+        const samePassword = JSON.stringify(incomingPassword) === JSON.stringify(existingAuthPassword);
+        const sessionsToKeep = samePassword ? existingAuthSessions : [];
+
+        if (incoming?.adminUser) {
+          normalizedValue = { ...incoming, sessions: sessionsToKeep };
+        } else if (incoming?.adminPassword) {
+          // Backward-compat: normalize to adminUser shape.
+          normalizedValue = { adminUser: { username: 'admin', password: incoming.adminPassword }, sessions: sessionsToKeep };
+        } else {
+          normalizedValue = { ...incoming, sessions: sessionsToKeep };
+        }
+      }
 
       await client.query(
         'INSERT INTO settings(key, value, updated_at) VALUES ($1, $2, $3) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at',
