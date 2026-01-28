@@ -8,18 +8,40 @@ function isMutation(method: string): boolean {
   return m === 'POST' || m === 'PUT' || m === 'PATCH' || m === 'DELETE';
 }
 
+function isAllowedMutationOnConfiguredFollower(url: string): boolean {
+  // HA setup must remain writable on every node.
+  if (url.startsWith('/api/cluster/')) return true;
+  if (url.startsWith('/api/health')) return true;
+
+  // Allow local session + account maintenance so the UI remains usable.
+  if (url.startsWith('/api/auth/login')) return true;
+  if (url.startsWith('/api/auth/logout')) return true;
+  if (url.startsWith('/api/auth/change-password')) return true;
+
+  // Operational writes that do not change configuration:
+  // - query log maintenance / ingest
+  // - ignored anomalies list
+  // - notification read markers
+  if (url.startsWith('/api/query-logs/')) return true;
+  if (url.startsWith('/api/suspicious/ignored')) return true;
+  if (url.startsWith('/api/notifications/feed/mark-read')) return true;
+
+  // Maintenance endpoints that only affect operational data.
+  if (url.startsWith('/api/maintenance/query-logs/')) return true;
+  if (url.startsWith('/api/maintenance/notifications/clear')) return true;
+  if (url.startsWith('/api/maintenance/ignored-anomalies/clear')) return true;
+
+  return false;
+}
+
 export function registerFollowerReadOnlyGuard(app: FastifyInstance, config: AppConfig, db: Db): void {
   app.addHook('preHandler', async (request, reply) => {
     if (!isMutation(request.method)) return;
 
     const url = request.raw.url || '';
     if (!url.startsWith('/api/')) return;
-    if (url.startsWith('/api/cluster/')) return;
-    if (url.startsWith('/api/health')) return;
 
-    // Allow creating/clearing local sessions so the UI can still be used in read-only mode.
-    if (url.startsWith('/api/auth/login')) return;
-    if (url.startsWith('/api/auth/logout')) return;
+    if (isAllowedMutationOnConfiguredFollower(url)) return;
 
     const cfg = await getClusterConfig(db);
     if (!cfg.enabled) return;

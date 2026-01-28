@@ -10,6 +10,7 @@ import { DnsQuery, QueryStatus, type Anomaly, type ChartDataPoint } from '../typ
 import { useRules } from '../contexts/RulesContext';
 import { useClients } from '../contexts/ClientsContext';
 import { apiFetch } from '../services/apiClient';
+import { isReadOnlyFollower, useClusterStatus } from '../hooks/useClusterStatus';
 
 const IGNORED_ANOMALY_KEY = 'sentinel_ignored_anomaly_signatures';
 
@@ -125,6 +126,9 @@ function openDomainInLogs(domain: string, opts?: { statusFilter?: string }) {
 const Dashboard: React.FC = () => {
   const { addRule } = useRules();
   const { clients, getClientByIp, updateClient } = useClients();
+
+  const { status: clusterStatus } = useClusterStatus();
+  const readOnlyFollower = isReadOnlyFollower(clusterStatus);
 
   const [summary, setSummary] = useState<{ totalQueries: number; blockedQueries: number; activeClients: number } | null>(null);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
@@ -488,6 +492,7 @@ const Dashboard: React.FC = () => {
 
   const handleBlockFromAnomaly = async () => {
     if (!selectedAnomaly) return;
+    if (readOnlyFollower) return;
     const domain = selectedAnomaly.domain || extractDomain(selectedAnomaly.detail);
     if (!domain) return;
     await addRule(domain, 'BLOCKED', 'Security Threat');
@@ -972,7 +977,8 @@ const Dashboard: React.FC = () => {
                 </button>
                 <button
                   onClick={handleBlockFromAnomaly}
-                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold"
+                  disabled={readOnlyFollower}
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-rose-600"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   BLOCK DOMAIN

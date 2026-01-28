@@ -9,6 +9,8 @@ import { apiFetch } from '../services/apiClient';
 import ConfirmModal from '../components/ConfirmModal';
 import Modal from '../components/Modal';
 import { ModalCard, ModalFooter, ModalHeader } from '../components/ModalLayout';
+import { ReadOnlyFollowerBanner } from '../components/ReadOnlyFollowerBanner';
+import { isReadOnlyFollower, useClusterStatus } from '../hooks/useClusterStatus';
 
 const IGNORED_ANOMALY_KEY = 'sentinel_ignored_anomaly_signatures';
 
@@ -44,6 +46,9 @@ type QueryLogsProps = {
 const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const [activeTab, setActiveTab] = useState<'queries' | 'suspicious'>('queries');
 
+  const { status: clusterStatus } = useClusterStatus();
+  const readOnlyFollower = isReadOnlyFollower(clusterStatus);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
@@ -76,6 +81,14 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const [quickActionState, setQuickActionState] = useState<Record<string, 'idle' | 'saving' | 'ok' | 'err'>>({});
 
   const quickToggleRule = async (query: DnsQuery) => {
+    if (readOnlyFollower) {
+      setQuickActionState((s) => ({ ...s, [query.id]: 'err' }));
+      window.setTimeout(() => {
+        setQuickActionState((s) => ({ ...s, [query.id]: 'idle' }));
+      }, 1200);
+      return;
+    }
+
     const domain = query.domain;
     if (!domain) return;
 
@@ -482,6 +495,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
   const blockFromSelectedAnomaly = async () => {
     if (!selectedAnomaly) return;
+    if (readOnlyFollower) return;
     const domain = selectedAnomaly.domain || extractDomain(selectedAnomaly.detail);
     if (!domain) return;
     const category = anomalyAnalysisResult?.category || 'Security Threat';
@@ -525,6 +539,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
   const handleAction = (action: 'BLOCK' | 'WHITELIST') => {
       if (!selectedDomain) return;
+      if (readOnlyFollower) return;
       
       const category = analysisResult?.category || 'Manual Log Action';
       addRule(selectedDomain.domain, action === 'BLOCK' ? 'BLOCKED' : 'ALLOWED', category);
@@ -542,6 +557,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
   const saveNewClient = () => {
       if(!clientToAdd) return;
+      if (readOnlyFollower) return;
       const newProfile: ClientProfile = {
           id: Date.now().toString(),
           name: newClientName,
@@ -754,6 +770,12 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
   return (
     <div className="space-y-4 animate-fade-in">
+      <ReadOnlyFollowerBanner
+        show={readOnlyFollower}
+        title="Failover node · limited actions"
+        subtitle="Rules and clients are read-only on this node. Query logs and operational actions (flush / ignore suspicious items) still work."
+        className="mb-2"
+      />
       {/* Header & Controls */}
       <div className="flex flex-col sm:flex-row justify-between gap-4 items-end">
         <div>
@@ -998,7 +1020,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
                               {!isKnown && (
                                 <button
                                   onClick={() => handleAddClientClick(query.clientIp, query.client)}
-                                  className="p-1.5 rounded bg-zinc-800 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-950/20 border border-zinc-700 hover:border-emerald-500/50 transition-colors"
+                                  disabled={readOnlyFollower}
+                                  className="p-1.5 rounded bg-zinc-800 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-950/20 border border-zinc-700 hover:border-emerald-500/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-zinc-400 disabled:hover:bg-zinc-800 disabled:hover:border-zinc-700"
                                   title="Add to Known Clients"
                                 >
                                   <UserPlus className="w-3.5 h-3.5" />
@@ -1011,12 +1034,12 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
                             <div className="inline-flex items-center gap-2">
                               <button
                                 onClick={() => quickToggleRule(query)}
-                                disabled={quickActionState[query.id] === 'saving'}
+                                disabled={quickActionState[query.id] === 'saving' || readOnlyFollower}
                                 className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border transition-all text-[10px] font-bold font-mono ${
                                   query.status === QueryStatus.BLOCKED || query.status === QueryStatus.SHADOW_BLOCKED
                                     ? 'bg-emerald-950/20 text-emerald-300 border-emerald-800 hover:bg-emerald-500 hover:text-black hover:border-emerald-500'
                                     : 'bg-rose-950/20 text-rose-300 border-rose-800 hover:bg-rose-500 hover:text-black hover:border-rose-500'
-                                } ${quickActionState[query.id] === 'saving' ? 'opacity-70 cursor-wait' : ''}`}
+                                } ${quickActionState[query.id] === 'saving' ? 'opacity-70 cursor-wait' : ''} ${readOnlyFollower ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''}`}
                                 title={
                                   query.status === QueryStatus.BLOCKED || query.status === QueryStatus.SHADOW_BLOCKED
                                     ? 'Permit this domain (override blocklists)'
@@ -1236,7 +1259,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
               </button>
               <button
                 onClick={saveNewClient}
-                className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-all text-xs font-bold flex items-center gap-2"
+                disabled={readOnlyFollower}
+                className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-all text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
               >
                 <Save className="w-3.5 h-3.5" /> SAVE DEVICE
               </button>
@@ -1339,7 +1363,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
               <button
                 onClick={blockFromSelectedAnomaly}
-                className="px-4 py-2 rounded bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold flex items-center gap-2"
+                disabled={readOnlyFollower}
+                className="px-4 py-2 rounded bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-rose-600"
               >
                 <Ban className="w-3.5 h-3.5" /> BLOCK DOMAIN
               </button>
@@ -1412,7 +1437,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
                <button 
                   onClick={() => handleAction('WHITELIST')}
-                  className="px-4 py-2 rounded border border-[#27272a] text-zinc-300 hover:text-emerald-400 hover:border-emerald-500/50 hover:bg-emerald-950/10 transition-all text-xs font-bold flex items-center gap-2"
+                disabled={readOnlyFollower}
+                className="px-4 py-2 rounded border border-[#27272a] text-zinc-300 hover:text-emerald-400 hover:border-emerald-500/50 hover:bg-emerald-950/10 transition-all text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-zinc-300 disabled:hover:border-[#27272a] disabled:hover:bg-transparent"
                >
                   <CheckCircle className="w-3.5 h-3.5" />
                   WHITELIST
@@ -1420,7 +1446,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
                
                <button 
                   onClick={() => handleAction('BLOCK')}
-                  className="px-4 py-2 rounded bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold flex items-center gap-2"
+                disabled={readOnlyFollower}
+                className="px-4 py-2 rounded bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-rose-600"
                >
                   <XCircle className="w-3.5 h-3.5" />
                   BLOCK DOMAIN

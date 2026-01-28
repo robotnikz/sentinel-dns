@@ -799,7 +799,11 @@ const Cluster: React.FC = () => {
         </div>
       </div>
 
-      <ReadOnlyFollowerBanner show={readOnlyFollower} className="mb-6" />
+      <ReadOnlyFollowerBanner
+        show={readOnlyFollower}
+        className="mb-6"
+        subtitle="This node is read-only for most settings. HA/VIP setup is applied per-node and can still be configured here."
+      />
 
       {msg ? (
         <div

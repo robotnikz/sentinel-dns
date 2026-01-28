@@ -1625,10 +1625,10 @@ const Settings2: React.FC<{
                       />
                       <button
                         onClick={purgeOldQueryLogs}
-                        disabled={maintBusy || readOnlyFollower}
+                        disabled={maintBusy}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
-                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         PURGE OLDER THAN (DAYS)
@@ -1636,10 +1636,10 @@ const Settings2: React.FC<{
 
                       <button
                         onClick={flushQueryLogs}
-                        disabled={maintBusy || readOnlyFollower}
+                        disabled={maintBusy}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border flex items-center gap-2',
-                          maintBusy || readOnlyFollower
+                          maintBusy
                             ? 'opacity-50 cursor-not-allowed bg-[#18181b] border-[#27272a] text-zinc-400'
                             : 'bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50'
                         )}
@@ -1656,20 +1656,20 @@ const Settings2: React.FC<{
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => clearNotifications('read')}
-                        disabled={maintBusy || readOnlyFollower}
+                        disabled={maintBusy}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
-                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         CLEAR READ
                       </button>
                       <button
                         onClick={() => clearNotifications('all')}
-                        disabled={maintBusy || readOnlyFollower}
+                        disabled={maintBusy}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50',
-                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         CLEAR ALL
@@ -1683,20 +1683,20 @@ const Settings2: React.FC<{
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => clearIgnoredAnomalies('expired')}
-                        disabled={maintBusy || readOnlyFollower}
+                        disabled={maintBusy}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
-                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         PURGE EXPIRED
                       </button>
                       <button
                         onClick={() => clearIgnoredAnomalies('all')}
-                        disabled={maintBusy || readOnlyFollower}
+                        disabled={maintBusy}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50',
-                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         CLEAR ALL
