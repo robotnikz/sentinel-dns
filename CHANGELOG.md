@@ -1,3 +1,11 @@
+## [0.7.2](https://github.com/robotnikz/sentinel-dns/compare/v0.7.1...v0.7.2) (2026-01-28)
+
+* Merge pull request #51 from robotnikz/fix/ha-autodetect-joincode ([](https://github.com/robotnikz/sentinel-dns/commit/b689c2ada09eb5e47c30d014964e53c61ff1c3f7)), closes [#51](https://github.com/robotnikz/sentinel-dns/issues/51)
+
+### fix
+
+* HA autodetect + join code under role override ([](https://github.com/robotnikz/sentinel-dns/commit/ea77ef843d5808e0ca94ff82822e042d14eb3c29))
+
 ## [0.7.1](https://github.com/robotnikz/sentinel-dns/compare/v0.7.0...v0.7.1) (2026-01-28)
 
 * Merge pull request #50 from robotnikz/fix/compose-keepalived-image ([](https://github.com/robotnikz/sentinel-dns/commit/b3a52c1dafe159a0d8cf0dd09196837f599aed86)), closes [#50](https://github.com/robotnikz/sentinel-dns/issues/50)
