@@ -9,6 +9,15 @@ const KEY_CLUSTER_META = 'cluster_meta';
 type ClusterMeta = {
   lastSync?: string;
   lastError?: string;
+  lastSyncDurationMs?: number;
+  lastSnapshotBytes?: number;
+  lastSnapshotCounts?: {
+    settings: number;
+    clients: number;
+    rules: number;
+    blocklists: number;
+    secrets: number;
+  };
 };
 
 function randomId(): string {
@@ -69,6 +78,32 @@ export async function setLastSync(db: Db, tsIso: string): Promise<void> {
   await setClusterMeta(db, { ...prev, lastSync: tsIso, lastError: undefined });
 }
 
+export async function setLastSyncDetails(
+  db: Db,
+  details: {
+    tsIso: string;
+    durationMs?: number;
+    snapshotBytes?: number;
+    snapshotCounts?: ClusterMeta['lastSnapshotCounts'];
+  }
+): Promise<void> {
+  const prev = await getClusterMeta(db);
+  await setClusterMeta(db, {
+    ...prev,
+    lastSync: details.tsIso,
+    lastError: undefined,
+    lastSyncDurationMs:
+      Number.isFinite(details.durationMs as any) && (details.durationMs as number) >= 0
+        ? (details.durationMs as number)
+        : prev.lastSyncDurationMs,
+    lastSnapshotBytes:
+      Number.isFinite(details.snapshotBytes as any) && (details.snapshotBytes as number) >= 0
+        ? (details.snapshotBytes as number)
+        : prev.lastSnapshotBytes,
+    lastSnapshotCounts: details.snapshotCounts ?? prev.lastSnapshotCounts
+  });
+}
+
 export async function setLastError(db: Db, message: string): Promise<void> {
   const prev = await getClusterMeta(db);
   await setClusterMeta(db, { ...prev, lastError: message });
@@ -80,7 +115,10 @@ export async function getClusterStatus(db: Db): Promise<ClusterStatus> {
     nodeId,
     config: cfg,
     lastSync: meta.lastSync,
-    lastError: meta.lastError
+    lastError: meta.lastError,
+    lastSyncDurationMs: meta.lastSyncDurationMs,
+    lastSnapshotBytes: meta.lastSnapshotBytes,
+    lastSnapshotCounts: meta.lastSnapshotCounts
   };
 }
 

@@ -4,7 +4,7 @@ import type { AppConfig } from '../config.js';
 import { getSecret, setSecret } from '../secretsStore.js';
 import { fromBase64UrlJson } from './codec.js';
 import { signClusterRequest } from './hmac.js';
-import { getClusterConfig, getClusterStatus, setClusterConfig, setLastError, setLastSync } from './store.js';
+import { getClusterConfig, getClusterStatus, setClusterConfig, setLastError, setLastSync, setLastSyncDetails } from './store.js';
 import type { ClusterExportSnapshot, ClusterJoinCode } from './types.js';
 import { effectiveRole } from './role.js';
 
@@ -52,6 +52,8 @@ export async function runFollowerSyncOnce(config: AppConfig, db: Db): Promise<vo
     return;
   }
 
+  const started = Date.now();
+
   const path = '/api/cluster/sync/export';
   const url = `${cfg.leaderUrl.replace(/\/$/, '')}${path}`;
   const body = { want: 'full' };
@@ -69,7 +71,21 @@ export async function runFollowerSyncOnce(config: AppConfig, db: Db): Promise<vo
   )) as ClusterExportSnapshot;
 
   await applySnapshot(config, db, snapshot);
-  await setLastSync(db, new Date().toISOString());
+
+  const finished = Date.now();
+  const snapshotJson = JSON.stringify(snapshot);
+  await setLastSyncDetails(db, {
+    tsIso: new Date().toISOString(),
+    durationMs: Math.max(0, finished - started),
+    snapshotBytes: Buffer.byteLength(snapshotJson, 'utf8'),
+    snapshotCounts: {
+      settings: Array.isArray((snapshot as any).settings) ? (snapshot as any).settings.length : 0,
+      clients: Array.isArray((snapshot as any).clients) ? (snapshot as any).clients.length : 0,
+      rules: Array.isArray((snapshot as any).rules) ? (snapshot as any).rules.length : 0,
+      blocklists: Array.isArray((snapshot as any).blocklists) ? (snapshot as any).blocklists.length : 0,
+      secrets: Array.isArray((snapshot as any).secrets) ? (snapshot as any).secrets.length : 0
+    }
+  });
 }
 
 export function startFollowerSyncLoop(config: AppConfig, db: Db): { stop: () => void } {
@@ -101,8 +117,17 @@ export async function configureFollowerFromJoinCode(db: Db, config: AppConfig, j
   const join = fromBase64UrlJson<ClusterJoinCode>(joinCodeB64Url);
   const leaderUrl = String(join?.leaderUrl || '').trim();
   const psk = String(join?.psk || '').trim();
+  const createdAt = String(join?.createdAt || '').trim();
   if (!leaderUrl || !/^https?:\/\//i.test(leaderUrl)) throw new Error('INVALID_LEADER_URL');
   if (!psk) throw new Error('INVALID_PSK');
+
+  // Join-code TTL applies only to initial follower configuration.
+  // It does NOT affect ongoing sync after a follower is configured.
+  const ttlMsRaw = Number((config as any).CLUSTER_JOIN_CODE_TTL_MS ?? process.env.CLUSTER_JOIN_CODE_TTL_MS ?? 60 * 60 * 1000);
+  const ttlMs = Number.isFinite(ttlMsRaw) && ttlMsRaw > 0 ? ttlMsRaw : 60 * 60 * 1000;
+  const createdMs = Date.parse(createdAt);
+  if (!Number.isFinite(createdMs)) throw new Error('INVALID_JOIN_CODE');
+  if (Date.now() - createdMs > ttlMs) throw new Error('JOIN_CODE_EXPIRED');
 
   await setSecret(db, config, CLUSTER_PSK_SECRET_NAME, psk);
   await setClusterConfig(db, { enabled: true, role: 'follower', leaderUrl });

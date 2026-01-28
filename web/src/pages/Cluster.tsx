@@ -12,9 +12,34 @@ type ClusterStatus = {
   };
   lastSync?: string;
   lastError?: string;
+  lastSyncDurationMs?: number;
+  lastSnapshotBytes?: number;
+  lastSnapshotCounts?: {
+    settings: number;
+    clients: number;
+    rules: number;
+    blocklists: number;
+    secrets: number;
+  };
   effectiveRole?: ClusterRole;
   roleOverride?: ClusterRole | null;
 };
+
+function formatBytes(bytes?: number): string {
+  if (!Number.isFinite(bytes as any) || (bytes as number) < 0) return '—';
+  const b = bytes as number;
+  if (b < 1024) return `${b} B`;
+  const kb = b / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KiB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(1)} MiB`;
+}
+
+function formatDurationMs(ms?: number): string {
+  if (!Number.isFinite(ms as any) || (ms as number) < 0) return '—';
+  if ((ms as number) < 1000) return `${Math.round(ms as number)} ms`;
+  return `${((ms as number) / 1000).toFixed(2)} s`;
+}
 
 type ClusterReady = {
   ok: boolean;
@@ -764,6 +789,21 @@ const Cluster: React.FC = () => {
                 <div className="space-y-1">
                   <div className="text-zinc-500">Follower last sync</div>
                   <div className="text-zinc-200">{formatWhen(status.lastSync)}</div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-zinc-500">Last sync duration</div>
+                  <div className="text-zinc-200">{formatDurationMs(status.lastSyncDurationMs)}</div>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="text-zinc-500">Last snapshot</div>
+                  <div className="text-zinc-200">
+                    {formatBytes(status.lastSnapshotBytes)}
+                    {status.lastSnapshotCounts
+                      ? ` (settings ${status.lastSnapshotCounts.settings}, clients ${status.lastSnapshotCounts.clients}, rules ${status.lastSnapshotCounts.rules}, blocklists ${status.lastSnapshotCounts.blocklists}, secrets ${status.lastSnapshotCounts.secrets})`
+                      : ''}
+                  </div>
                 </div>
 
                 <div className="space-y-1">

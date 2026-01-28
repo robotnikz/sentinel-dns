@@ -76,6 +76,10 @@ function decodeJoinCode(joinCode: string): any {
   return JSON.parse(raw);
 }
 
+function encodeJoinCode(obj: any): string {
+  return Buffer.from(JSON.stringify(obj), 'utf8').toString('base64url');
+}
+
 describe('integration: cluster/HA + sync (MVP)', () => {
   let dockerOk = false;
   let pg: Awaited<ReturnType<typeof startPostgresContainer>> | null = null;
@@ -237,6 +241,29 @@ describe('integration: cluster/HA + sync (MVP)', () => {
     expect(decoded).toHaveProperty('psk');
     expect(String(decoded.leaderUrl)).toMatch(/^http:\/\//);
     expect(String(decoded.psk).length).toBeGreaterThan(10);
+  });
+
+  it('expired join code is rejected (JOIN_CODE_EXPIRED)', async () => {
+    if (!dockerOk) return;
+    if (!leader || !follower) throw new Error('apps not initialized');
+
+    // Load a join code and then backdate it beyond the default TTL (60 minutes).
+    const join = await leader.app.inject({ method: 'GET', url: '/api/cluster/join-code', headers: { cookie: leaderCookie } });
+    expect(join.statusCode).toBe(200);
+    const joinCode = String(join.json()?.joinCode || '');
+    const decoded = decodeJoinCode(joinCode);
+    decoded.createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const expired = encodeJoinCode(decoded);
+
+    const res = await follower.app.inject({
+      method: 'POST',
+      url: '/api/cluster/configure-follower',
+      headers: { cookie: followerCookie, 'content-type': 'application/json' },
+      payload: { joinCode: expired }
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'JOIN_CODE_EXPIRED' });
   });
 
   it('follower sync applies snapshot (settings, clients, rules, blocklists, secrets)', async () => {

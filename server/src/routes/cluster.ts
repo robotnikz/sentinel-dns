@@ -10,12 +10,37 @@ import { getClusterStatus, setClusterConfig } from '../cluster/store.js';
 import { configureFollowerFromJoinCode, ensureClusterPsk, makeLeaderJoinCode } from '../cluster/sync.js';
 import type { ClusterExportSnapshot } from '../cluster/types.js';
 import { effectiveRole, readRoleOverride } from '../cluster/role.js';
+import 'fastify-rate-limit';
 
 function unauthorized(): Error {
   const err = new Error('Unauthorized');
   // @ts-expect-error Fastify maps this
   err.statusCode = 401;
   return err;
+}
+
+// Best-effort replay protection for cluster-internal requests.
+// This is intentionally in-memory (per leader instance) and TTL-bounded.
+const SEEN_NONCES = new Map<string, number>();
+const NONCE_TTL_MS = 2 * 60_000;
+const MAX_NONCES = 5_000;
+
+function rememberNonce(nonce: string): boolean {
+  const now = Date.now();
+  const existing = SEEN_NONCES.get(nonce);
+  if (existing !== undefined && now - existing < NONCE_TTL_MS) return false;
+
+  SEEN_NONCES.set(nonce, now);
+
+  // Opportunistic cleanup.
+  if (SEEN_NONCES.size > MAX_NONCES) {
+    for (const [k, ts] of SEEN_NONCES) {
+      if (now - ts >= NONCE_TTL_MS) SEEN_NONCES.delete(k);
+      if (SEEN_NONCES.size <= MAX_NONCES) break;
+    }
+  }
+
+  return true;
 }
 
 async function requireClusterAuth(db: Db, config: AppConfig, request: any): Promise<void> {
@@ -33,6 +58,10 @@ async function requireClusterAuth(db: Db, config: AppConfig, request: any): Prom
   });
 
   if (!v.ok) throw unauthorized();
+
+  const nonce = String(request.headers['x-sentinel-nonce'] || '').trim();
+  if (!nonce) throw unauthorized();
+  if (!rememberNonce(nonce)) throw unauthorized();
 }
 
 export async function registerClusterRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
@@ -269,15 +298,34 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
         }
       }
     },
-    async (request: any) => {
+    async (request: any, reply: any) => {
       await requireAdmin(db, request);
-      await configureFollowerFromJoinCode(db, config, String(request.body.joinCode));
-      return { ok: true };
+      try {
+        await configureFollowerFromJoinCode(db, config, String(request.body.joinCode));
+        return { ok: true };
+      } catch (e: any) {
+        const code = String(e?.message || 'INVALID_JOIN_CODE');
+        if (code === 'JOIN_CODE_EXPIRED' || code === 'INVALID_JOIN_CODE' || code === 'INVALID_LEADER_URL' || code === 'INVALID_PSK') {
+          reply.code(400);
+          return { error: code };
+        }
+        throw e;
+      }
     }
   );
 
   // Cluster-internal export endpoint (followers pull from leader).
-  app.post('/api/cluster/sync/export', async (request: any) => {
+  app.post(
+    '/api/cluster/sync/export',
+    {
+      config: {
+        // Internal endpoint: follower sync loop polls every few seconds.
+        // Keep this high enough for normal operation, but prevent abuse.
+        rateLimit: { max: 240, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request: any) => {
     await requireClusterAuth(db, config, request);
 
     const status = await getClusterStatus(db);
@@ -353,5 +401,6 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
     };
 
     return snapshot;
-  });
+    }
+  );
 }

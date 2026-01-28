@@ -11,6 +11,15 @@ export type ClusterStatus = {
   config: ClusterConfig;
   lastSync?: string;
   lastError?: string;
+  lastSyncDurationMs?: number;
+  lastSnapshotBytes?: number;
+  lastSnapshotCounts?: {
+    settings: number;
+    clients: number;
+    rules: number;
+    blocklists: number;
+    secrets: number;
+  };
 };
 
 export type ClusterJoinCode = {
