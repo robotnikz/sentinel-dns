@@ -1,3 +1,9 @@
+## [0.8.7](https://github.com/robotnikz/sentinel-dns/compare/v0.8.6...v0.8.7) (2026-01-28)
+
+### fix
+
+* **ui:** show read-only banner on config pages ([](https://github.com/robotnikz/sentinel-dns/commit/dce1cf2ed05e2aa7ba858a67d32d172aeb060a02))
+
 ## [0.8.6](https://github.com/robotnikz/sentinel-dns/compare/v0.8.5...v0.8.6) (2026-01-28)
 
 ### fix
