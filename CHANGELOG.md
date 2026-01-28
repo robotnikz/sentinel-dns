@@ -1,3 +1,9 @@
+## [0.7.8](https://github.com/robotnikz/sentinel-dns/compare/v0.7.7...v0.7.8) (2026-01-28)
+
+### fix
+
+* **ha:** readiness uses configured role for failback ([](https://github.com/robotnikz/sentinel-dns/commit/9883dc09d647ab6e701c5ac080d5c983ba9bf906))
+
 ## [0.7.7](https://github.com/robotnikz/sentinel-dns/compare/v0.7.6...v0.7.7) (2026-01-28)
 
 ### fix
