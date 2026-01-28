@@ -43,29 +43,27 @@
 
 ## ⚡ What is Sentinel-DNS?
 
-Sentinel-DNS is a **self-hosted, network-wide DNS blocker** (Pi-hole/AdGuard-style).
-Point your router or devices to it as the DNS server and it will **filter ads/trackers/malware domains** before they reach your apps.
-- a clear dashboard (what’s happening right now)
-- per-client visibility (who is asking what)
-- query logs when something breaks
-- simple controls for allow/deny + local DNS records
+Sentinel-DNS is a **self-hosted DNS blocker** (Pi-hole/AdGuard-style) that runs on your own server.
+You point your router (or your devices) to Sentinel-DNS as the DNS server and it will **block ads/trackers/malware domains** before they reach your apps.
 
-It runs as **one Docker container** with a persistent data volume — no cloud dependency.
+If you’re new to DNS blockers: don’t worry — the setup is basically “start the container → open the web UI → set router DNS”.
 
-The UI is intentionally **honest**: status indicators are driven by real backend checks (no “always green” screens).
+## ⭐ Why people choose Sentinel-DNS (vs. Pi-hole / AdGuard Home)
 
-## ✨ Key Features
+- **Sync + HA + Failover (2 nodes):** a floating VIP (keepalived/VRRP) + automatic **cluster sync** so DNS keeps working even if one node dies.
+- **Per-client policies (device + subnet):** client-specific rules + domain/category/app blocklists (kids, guests, TVs, work devices, etc.)
+- **Honest UI:** health/cluster indicators are backed by real checks (not just a green badge).
 
-- **Fast setup:** run it, set DNS on router/clients, done
-- **Per-client policies:** apply different blocklists / “app” categories / rules per device (kids, work laptop, smart TV, guests…)
-- **Blocking controls:** blocklists + allow/deny rules + local DNS rewrites (local records)
-- **Visibility:** query logs, per-client view, metrics, DNS Activity Map
-- **Reverse DNS lookup:** see real hostnames when available (instead of just IPs)
-- **Suspicious activity detection (heuristic):** highlights unusual DNS behavior so you can react quickly
-- **Optional AI domain threat analysis (one click):** get instant feedback on a domain when you explicitly ask for it
-- **Upstreams:** UDP / DoT / DoH (presets + custom resolvers)
-- **Optional remote access:** Tailscale (docs: [docs/REMOTE_ACCESS_TAILSCALE.md](docs/REMOTE_ACCESS_TAILSCALE.md))
-- **Optional HA (2 nodes):** VIP failover (keepalived/VRRP) + cluster sync (docs: [docs/CLUSTER_HA.md](docs/CLUSTER_HA.md))
+## ✨ Key Features (short)
+
+- **Fast setup:** one container, persistent data volume
+- **DNS filtering:** blocklists + allow/deny rules + local DNS rewrites
+- **Client policies:** per device + per subnet
+- **Blocklists:** domain lists + *Category:* lists + *App:* lists
+- **Visibility:** query logs, metrics, DNS Activity Map
+- **Encrypted upstream DNS:** UDP / DoT / DoH
+- **Optional remote access:** Tailscale ([docs/REMOTE_ACCESS_TAILSCALE.md](docs/REMOTE_ACCESS_TAILSCALE.md))
+- **Optional HA:** Sync + VIP failover ([docs/CLUSTER_HA.md](docs/CLUSTER_HA.md))
 
 > [!NOTE]
 > **AI features are optional and opt-in.** They require you to add a **Gemini or ChatGPT API key** in the UI.
@@ -76,32 +74,42 @@ The UI is intentionally **honest**: status indicators are driven by real backend
 | **Dashboard** | **Query Logs** |
 |:---:|:---:|
 | <img src="docs/screenshots/dashboard.png" alt="Dashboard" width="400"/> | <img src="docs/screenshots/query-logs.png" alt="Query Logs" width="400"/> |
-| **DNS Settings** | **Clients** |
-| <img src="docs/screenshots/dns-settings.png" alt="DNS Settings" width="400"/> | <img src="docs/screenshots/clients.png" alt="Clients" width="400"/> |
+| **Filtering** | **Client Policies** |
+| <img src="docs/screenshots/filtering.png" alt="Filtering" width="400"/> | <img src="docs/screenshots/clients.png" alt="Clients" width="400"/> |
+| **DNS Settings** | **Cluster / HA** |
+| <img src="docs/screenshots/dns-settings.png" alt="DNS Settings" width="400"/> | <img src="docs/screenshots/cluster-ha.png" alt="Cluster / HA" width="400"/> |
 
 ## 🧭 Quickstart
 
-Sentinel-DNS is shipped as a Docker image. You can run it on a Raspberry Pi, NAS, or any Linux server.
+Sentinel-DNS is shipped as a Docker image. You can run it on a Raspberry Pi, NAS, mini PC, or server.
 
-Advanced setup guides:
+If you want the “just tell me what to do” version:
 
-- HA / VIP failover (2 nodes): [docs/CLUSTER_HA.md](docs/CLUSTER_HA.md)
-- Remote access (Tailscale): [docs/REMOTE_ACCESS_TAILSCALE.md](docs/REMOTE_ACCESS_TAILSCALE.md)
-- Operations (upgrades, backups, exposure, reverse proxy): [docs/OPERATIONS.md](docs/OPERATIONS.md)
+1) Start the container (commands below)
+2) Open the Web UI: `http://<server-ip>:8080`
+3) Create your admin account
+4) Set your router’s DNS to the Sentinel IP (or VIP if you use HA)
+5) Done ✅
+
+More docs (advanced / deeper): start here: [docs/README.md](docs/README.md)
 
 ### 🧰 Docker Prerequisites
 
-1. Docker Engine + Compose plugin installed
-2. Ports open on your LAN: `53/udp`, `53/tcp`, `8080/tcp`
+1. Docker Engine + Docker Compose installed
+2. Your firewall allows LAN access to: `53/udp`, `53/tcp`, `8080/tcp`
+
+> [!NOTE]
+> **HA/VIP failover requires Linux hosts** (keepalived uses host networking). Single-node works anywhere Docker works.
 
 ### 🧩 Method 1: Docker Compose (Recommended)
 
 > [!TIP]
 > For production, pin a version tag (instead of `latest`) so upgrades/rollbacks are explicit.
 
-
+**Fastest path:** use the repo’s compose file (it already includes the optional keepalived sidecar).
 
 ```yaml
+# deploy/compose/docker-compose.yml
 services:
   sentinel:
     image: ghcr.io/robotnikz/sentinel-dns:latest
@@ -144,10 +152,12 @@ services:
     restart: unless-stopped
 
   # Optional HA sidecar (VRRP/VIP via keepalived)
-  # - Included by default so `docker compose up -d` deploys everything.
+  # - Always included so users can enable HA from the UI without editing compose files.
   # - Does nothing until the UI writes /data/sentinel/ha/config.json (enabled=true).
   # - Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
   keepalived:
+    # Included by default so a simple `docker compose up -d` deploys everything.
+    # The container stays idle until the UI enables VIP failover (writes /data/sentinel/ha/config.json).
     image: ghcr.io/robotnikz/sentinel-dns-keepalived:latest
     container_name: sentinel-keepalived
     network_mode: host
@@ -169,13 +179,21 @@ volumes:
   sentinel-data:
 ```
 
-Run it:
+Or download the compose file directly and run it:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml up -d
+# Linux/macOS
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.yml
+docker compose up -d
+
+# Windows PowerShell
+curl.exe -fsSL -o docker-compose.yml https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.yml
+docker compose up -d
 ```
 
-VIP/HA failover (keepalived) is included by default. Enable it in the UI (Cluster / HA) after startup.
+VIP/HA failover (keepalived) is included by default in that compose file. Enable it in the UI (Cluster / HA) after startup.
+
+The source of truth is always [deploy/compose/docker-compose.yml](deploy/compose/docker-compose.yml).
 
 
 
@@ -209,6 +227,14 @@ Once running:
 - Web UI + API: `http://<server-ip>:8080`
 - DNS service: `<server-ip>:53` (UDP/TCP)
 
+## 🧠 Important concept (Leader / Follower)
+
+If you enable **Sync/HA**:
+
+- You make changes on the **Leader** (settings, clients, blocklists, rules…)
+- The **Follower automatically syncs** and is **read-only**
+- Your network uses the **VIP** (virtual IP) as DNS, so failover is transparent
+
 ## ✅ First run
 
 On first start, create an admin user directly in the Web UI:
@@ -221,6 +247,29 @@ Optional AI features (Gemini / ChatGPT) can be enabled from the UI by adding an 
 Keys are stored encrypted server-side.
 
 Sentinel-DNS will only send an AI request when you explicitly trigger it (for example: “analyze this domain”).
+
+## 🧩 Client policies (what makes Sentinel powerful)
+
+In **Clients / Client Policies** you can create policies for:
+
+- **Individual devices** (by IP/MAC)
+- **Networks & Subnets** (e.g. guest Wi‑Fi)
+
+Each client policy can have different filtering, for example:
+
+- stricter blocking for kids devices
+- relaxed rules for a Smart TV
+- a “work” profile that blocks distractions
+
+### Blocklists: domain vs category vs app
+
+Sentinel supports multiple kinds of lists:
+
+- **Domain blocklists** (classic ad/tracker lists)
+- **Category blocklists** (e.g. "Category: adult", "Category: gambling")
+- **App blocklists** (e.g. "App: tiktok", "App: youtube")
+
+You can enable these globally and/or per client.
 
 ## 🗺️ GeoIP database
 
