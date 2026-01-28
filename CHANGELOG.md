@@ -1,3 +1,11 @@
+## [0.8.5](https://github.com/robotnikz/sentinel-dns/compare/v0.8.4...v0.8.5) (2026-01-28)
+
+* Merge pull request #54 from robotnikz/fix/cluster-ha-layout ([](https://github.com/robotnikz/sentinel-dns/commit/7af3e1b76663621742c3fcebdc284a2b7f42b06f)), closes [#54](https://github.com/robotnikz/sentinel-dns/issues/54)
+
+### fix
+
+* **web:** full-width Cluster/HA after setup ([](https://github.com/robotnikz/sentinel-dns/commit/d3586e848150bdf99cf1037e24b7da85118543a8))
+
 ## [0.8.4](https://github.com/robotnikz/sentinel-dns/compare/v0.8.3...v0.8.4) (2026-01-28)
 
 * Merge pull request #53 from robotnikz/chore/test-coverage-audit-2026-01-28 ([](https://github.com/robotnikz/sentinel-dns/commit/bd5015ff711771d937b2d0741edd7856ac6ac3d9)), closes [#53](https://github.com/robotnikz/sentinel-dns/issues/53)
