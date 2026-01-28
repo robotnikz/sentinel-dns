@@ -1183,8 +1183,8 @@ const Settings2: React.FC<{
             <div className="mt-4 flex items-center gap-3">
               <button
                 onClick={saveAiKeys}
-                disabled={aiBusy}
-                className="btn-primary px-4 py-2 rounded text-xs font-bold flex items-center gap-2"
+                disabled={aiBusy || readOnlyFollower}
+                className="btn-primary px-4 py-2 rounded text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {aiBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 SAVE
@@ -1234,7 +1234,8 @@ const Settings2: React.FC<{
                     />
                     <button
                       onClick={saveMaxMindKey}
-                      className="px-3 py-2 rounded text-xs font-bold bg-[#18181b] border border-[#27272a] text-zinc-300 hover:bg-white hover:text-black hover:border-white transition-colors"
+                      disabled={readOnlyFollower}
+                      className="px-3 py-2 rounded text-xs font-bold bg-[#18181b] border border-[#27272a] text-zinc-300 hover:bg-white hover:text-black hover:border-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#18181b] disabled:hover:text-zinc-300 disabled:hover:border-[#27272a]"
                     >
                       <span className="flex items-center gap-2"><Lock className="w-3.5 h-3.5" /> SAVE</span>
                     </button>
@@ -1252,8 +1253,8 @@ const Settings2: React.FC<{
                 </button>
                 <button
                   onClick={updateGeoIpDb}
-                  disabled={geoBusy}
-                  className="btn-primary px-4 py-2 rounded text-xs font-bold flex items-center gap-2"
+                  disabled={geoBusy || readOnlyFollower}
+                  className="btn-primary px-4 py-2 rounded text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {geoBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Globe className="w-3.5 h-3.5" />}
                   UPDATE DB
@@ -1293,7 +1294,7 @@ const Settings2: React.FC<{
 
                   <button
                     onClick={authenticateTailscaleInBrowser}
-                    disabled={tailscaleBusy || tailscaleAuthPolling}
+                    disabled={tailscaleBusy || tailscaleAuthPolling || readOnlyFollower}
                     className="px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-white hover:text-black hover:border-white transition-colors flex items-center gap-2"
                   >
                     {tailscaleBusy || tailscaleAuthPolling ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <ExternalLink className="w-3.5 h-3.5" />}
@@ -1343,8 +1344,8 @@ const Settings2: React.FC<{
                     />
                     <button
                       onClick={saveTailscaleAuthKey}
-                      disabled={tailscaleBusy}
-                      className="px-3 py-2 rounded text-xs font-bold bg-[#18181b] border border-[#27272a] text-zinc-300 hover:bg-white hover:text-black hover:border-white transition-colors"
+                      disabled={tailscaleBusy || readOnlyFollower}
+                      className="px-3 py-2 rounded text-xs font-bold bg-[#18181b] border border-[#27272a] text-zinc-300 hover:bg-white hover:text-black hover:border-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#18181b] disabled:hover:text-zinc-300 disabled:hover:border-[#27272a]"
                     >
                       <span className="flex items-center gap-2"><Lock className="w-3.5 h-3.5" /> SAVE</span>
                     </button>
@@ -1363,9 +1364,11 @@ const Settings2: React.FC<{
                     </div>
                     <button
                       onClick={() => setTailscaleAdvertiseExitNode((v) => !v)}
+                      disabled={readOnlyFollower}
                       className={classNames(
                         'w-12 h-6 rounded-full relative transition-colors',
-                        tailscaleAdvertiseExitNode ? 'bg-emerald-600' : 'bg-zinc-700'
+                        tailscaleAdvertiseExitNode ? 'bg-emerald-600' : 'bg-zinc-700',
+                        readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                       )}
                       aria-label="Toggle exit node advertisement"
                       type="button"
@@ -1407,9 +1410,11 @@ const Settings2: React.FC<{
                     </div>
                     <button
                       onClick={() => setTailscaleSnatSubnetRoutes((v) => !v)}
+                      disabled={readOnlyFollower}
                       className={classNames(
                         'w-12 h-6 rounded-full relative transition-colors',
-                        tailscaleSnatSubnetRoutes ? 'bg-emerald-600' : 'bg-zinc-700'
+                        tailscaleSnatSubnetRoutes ? 'bg-emerald-600' : 'bg-zinc-700',
+                        readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                       )}
                       aria-label="Toggle SNAT"
                       type="button"
@@ -1442,7 +1447,7 @@ const Settings2: React.FC<{
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <button
                     onClick={isTailscaleConnected ? disconnectTailscale : connectTailscale}
-                  disabled={tailscaleBusy}
+                  disabled={tailscaleBusy || readOnlyFollower}
                     className={classNames(
                       'px-4 py-2 rounded text-xs font-bold flex items-center gap-2 border transition-colors',
                       isTailscaleConnected
@@ -1459,10 +1464,10 @@ const Settings2: React.FC<{
                 </button>
                   <button
                     onClick={applyTailscaleConfig}
-                    disabled={tailscaleBusy || !isTailscaleConnected || !hasTailscaleChanges}
+                    disabled={tailscaleBusy || !isTailscaleConnected || !hasTailscaleChanges || readOnlyFollower}
                     className={classNames(
                       'btn-primary px-4 py-2 rounded text-xs font-bold flex items-center gap-2',
-                      tailscaleBusy || !isTailscaleConnected || !hasTailscaleChanges ? 'opacity-50 cursor-not-allowed' : ''
+                      tailscaleBusy || !isTailscaleConnected || !hasTailscaleChanges || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                     )}
                   >
                     <Save className="w-3.5 h-3.5" /> Apply Changes
@@ -1522,16 +1527,16 @@ const Settings2: React.FC<{
               <div className="mt-3 flex items-center gap-3">
                 <button
                   onClick={saveNotificationSettings}
-                  disabled={notifBusy}
-                  className="btn-primary px-4 py-2 rounded text-xs font-bold flex items-center gap-2"
+                  disabled={notifBusy || readOnlyFollower}
+                  className="btn-primary px-4 py-2 rounded text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {notifBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                   SAVE
                 </button>
                 <button
                   onClick={testNotification}
-                  disabled={notifBusy}
-                  className="px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2"
+                  disabled={notifBusy || readOnlyFollower}
+                  className="px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Shield className="w-3.5 h-3.5" /> TEST
                 </button>
@@ -1581,8 +1586,8 @@ const Settings2: React.FC<{
               <div className="mt-4 flex items-center gap-3">
                 <button
                   onClick={saveNotificationEvents}
-                  disabled={notifBusy}
-                  className="btn-primary px-4 py-2 rounded text-xs font-bold flex items-center gap-2"
+                  disabled={notifBusy || readOnlyFollower}
+                  className="btn-primary px-4 py-2 rounded text-xs font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {notifBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                   SAVE EVENTS
@@ -1620,10 +1625,10 @@ const Settings2: React.FC<{
                       />
                       <button
                         onClick={purgeOldQueryLogs}
-                        disabled={maintBusy}
+                        disabled={maintBusy || readOnlyFollower}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
-                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         PURGE OLDER THAN (DAYS)
@@ -1631,10 +1636,10 @@ const Settings2: React.FC<{
 
                       <button
                         onClick={flushQueryLogs}
-                        disabled={maintBusy}
+                        disabled={maintBusy || readOnlyFollower}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border flex items-center gap-2',
-                          maintBusy
+                          maintBusy || readOnlyFollower
                             ? 'opacity-50 cursor-not-allowed bg-[#18181b] border-[#27272a] text-zinc-400'
                             : 'bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50'
                         )}
@@ -1651,20 +1656,20 @@ const Settings2: React.FC<{
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => clearNotifications('read')}
-                        disabled={maintBusy}
+                        disabled={maintBusy || readOnlyFollower}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
-                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         CLEAR READ
                       </button>
                       <button
                         onClick={() => clearNotifications('all')}
-                        disabled={maintBusy}
+                        disabled={maintBusy || readOnlyFollower}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50',
-                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         CLEAR ALL
@@ -1678,20 +1683,20 @@ const Settings2: React.FC<{
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => clearIgnoredAnomalies('expired')}
-                        disabled={maintBusy}
+                        disabled={maintBusy || readOnlyFollower}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
-                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         PURGE EXPIRED
                       </button>
                       <button
                         onClick={() => clearIgnoredAnomalies('all')}
-                        disabled={maintBusy}
+                        disabled={maintBusy || readOnlyFollower}
                         className={classNames(
                           'px-3 py-2 rounded text-xs font-bold border bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50',
-                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                         )}
                       >
                         CLEAR ALL
@@ -1714,10 +1719,10 @@ const Settings2: React.FC<{
                       <div className="mt-3">
                         <button
                           onClick={refreshEnabledBlocklistsNow}
-                          disabled={maintBusy}
+                          disabled={maintBusy || readOnlyFollower}
                           className={classNames(
                             'px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2',
-                            maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                            maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                           )}
                         >
                           {maintBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -1732,20 +1737,20 @@ const Settings2: React.FC<{
                       <div className="mt-3 flex flex-wrap items-center gap-2">
                         <button
                           onClick={() => restartResolver('reload')}
-                          disabled={maintBusy}
+                          disabled={maintBusy || readOnlyFollower}
                           className={classNames(
                             'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
-                            maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                            maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                           )}
                         >
                           RELOAD CONFIG
                         </button>
                         <button
                           onClick={() => restartResolver('restart')}
-                          disabled={maintBusy}
+                          disabled={maintBusy || readOnlyFollower}
                           className={classNames(
                             'px-3 py-2 rounded text-xs font-bold border bg-amber-950/30 border-amber-900/50 text-amber-300 hover:bg-amber-950/50',
-                            maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                            maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                           )}
                         >
                           RESTART (CLEARS CACHE)
@@ -1805,7 +1810,7 @@ const Settings2: React.FC<{
                           ref={importFileInputRef}
                           type="file"
                           accept="application/json"
-                          disabled={importBusy || maintBusy}
+                          disabled={importBusy || maintBusy || readOnlyFollower}
                           onChange={(e) => {
                             const file = e.target.files?.[0] || null;
                             void onImportFileSelected(file);
@@ -1818,10 +1823,10 @@ const Settings2: React.FC<{
                         <div className="flex flex-wrap items-center gap-2">
                           <button
                             onClick={() => importFileInputRef.current?.click()}
-                            disabled={importBusy || maintBusy}
+                            disabled={importBusy || maintBusy || readOnlyFollower}
                             className={classNames(
                               'px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2',
-                              importBusy || maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                              importBusy || maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                             )}
                           >
                             <Upload className="w-3.5 h-3.5" /> CHOOSE FILE
@@ -1862,10 +1867,10 @@ const Settings2: React.FC<{
                           <div className="mt-3 flex items-center gap-2">
                             <button
                               onClick={applyImport}
-                              disabled={importBusy || maintBusy || !importPayload}
+                              disabled={importBusy || maintBusy || !importPayload || readOnlyFollower}
                               className={classNames(
                                 'px-4 py-2 rounded text-xs font-bold border flex items-center gap-2',
-                                importBusy || maintBusy
+                                importBusy || maintBusy || readOnlyFollower
                                   ? 'opacity-50 cursor-not-allowed bg-[#18181b] border-[#27272a] text-zinc-400'
                                   : 'bg-emerald-950/30 border-emerald-900/50 text-emerald-300 hover:bg-emerald-950/50'
                               )}

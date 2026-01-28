@@ -9,7 +9,7 @@ import NetworkMap from './pages/NetworkMap';
 import Settings from './pages/Settings2';
 import Cluster from './pages/Cluster';
 import Setup from './pages/Setup';
-import { Bell, Search, Terminal, Play, Pause, AlertTriangle, Shield, CheckCircle } from 'lucide-react';
+import { Bell, Search, Terminal, Play, Pause, AlertTriangle, Shield, CheckCircle, Lock } from 'lucide-react';
 import { RulesProvider } from './contexts/RulesContext';
 import { ClientsProvider } from './contexts/ClientsContext';
 
@@ -49,6 +49,7 @@ const App: React.FC = () => {
   const [pauseMenuOpen, setPauseMenuOpen] = useState(false);
   const [pauseBusy, setPauseBusy] = useState(false);
   const [pauseError, setPauseError] = useState('');
+  const [localConfiguredRole, setLocalConfiguredRole] = useState<'standalone' | 'leader' | 'follower' | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [authGate, setAuthGate] = useState<'loading' | 'open' | 'closed'>('loading');
   const [authUsername, setAuthUsername] = useState<string>('');
@@ -229,6 +230,35 @@ const App: React.FC = () => {
       clearInterval(t);
     };
   }, [protectionPause.active]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshClusterPeerStatus = async () => {
+      try {
+        const res = await fetch('/api/cluster/peer-status', { headers: { Accept: 'application/json' } });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (cancelled || !data || typeof data !== 'object') return;
+
+        const role = String((data as any)?.local?.ready?.configuredRole || 'standalone');
+        if (role === 'leader' || role === 'follower' || role === 'standalone') {
+          setLocalConfiguredRole(role);
+        } else {
+          setLocalConfiguredRole(null);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    refreshClusterPeerStatus();
+    const t = setInterval(refreshClusterPeerStatus, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
 
   useEffect(() => {
     if (!pauseMenuOpen) return;
@@ -542,6 +572,13 @@ const App: React.FC = () => {
                     {protectionPause.active ? 'Protection Paused' : 'Active'}
                     </span>
                  </div>
+
+                   {localConfiguredRole === 'follower' ? (
+                     <div className="flex items-center gap-2 px-2 py-1 rounded border border-amber-900/30 bg-amber-950/10">
+                       <Lock className="w-3.5 h-3.5 text-amber-500" />
+                       <span className="text-[10px] font-mono font-medium uppercase tracking-wider text-amber-500">Failover node · read-only</span>
+                     </div>
+                   ) : null}
               </div>
 
               <div className="flex items-center gap-4">

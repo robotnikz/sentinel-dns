@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { getClusterConfig } from './store.js';
-import { effectiveRole } from './role.js';
 
 function isMutation(method: string): boolean {
   const m = method.toUpperCase();
@@ -25,8 +24,9 @@ export function registerFollowerReadOnlyGuard(app: FastifyInstance, config: AppC
     const cfg = await getClusterConfig(db);
     if (!cfg.enabled) return;
 
-    const role = effectiveRole(config, cfg.role);
-    if (role !== 'follower') return;
+    // Backup-only semantics: a configured follower is always read-only,
+    // even if keepalived temporarily overrides the *effective* role.
+    if (cfg.role !== 'follower') return;
 
     reply.code(409);
     // Hooks must explicitly send to short-circuit the request.

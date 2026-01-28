@@ -601,7 +601,11 @@ const DnsSettings: React.FC = () => {
                  </span>
              ) : null}
              {activeTab === 'upstream' ? (
-                 <button onClick={saveDnsSettings} className="btn-primary flex items-center gap-2 px-4 py-2 rounded text-xs">
+                 <button
+                   onClick={saveDnsSettings}
+                   disabled={readOnlyFollower}
+                   className="btn-primary flex items-center gap-2 px-4 py-2 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                 >
                      <Save className="w-3.5 h-3.5" />
                      SAVE CHANGES
                  </button>
@@ -644,7 +648,11 @@ const DnsSettings: React.FC = () => {
                         <Server className="w-4 h-4 text-indigo-500" /> Public Resolvers
                     </h3>
                     {!showAddResolver && (
-                        <button onClick={() => setShowAddResolver(true)} className="text-[10px] font-bold text-zinc-400 hover:text-white flex items-center gap-1 bg-[#18181b] px-2 py-1 rounded border border-[#27272a]">
+                        <button
+                          onClick={() => setShowAddResolver(true)}
+                          disabled={readOnlyFollower}
+                          className="text-[10px] font-bold text-zinc-400 hover:text-white flex items-center gap-1 bg-[#18181b] px-2 py-1 rounded border border-[#27272a] disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
                             <Plus className="w-3 h-3" /> ADD CUSTOM
                         </button>
                     )}
@@ -1100,7 +1108,7 @@ const DnsSettings: React.FC = () => {
                                         showPageMsg('Backend not reachable.', 'error');
                                     }
                                 }}
-                                disabled={!newRewriteDomain.trim() || !newRewriteTarget.trim()}
+                                disabled={readOnlyFollower || !newRewriteDomain.trim() || !newRewriteTarget.trim()}
                                 className="btn-primary px-6 py-2 rounded text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <Save className="w-3.5 h-3.5" /> SAVE
@@ -1229,7 +1237,7 @@ const DnsSettings: React.FC = () => {
                               <button
                                   onClick={saveDiscoverySettings}
                                   className="btn-primary px-6 py-2 rounded text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  disabled={discoveryLoading}
+                                  disabled={discoveryLoading || readOnlyFollower}
                               >
                                   <Save className="w-3.5 h-3.5" /> SAVE
                               </button>

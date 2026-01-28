@@ -375,6 +375,27 @@ describe('integration: cluster/HA + sync (MVP)', () => {
       expect(ready.statusCode).toBe(200);
       expect(ready.json()).toMatchObject({ ok: true, role: 'leader' });
 
+      // Even while effectively leader (VIP owner), a configured follower must remain read-only.
+      const login = await followerRole.app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        headers: { 'content-type': 'application/json' },
+        payload: { username: adminUsername, password: adminPassword }
+      });
+      expect(login.statusCode, login.body).toBe(200);
+      const freshCookie = extractSessionCookie(login.headers['set-cookie']);
+      expect(freshCookie).toBeTruthy();
+
+      const id = `ro-override-${Date.now()}`;
+      const mutation = await followerRole.app.inject({
+        method: 'PUT',
+        url: `/api/clients/${id}`,
+        headers: { cookie: freshCookie, 'content-type': 'application/json' },
+        payload: { id, name: 'Should fail', type: 'laptop' }
+      });
+      expect(mutation.statusCode).toBe(409);
+      expect(mutation.json()).toMatchObject({ error: 'FOLLOWER_READONLY' });
+
       // Prove sync won't run when effective role is leader.
       await followerRole.db.pool.query("DELETE FROM settings WHERE key = 'some_setting'");
       await runFollowerSyncOnce(followerRole.config, followerRole.db);

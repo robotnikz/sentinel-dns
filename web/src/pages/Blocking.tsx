@@ -795,7 +795,7 @@ const Blocking: React.FC = () => {
         </div>
                 <button
                     onClick={syncAllBlocklists}
-                    disabled={isSyncing || !canUpdateLists}
+                    disabled={isSyncing || !canUpdateLists || readOnlyFollower}
                     className="btn-primary flex items-center gap-2 px-4 py-2 rounded text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                     title={updateListsTitle}
                 >

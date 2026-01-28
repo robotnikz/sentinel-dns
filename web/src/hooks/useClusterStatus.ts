@@ -49,8 +49,15 @@ export function getEffectiveRole(status: ClusterStatus | null): ClusterRole {
   return 'standalone';
 }
 
+export function getConfiguredRole(status: ClusterStatus | null): ClusterRole {
+  const r = String((status as any)?.config?.role || 'standalone');
+  if (r === 'leader' || r === 'follower' || r === 'standalone') return r;
+  return 'standalone';
+}
+
 export function isReadOnlyFollower(status: ClusterStatus | null): boolean {
   const enabled = Boolean((status as any)?.config?.enabled);
   if (!enabled) return false;
-  return getEffectiveRole(status) === 'follower';
+  // Backup-only semantics: configured follower is always read-only.
+  return getConfiguredRole(status) === 'follower';
 }

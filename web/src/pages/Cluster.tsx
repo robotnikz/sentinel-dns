@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, RefreshCw, Shield, ServerCog, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { ReadOnlyFollowerBanner } from '../components/ReadOnlyFollowerBanner';
 
 type ClusterRole = 'standalone' | 'leader' | 'follower';
 
@@ -754,6 +755,8 @@ const Cluster: React.FC = () => {
     return { vip, domain, cmds };
   }, [failoverTestDomain, haVip]);
 
+  const readOnlyFollower = Boolean(status?.config?.enabled && status?.config?.role === 'follower');
+
   return (
     <div className="p-8 text-zinc-200">
       <div className="flex items-start justify-between gap-4 mb-6">
@@ -795,6 +798,8 @@ const Cluster: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <ReadOnlyFollowerBanner show={readOnlyFollower} className="mb-6" />
 
       {msg ? (
         <div
