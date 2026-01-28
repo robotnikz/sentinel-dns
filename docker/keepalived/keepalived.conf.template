@@ -19,7 +19,7 @@ global_defs {
 }
 
 vrrp_script chk_sentinel_ready {
-  script "/bin/sh -c 'curl -fsS --max-time 2 ${HA_READY_URL} | grep -q \"\\\"ok\\\":true\"'"
+  script "/bin/sh -c 'curl -fsS --max-time 2 ${HA_READY_URL} | jq -e \".ok == true\" >/dev/null'"
   interval 2
   timeout 3
   fall 2
