@@ -1,3 +1,11 @@
+## [0.6.5](https://github.com/robotnikz/sentinel-dns/compare/v0.6.4...v0.6.5) (2026-01-28)
+
+* Merge pull request #48 from robotnikz/fix/remove-dating-and-auditor-domaincheck ([](https://github.com/robotnikz/sentinel-dns/commit/faa745d1a48ed3dcb2142943a958418c7c9e1e71)), closes [#48](https://github.com/robotnikz/sentinel-dns/issues/48)
+
+### fix
+
+* remove dating category and improve policy auditing ([](https://github.com/robotnikz/sentinel-dns/commit/b693a9ab123abd06baa0e5dc5bb622aeaeceab97))
+
 ## [0.6.4](https://github.com/robotnikz/sentinel-dns/compare/v0.6.3...v0.6.4) (2026-01-28)
 
 * Merge pull request #47 from robotnikz/fix/modal-client-network-settings ([](https://github.com/robotnikz/sentinel-dns/commit/8de6095760ace39eb47542820b29a1bea93500c1)), closes [#47](https://github.com/robotnikz/sentinel-dns/issues/47)
