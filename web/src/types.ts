@@ -53,7 +53,7 @@ export interface DnsRewrite {
   target: string;
 }
 
-export type ContentCategory = 'adult' | 'gambling' | 'social' | 'piracy' | 'dating' | 'crypto' | 'shopping' | 'news' | 'game' | 'video';
+export type ContentCategory = 'adult' | 'gambling' | 'social' | 'piracy' | 'crypto' | 'shopping' | 'news' | 'game' | 'video';
 export type AppService =
   | '9gag'
   | 'amazon'

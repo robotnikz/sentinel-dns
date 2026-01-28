@@ -42,12 +42,6 @@ const DEFAULT_BLOCKLISTS: SeedBlocklist[] = [
     enabled: false,
     mode: 'ACTIVE'
   },
-  {
-    name: 'Category: Dating (NextDNS Services)',
-    url: 'https://raw.githubusercontent.com/nextdns/services/main/services/tinder',
-    enabled: false,
-    mode: 'ACTIVE'
-  },
 
   // App lists (disabled by default). These are used by per-client "Blocked Applications".
   { name: 'App: 9GAG (NextDNS Services)', url: 'https://raw.githubusercontent.com/nextdns/services/main/services/9gag', enabled: false, mode: 'ACTIVE' },

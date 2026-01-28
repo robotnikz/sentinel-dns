@@ -175,8 +175,7 @@ const Clients: React.FC = () => {
       adult: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/nsfw.txt'],
       gambling: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/gambling.txt'],
       social: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt'],
-      piracy: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt'],
-      dating: ['https://raw.githubusercontent.com/nextdns/services/main/services/tinder']
+      piracy: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt']
   };
 
   const APP_LIST_URLS: Partial<Record<AppService, string[]>> = {
@@ -287,7 +286,6 @@ const Clients: React.FC = () => {
     { id: 'adult', label: 'Pornography', icon: Lock },
     { id: 'gambling', label: 'Gambling', icon: Grid },
     { id: 'piracy', label: 'Piracy', icon: Skull },
-    { id: 'dating', label: 'Dating', icon: Heart },
     { id: 'social', label: 'Social Media', icon: MessageCircle },
     { id: 'crypto', label: 'Crypto', icon: Ban },
     { id: 'shopping', label: 'Shopping', icon: ShoppingCart },

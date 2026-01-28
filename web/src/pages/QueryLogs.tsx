@@ -104,6 +104,21 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const [newClientName, setNewClientName] = useState('');
   const [newClientType, setNewClientType] = useState('smartphone');
 
+  const applyClientFilterFromQuery = useCallback(
+    (q: DnsQuery) => {
+      const ip = String((q as any)?.clientIp ?? '').trim();
+      const label = String((q as any)?.client ?? '').trim();
+      setClientFilter(ip || label || 'ALL');
+    },
+    []
+  );
+
+  const applyDomainFilterFromQuery = useCallback((q: DnsQuery) => {
+    const d = String((q as any)?.domain ?? '').trim();
+    if (!d) return;
+    setSearchTerm(d);
+  }, []);
+
   const queryLogsAbortRef = useRef<AbortController | null>(null);
   const discoveryAbortRef = useRef<AbortController | null>(null);
 
@@ -959,13 +974,27 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
                         <tr ref={setRowRef(query.id)} key={query.id} className="hover:bg-[#27272a]/40 transition-colors group">
                           <td className="p-3 pl-4 text-xs text-zinc-400 font-mono">{query.timestamp}</td>
                           <td className="p-3">{getStatusBadge(query)}</td>
-                          <td className="p-3 text-sm text-zinc-200 font-mono tracking-tight">{query.domain}</td>
+                          <td className="p-3 text-sm font-mono tracking-tight">
+                            <button
+                              type="button"
+                              onClick={() => applyDomainFilterFromQuery(query)}
+                              className="text-zinc-200 hover:text-white hover:underline decoration-zinc-600 underline-offset-2 text-left"
+                              title="Filter query log by this domain"
+                            >
+                              {query.domain}
+                            </button>
+                          </td>
                           <td className="p-3 text-xs text-zinc-400 font-mono">
                             <div className="flex items-center justify-between gap-4">
-                              <div className="flex flex-col">
+                              <button
+                                type="button"
+                                onClick={() => applyClientFilterFromQuery(query)}
+                                className="flex flex-col text-left hover:underline decoration-zinc-600 underline-offset-2"
+                                title="Filter query log by this client"
+                              >
                                 <span className="text-zinc-300">{query.client}</span>
                                 <span className="text-[10px] text-zinc-600">{query.clientIp}</span>
-                              </div>
+                              </button>
                               {!isKnown && (
                                 <button
                                   onClick={() => handleAddClientClick(query.clientIp, query.client)}
