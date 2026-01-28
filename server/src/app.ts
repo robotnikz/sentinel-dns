@@ -37,6 +37,8 @@ import { registerOpenApiRoutes } from './routes/openapi.js';
 import { registerMaintenanceRoutes } from './routes/maintenance.js';
 import { startDnsServer } from './dns/dnsServer.js';
 import { requireAdmin } from './auth.js';
+import { startFollowerSyncLoop } from './cluster/sync.js';
+import { registerFollowerReadOnlyGuard } from './cluster/guard.js';
 import { startMaintenanceJobs } from './maintenance.js';
 
 export type BuildAppOptions = {
@@ -84,6 +86,9 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   await db.init();
 
   const maintenance = startMaintenanceJobs(config, db);
+
+  // If clustering is enabled and this node is a follower, reject mutation requests.
+  registerFollowerReadOnlyGuard(app, config, db);
 
   // First-run convenience: seed a small baseline set of enabled blocklists.
   // Safe to call repeatedly; it only runs when no blocklists exist.
@@ -212,7 +217,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   await registerProtectionRoutes(app, config, db);
   await registerMaintenanceRoutes(app, config, db);
   await registerOpenApiRoutes(app, config, db);
-  await registerClusterRoutes(app, db);
+  await registerClusterRoutes(app, config, db);
   await registerTailscaleRoutes(app, config, db);
   await registerVersionRoutes(app);
 
@@ -220,9 +225,16 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
 
   await app.ready();
 
+  const clusterLoop = startFollowerSyncLoop(config, db);
+
   async function close(): Promise<void> {
     if (refreshTimeout) clearTimeout(refreshTimeout);
     if (refreshInterval) clearInterval(refreshInterval);
+    try {
+      clusterLoop.stop();
+    } catch {
+      // ignore
+    }
     try {
       await maintenance.close();
     } catch {

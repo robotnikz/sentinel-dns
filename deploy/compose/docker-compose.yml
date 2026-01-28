@@ -22,6 +22,9 @@ services:
       # Ensure the Web UI/API is reachable via Docker port publishing.
       - HOST=0.0.0.0
       - PORT=8080
+      # Optional: HA/VIP role override file (written by keepalived sidecar).
+      # If you never configure HA in the UI, this file won't exist and Sentinel runs normally.
+      - CLUSTER_ROLE_FILE=/data/sentinel/cluster_role
     volumes:
       # Persistent storage for Postgres data, settings, secrets, and the GeoIP database.
       - sentinel-data:/data
@@ -35,6 +38,30 @@ services:
       net.ipv4.ip_forward: "1"
       net.ipv6.conf.all.forwarding: "1"
     restart: unless-stopped
+
+  # Optional HA sidecar (VRRP/VIP via keepalived)
+  # - Always included so users can enable HA from the UI without editing compose files.
+  # - Does nothing until the UI writes /data/sentinel/ha/config.json (enabled=true).
+  # - Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
+  keepalived:
+    build:
+      context: ../..
+      dockerfile: docker/keepalived/Dockerfile
+    container_name: sentinel-keepalived
+    network_mode: host
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BROADCAST
+    environment:
+      - DATA_DIR=/data
+      - HA_CONFIG_FILE=/data/sentinel/ha/config.json
+      - HA_ROLE_FILE=/data/sentinel/cluster_role
+      - HA_NETINFO_FILE=/data/sentinel/ha/netinfo.json
+      - HA_READY_URL=http://127.0.0.1:8080/api/cluster/ready
+    volumes:
+      - sentinel-data:/data
 
 volumes:
   sentinel-data:

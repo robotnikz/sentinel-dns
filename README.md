@@ -34,7 +34,6 @@
 <p>
   <a href="#quickstart">Quickstart</a>
   · <a href="#screenshots">Screenshots</a>
-  · <a href="#remote-access-tailscale">Remote access</a>
   · <a href="#security--hardening">Security</a>
   · <a href="#troubleshooting">Troubleshooting</a>
 </p>
@@ -68,7 +67,8 @@ The UI is intentionally **honest**: status indicators are driven by real backend
 - **Suspicious activity detection (heuristic):** highlights unusual DNS behavior so you can react quickly
 - **Optional AI domain threat analysis (one click):** get instant feedback on a domain when you explicitly ask for it
 - **Upstreams:** UDP / DoT / DoH (presets + custom resolvers)
-- **Optional remote access:** built-in Tailscale support. Connect all your devices to the same Tailscale network and use your DNS blocker on-the-go
+- **Optional remote access:** Tailscale (docs: [docs/REMOTE_ACCESS_TAILSCALE.md](docs/REMOTE_ACCESS_TAILSCALE.md))
+- **Optional HA (2 nodes):** VIP failover (keepalived/VRRP) + cluster sync (docs: [docs/CLUSTER_HA.md](docs/CLUSTER_HA.md))
 
 > [!NOTE]
 > **AI features are optional and opt-in.** They require you to add a **Gemini or ChatGPT API key** in the UI.
@@ -86,6 +86,12 @@ The UI is intentionally **honest**: status indicators are driven by real backend
 
 Sentinel-DNS is shipped as a Docker image. You can run it on a Raspberry Pi, NAS, or any Linux server.
 
+Advanced setup guides:
+
+- HA / VIP failover (2 nodes): [docs/CLUSTER_HA.md](docs/CLUSTER_HA.md)
+- Remote access (Tailscale): [docs/REMOTE_ACCESS_TAILSCALE.md](docs/REMOTE_ACCESS_TAILSCALE.md)
+- Operations (upgrades, backups, exposure, reverse proxy): [docs/OPERATIONS.md](docs/OPERATIONS.md)
+
 ### 🧰 Docker Prerequisites
 
 1. Docker Engine + Compose plugin installed
@@ -94,22 +100,28 @@ Sentinel-DNS is shipped as a Docker image. You can run it on a Raspberry Pi, NAS
 ### 🧩 Method 1: Docker Compose (Recommended)
 
 > [!TIP]
-> For production, pin a version tag (e.g. `ghcr.io/robotnikz/sentinel-dns:0.1.1`) so upgrades/rollbacks are explicit.
+> For production, pin a version tag (instead of `latest`) so upgrades/rollbacks are explicit.
 
-Use the included compose file at `deploy/compose/docker-compose.yml` (or create your own):
+
 
 ```yaml
 services:
   sentinel:
-    # Single-container build: Web UI + API + embedded DNS stack
     image: ghcr.io/robotnikz/sentinel-dns:latest
     container_name: sentinel-dns
     ports:
       # DNS service (UDP/TCP). If port 53 is already in use (e.g. systemd-resolved),
       # adjust the host-side port mapping or disable the stub resolver.
+      # By default this is published on all host interfaces (0.0.0.0).
+      # To keep it reachable for all devices in your LAN while avoiding WAN exposure,
+      # bind explicitly to your LAN interface IP (example 192.168.1.10):
+      # - "192.168.1.10:53:53/udp"
+      # - "192.168.1.10:53:53/tcp"
       - "53:53/udp"
       - "53:53/tcp"
       # Web UI + API
+      # Same idea for the UI/API:
+      # - "192.168.1.10:8080:8080"
       - "8080:8080"
     environment:
       # Timezone used for logs/UI timestamps.
@@ -117,8 +129,11 @@ services:
       # Ensure the Web UI/API is reachable via Docker port publishing.
       - HOST=0.0.0.0
       - PORT=8080
+      # Optional: HA/VIP role override file (written by keepalived sidecar).
+      # If you never configure HA in the UI, this file won't exist and Sentinel runs normally.
+      - CLUSTER_ROLE_FILE=/data/sentinel/cluster_role
     volumes:
-      # Persistent storage for data, settings, secrets, and the GeoIP database.
+      # Persistent storage for Postgres data, settings, secrets, and the GeoIP database.
       - sentinel-data:/data
     # Required for embedded Tailscale (VPN / exit-node mode).
     cap_add:
@@ -130,6 +145,30 @@ services:
       net.ipv4.ip_forward: "1"
       net.ipv6.conf.all.forwarding: "1"
     restart: unless-stopped
+
+  # Optional HA sidecar (VRRP/VIP via keepalived)
+  # - Always included so users can enable HA from the UI without editing compose files.
+  # - Does nothing until the UI writes /data/sentinel/ha/config.json (enabled=true).
+  # - Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
+  keepalived:
+    build:
+      context: ../..
+      dockerfile: docker/keepalived/Dockerfile
+    container_name: sentinel-keepalived
+    network_mode: host
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BROADCAST
+    environment:
+      - DATA_DIR=/data
+      - HA_CONFIG_FILE=/data/sentinel/ha/config.json
+      - HA_ROLE_FILE=/data/sentinel/cluster_role
+      - HA_NETINFO_FILE=/data/sentinel/ha/netinfo.json
+      - HA_READY_URL=http://127.0.0.1:8080/api/cluster/ready
+    volumes:
+      - sentinel-data:/data
 
 volumes:
   sentinel-data:
@@ -156,13 +195,12 @@ docker run -d \
   -p 53:53/tcp \
   -v sentinel-data:/data \
   -e TZ=Europe/Berlin \
-  --cap-add=NET_ADMIN \
-  --device=/dev/net/tun:/dev/net/tun \
-  --sysctl net.ipv4.ip_forward=1 \
-  --sysctl net.ipv6.conf.all.forwarding=1 \
   --restart unless-stopped \
   --name sentinel-dns \
   ghcr.io/robotnikz/sentinel-dns:latest
+
+# Note: for remote access (Tailscale) / Exit Node, extra privileges are required.
+# See: docs/REMOTE_ACCESS_TAILSCALE.md
 ```
 
 ---
@@ -184,37 +222,6 @@ Optional AI features (Gemini / ChatGPT) can be enabled from the UI by adding an 
 Keys are stored encrypted server-side.
 
 Sentinel-DNS will only send an AI request when you explicitly trigger it (for example: “analyze this domain”).
-
-## 🌐 Remote access (Tailscale)
-
-Sentinel runs an embedded `tailscaled` so you can reach the UI/API over your tailnet.
-
-If you enable **Exit Node** in the UI, Sentinel can act as your “VPN back home” (route all traffic through your home network).
-
-1. In the Web UI: Settings -> Remote Access (Tailscale)
-2. Click the sign-in/connect flow (browser auth) and complete the login
-3. Optional: instead of browser auth, you can paste a reusable auth key from the Tailscale admin console
-4. Approve exit-node advertisement in the Tailscale admin console (if enabled)
-
-To route DNS through Sentinel for your tailnet devices, set your tailnet DNS nameserver(s) to Sentinel's Tailscale IP.
-
-In the Tailscale admin console, ensure **Override DNS Servers** is enabled.
-
-### Tailscale clients + Query Logs
-
-If your tailnet devices use Sentinel as DNS but you **don't see any queries** in Query Logs, check the IP family used for DNS.
-
-- Some Tailscale clients prefer the **IPv6 tailnet address** of the resolver (e.g. `fd7a:...`).
-- Sentinel's DNS server must be listening on **IPv4 and IPv6** to see and log those requests.
-
-Per-client policies for Tailscale work the same as LAN devices:
-
-- Add each device as a client using its stable Tailscale IP (usually in `100.64.0.0/10`, or an IPv6 tailnet address).
-- Or add a CIDR client for a whole tailnet range if you want one shared policy.
-
-Once the DNS requests are logged, the Query Logs view can be used to identify the client IPs you should add.
-
-Exit nodes are **not required** for tailnet DNS (DNS-only routing), but they work well together.
 
 ## 🗺️ GeoIP database
 

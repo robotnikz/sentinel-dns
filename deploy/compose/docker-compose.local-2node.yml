@@ -1,0 +1,56 @@
+# Local 2-node cluster simulation (no VRRP/VIP)
+#
+# Why: on Windows/macOS Docker Desktop you cannot realistically test keepalived/VRRP VIP failover.
+# This compose file lets you run two Sentinel nodes locally to test:
+# - leader <-> follower cluster sync
+# - follower read-only guard
+# - DNS answering on both nodes
+# - manual promotion via CLUSTER_ROLE_FILE
+#
+# Start:
+#   docker compose -f deploy/compose/docker-compose.local-2node.yml up -d --build
+# Stop:
+#   docker compose -f deploy/compose/docker-compose.local-2node.yml down -v
+
+services:
+  sentinel_a:
+    build:
+      context: ../..
+      dockerfile: docker/single/Dockerfile
+    container_name: sentinel-a
+    ports:
+      - "127.0.0.1:1053:53/udp"
+      - "127.0.0.1:1053:53/tcp"
+      - "127.0.0.1:8081:8080"
+    environment:
+      - TZ=Europe/Berlin
+      - HOST=0.0.0.0
+      - PORT=8080
+      - FRONTEND_ORIGIN=http://localhost:8081
+      - CLUSTER_ROLE_FILE=/data/sentinel/cluster_role
+    volumes:
+      - sentinel-a-data:/data
+    restart: unless-stopped
+
+  sentinel_b:
+    build:
+      context: ../..
+      dockerfile: docker/single/Dockerfile
+    container_name: sentinel-b
+    ports:
+      - "127.0.0.1:2053:53/udp"
+      - "127.0.0.1:2053:53/tcp"
+      - "127.0.0.1:8082:8080"
+    environment:
+      - TZ=Europe/Berlin
+      - HOST=0.0.0.0
+      - PORT=8080
+      - FRONTEND_ORIGIN=http://localhost:8082
+      - CLUSTER_ROLE_FILE=/data/sentinel/cluster_role
+    volumes:
+      - sentinel-b-data:/data
+    restart: unless-stopped
+
+volumes:
+  sentinel-a-data:
+  sentinel-b-data:

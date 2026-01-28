@@ -54,6 +54,10 @@ const schema = z.object({
   // Can be a passphrase; in production you should set this.
   SECRETS_KEY: z.string().optional().default(''),
 
+  // Optional file path whose contents override cluster role: 'leader' or 'follower'.
+  // Intended for keepalived/VRRP notify scripts to provide automatic role switching with a VIP.
+  CLUSTER_ROLE_FILE: z.string().optional().default(''),
+
   // Performance/operations: keep query_logs bounded.
   // Set to 0 to disable retention.
   QUERY_LOGS_RETENTION_DAYS: z.coerce.number().int().min(0).optional().default(30),

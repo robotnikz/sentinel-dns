@@ -170,6 +170,19 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
 
         <div className="h-px bg-[#27272a] my-2"></div>
 
+          <button
+            onClick={() => setActivePage('cluster')}
+            title={isCollapsed ? "Cluster / HA" : undefined}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-all duration-200 text-sm group ${
+            activePage === 'cluster'
+              ? 'bg-[#27272a] text-white border border-[#3f3f46]'
+              : 'text-zinc-500 hover:text-zinc-300 hover:bg-[#18181b]'
+            } ${isCollapsed ? 'justify-center' : ''}`}
+          >
+            <Globe className={`w-4 h-4 transition-colors ${activePage === 'cluster' ? 'text-white' : 'text-zinc-500 group-hover:text-zinc-400'}`} />
+            {!isCollapsed && <span className="font-medium animate-fade-in">Cluster / HA</span>}
+          </button>
+
         <button
            onClick={() => setActivePage('settings')}
            title={isCollapsed ? "System Settings" : undefined}
