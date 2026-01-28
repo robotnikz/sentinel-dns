@@ -110,6 +110,172 @@ On the other node:
 - Stop Node A (or the sentinel container): VIP should move to Node B.
 - After failover, the new VIP owner should become Leader automatically.
 
+## HA verification checklist (hands-on)
+
+This is a practical checklist you can run during a maintenance window to validate:
+
+- VIP failover (keepalived / VRRP)
+- automatic role switching (via role file)
+- follower settings sync loop
+- follower read-only guard
+
+Assumptions:
+
+- Two Linux hosts: **Node A** + **Node B**
+- Both are running the compose from `deploy/compose/docker-compose.yml`
+- Router/DHCP points DNS to the VIP
+- UI/API port is reachable on both nodes (default `8080`)
+
+### 0) Pre-flight (both nodes)
+
+On each node:
+
+1) Confirm containers are up:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml ps
+```
+
+2) Confirm keepalived is enabled (after you saved HA config in UI):
+
+```bash
+docker logs --tail=200 sentinel-keepalived
+```
+
+Expected:
+
+- You should see a line like `keepalived: enabled interface=... vip=... vrid=... priority=...`.
+
+3) Confirm the role override file exists and is being updated:
+
+```bash
+docker exec sentinel-dns sh -lc 'ls -la /data/sentinel/cluster_role || true; cat /data/sentinel/cluster_role || true'
+```
+
+Expected:
+
+- File exists after keepalived becomes active.
+- Content is exactly `leader` on the VIP owner, `follower` on the standby.
+
+### 1) Confirm role + readiness endpoints
+
+On each node:
+
+1) `ready` endpoint (no auth):
+
+```bash
+curl -fsS http://127.0.0.1:8080/api/cluster/ready
+```
+
+Expected:
+
+- Standalone: `{"ok":true,"role":"standalone"}`
+- Leader: `{"ok":true,"role":"leader"}`
+- Follower: `{"ok":true,"role":"follower",...}` **only if** it synced recently (see next step)
+
+2) Cluster status endpoint (requires admin cookie/token via UI):
+
+- UI → **Cluster / HA** → Status should show:
+   - `effectiveRole` matches the role file
+   - follower shows a fresh “Follower last sync” timestamp
+
+### 2) Validate follower sync actually applies changes
+
+1) Pick a safe, visible change on the Leader (VIP owner):
+
+- Example A: create a dummy client label
+- Example B: toggle a non-destructive setting (e.g. a UI setting)
+- Example C: add a harmless local DNS rewrite for a test-only domain
+
+2) Wait ~10–15 seconds.
+
+3) On the follower:
+
+- UI should reflect the change.
+- The follower Status should show “Follower last sync” updating every few seconds.
+
+If you want a quick sanity check from shell without UI:
+
+```bash
+curl -fsS http://127.0.0.1:8080/api/cluster/ready
+```
+
+Expected:
+
+- `ok:true` on the follower (meaning `lastSync` stayed within the freshness window).
+
+### 3) Validate follower read-only guard
+
+Goal: follower must reject mutations to avoid split-brain.
+
+On the follower node, while logged in, try a safe mutation (e.g. toggling a setting).
+
+Expected:
+
+- UI should show an error.
+- The API returns HTTP `409` with:
+   - `error: "FOLLOWER_READONLY"`
+   - message tells you to make changes on leader/VIP.
+
+Note: `/api/cluster/*` endpoints are intentionally still allowed so you can reconfigure/recover.
+
+### 4) Failover exercise (VIP move)
+
+1) Identify which node currently owns the VIP:
+
+- UI Status should show Leader on the VIP owner.
+- The role file should contain `leader` there.
+
+2) Trigger failover by stopping Sentinel on the leader node:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml stop sentinel
+```
+
+3) Observe on the other node (new VIP owner):
+
+- The VIP should appear on the LAN interface.
+- keepalived logs should show MASTER transition.
+- The role file should switch to `leader`.
+- The UI should report effective role `leader`.
+
+4) Bring the old leader back:
+
+```bash
+docker compose -f deploy/compose/docker-compose.yml start sentinel
+```
+
+Expected:
+
+- With `nopreempt`, the VIP usually stays where it is until the current master fails.
+
+### 5) “Readiness gating” sanity (follower should not own VIP if sync is broken)
+
+The keepalived config tracks a script that checks `/api/cluster/ready`.
+For followers, `ready` only becomes ok when a successful sync happened recently.
+
+Practical check:
+
+- Temporarily break follower sync (e.g. set an unreachable Leader URL on the follower),
+- then observe `/api/cluster/ready` on follower flips to `ok:false` after ~20s,
+- and keepalived should avoid/promote VIP ownership based on the script.
+
+### What to capture if something fails
+
+On both nodes:
+
+```bash
+docker logs --tail=300 sentinel-dns
+docker logs --tail=300 sentinel-keepalived
+docker exec sentinel-dns sh -lc 'cat /data/sentinel/cluster_role || true; cat /data/sentinel/ha/config.json || true'
+```
+
+And note:
+
+- which node had the VIP at the time
+- the `effectiveRole` shown in UI
+- the follower “last sync” + “last error” fields
+
 ## Troubleshooting
 
 ### VIP confusion (port)

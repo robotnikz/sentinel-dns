@@ -23,7 +23,8 @@ export async function getOrCreateNodeId(db: Db): Promise<string> {
   const nodeId = randomId();
   await db.pool.query(
     'INSERT INTO settings(key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()',
-    [KEY_NODE_ID, nodeId]
+    // settings.value is JSONB, so strings must be valid JSON (quoted).
+    [KEY_NODE_ID, JSON.stringify(nodeId)]
   );
   return nodeId;
 }

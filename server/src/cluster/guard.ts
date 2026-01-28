@@ -29,6 +29,10 @@ export function registerFollowerReadOnlyGuard(app: FastifyInstance, config: AppC
     if (role !== 'follower') return;
 
     reply.code(409);
-    return { error: 'FOLLOWER_READONLY', message: 'This node is a follower. Make changes on the leader/VIP.' };
+    // Hooks must explicitly send to short-circuit the request.
+    return reply.send({
+      error: 'FOLLOWER_READONLY',
+      message: 'This node is a follower. Make changes on the leader/VIP.'
+    });
   });
 }
