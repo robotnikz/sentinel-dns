@@ -307,7 +307,10 @@ const Cluster: React.FC = () => {
     }
   };
 
-  const canShowJoinCode = status?.config.enabled && effectiveRole === 'leader' && !!status?.config.leaderUrl;
+  // Show join code whenever this node is configured as leader.
+  // In HA mode, keepalived may temporarily override the effective role (e.g. follower until VIP ownership),
+  // but users still need the join code to enroll followers.
+  const canShowJoinCode = status?.config.enabled && status?.config.role === 'leader' && !!status?.config.leaderUrl;
   const warningOverride = status?.roleOverride ? `Role override active: ${status.roleOverride}` : '';
 
   const leaderUrlMismatchWarning = useMemo(() => {

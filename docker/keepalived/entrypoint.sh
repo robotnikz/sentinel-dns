@@ -20,7 +20,9 @@ write_netinfo() {
   mkdir -p "$(dirname "$NETINFO_FILE")" || true
 
   INTERFACES_JSON=""
-  for IFACE in $(ip -o link show | awk -F': ' '{print $2}'); do
+  for IFACE_RAW in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' || true); do
+    IFACE="${IFACE_RAW%%@*}"
+    [ -n "$IFACE" ] || continue
     ADDR_CIDR="$(ip -4 -o addr show dev "$IFACE" 2>/dev/null | awk '{print $4}' | head -n 1 || true)"
     [ -n "$ADDR_CIDR" ] || continue
     IP_ONLY="${ADDR_CIDR%/*}"
@@ -31,14 +33,17 @@ write_netinfo() {
     INTERFACES_JSON="$INTERFACES_JSON{\"name\":\"$IFACE\",\"ipv4\":\"$IP_ONLY\",\"cidr\":\"$ADDR_CIDR\",\"prefix\":$PREFIX}"
   done
 
-  cat > "$NETINFO_FILE" <<EOF
-{\
-  \"detectedAt\": \"$(date -Iseconds)\",\
-  \"defaultInterface\": \"$DEFAULT_IF\",\
-  \"defaultGateway\": \"$DEFAULT_GW\",\
-  \"interfaces\": [${INTERFACES_JSON}]\
-}
-EOF
+  DETECTED_AT="$(date -Iseconds)"
+  DETECTED_AT_JSON="$(printf '%s' "$DETECTED_AT" | jq -Rsa '.')"
+  DEFAULT_IF_JSON="$(printf '%s' "$DEFAULT_IF" | jq -Rsa '.')"
+  DEFAULT_GW_JSON="$(printf '%s' "$DEFAULT_GW" | jq -Rsa '.')"
+
+  printf '{\n  "detectedAt": %s,\n  "defaultInterface": %s,\n  "defaultGateway": %s,\n  "interfaces": [%s]\n}\n' \
+    "$DETECTED_AT_JSON" \
+    "$DEFAULT_IF_JSON" \
+    "$DEFAULT_GW_JSON" \
+    "$INTERFACES_JSON" \
+    > "$NETINFO_FILE"
 }
 
 render_from_config() {
@@ -132,8 +137,5 @@ while true; do
   write_netinfo || true
   sleep 5
 done
-
-# Safe default: until VIP ownership is established, behave as follower.
-HA_ROLE_FILE="$ROLE_FILE" /notify.sh BACKUP || true
 
 exec keepalived --dont-fork --log-console -f "$CONF_DIR/keepalived.conf"

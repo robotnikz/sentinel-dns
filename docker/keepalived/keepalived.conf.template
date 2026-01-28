@@ -13,6 +13,11 @@
 # - HA_READY_URL (default http://127.0.0.1:8080/api/cluster/ready)
 # - HA_ROLE_FILE (default /data/sentinel/cluster_role)
 
+global_defs {
+  enable_script_security
+  script_user root
+}
+
 vrrp_script chk_sentinel_ready {
   script "/bin/sh -c 'curl -fsS --max-time 2 ${HA_READY_URL} | grep -q \"\\\"ok\\\":true\"'"
   interval 2
