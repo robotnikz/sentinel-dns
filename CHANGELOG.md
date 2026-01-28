@@ -1,3 +1,9 @@
+## [0.8.3](https://github.com/robotnikz/sentinel-dns/compare/v0.8.2...v0.8.3) (2026-01-28)
+
+### fix
+
+* **ui:** prevent Cluster/HA runtime crash ([](https://github.com/robotnikz/sentinel-dns/commit/4e34a47573419cc3e832ba0fcdaaa07d12d82dac))
+
 ## [0.8.2](https://github.com/robotnikz/sentinel-dns/compare/v0.8.1...v0.8.2) (2026-01-28)
 
 ### fix
