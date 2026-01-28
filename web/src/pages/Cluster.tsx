@@ -300,6 +300,23 @@ const Cluster: React.FC = () => {
     return `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30`;
   }, [effectiveRole]);
 
+  const activeBadge = useMemo(() => {
+    const base = 'inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border';
+    if (effectiveRole === 'leader') {
+      return {
+        text: haEnabled ? 'Active (VIP owner)' : 'Active (Leader)',
+        className: `${base} bg-emerald-500/10 text-emerald-200 border-emerald-500/30`
+      };
+    }
+    if (effectiveRole === 'follower') {
+      return {
+        text: haEnabled ? 'Standby (Follower)' : 'Follower',
+        className: `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30`
+      };
+    }
+    return { text: 'Standalone', className: `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30` };
+  }, [effectiveRole, haEnabled]);
+
   const StatusCards = (
     <div className="space-y-6">
       <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
@@ -452,23 +469,6 @@ const Cluster: React.FC = () => {
       </div>
     </div>
   );
-
-  const activeBadge = useMemo(() => {
-    const base = 'inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border';
-    if (effectiveRole === 'leader') {
-      return {
-        text: haEnabled ? 'Active (VIP owner)' : 'Active (Leader)',
-        className: `${base} bg-emerald-500/10 text-emerald-200 border-emerald-500/30`
-      };
-    }
-    if (effectiveRole === 'follower') {
-      return {
-        text: haEnabled ? 'Standby (Follower)' : 'Follower',
-        className: `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30`
-      };
-    }
-    return { text: 'Standalone', className: `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30` };
-  }, [effectiveRole, haEnabled]);
 
   const enableLeader = async () => {
     setBusy(true);

@@ -368,10 +368,16 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
                       {(() => {
                       const l = systemStatus.cluster?.leader?.state;
                       const f = systemStatus.cluster?.follower?.state;
-                      const failover = (f === 'active' && l === 'offline') || (l === 'active' && f === 'offline');
+                      // "Failover" is only true when the follower is currently active because the leader is down.
+                      // If the leader is active but the follower is offline, that's not failover — it's loss of redundancy.
+                      const failover = f === 'active' && l === 'offline';
+                      const followerOffline = l === 'active' && f === 'offline';
                       const degraded = (f === 'active' && l === 'standby') || (l === 'active' && f === 'standby');
                       if (failover) {
                         return <div className="mt-1 text-[10px] font-mono text-amber-300">Failover active</div>;
+                      }
+                      if (followerOffline) {
+                        return <div className="mt-1 text-[10px] font-mono text-amber-300">Follower offline</div>;
                       }
                       if (degraded) {
                         return <div className="mt-1 text-[10px] font-mono text-zinc-500">HA standby</div>;
