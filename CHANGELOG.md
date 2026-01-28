@@ -1,3 +1,9 @@
+## [0.7.4](https://github.com/robotnikz/sentinel-dns/compare/v0.7.3...v0.7.4) (2026-01-28)
+
+### fix
+
+* **ha:** make keepalived ready-check parse JSON ([](https://github.com/robotnikz/sentinel-dns/commit/b80353d0c784ad9c55c381d4715826483f9b4758))
+
 ## [0.7.3](https://github.com/robotnikz/sentinel-dns/compare/v0.7.2...v0.7.3) (2026-01-28)
 
 ### fix
