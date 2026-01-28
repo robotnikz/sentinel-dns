@@ -1,3 +1,9 @@
+## [0.7.6](https://github.com/robotnikz/sentinel-dns/compare/v0.7.5...v0.7.6) (2026-01-28)
+
+### fix
+
+* **ha:** enable failback + faster ARP convergence ([](https://github.com/robotnikz/sentinel-dns/commit/f13f7b228a824156b4d43408f9412c2d704255eb))
+
 ## [0.7.5](https://github.com/robotnikz/sentinel-dns/compare/v0.7.4...v0.7.5) (2026-01-28)
 
 ### fix
