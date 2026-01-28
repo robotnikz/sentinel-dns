@@ -2,6 +2,8 @@
 
 Goal: run **two Sentinel nodes** so your router uses **one single DNS IP**, and failover happens automatically.
 
+This document is written for a **home network / homelab** setup where “DNS must not go down” during maintenance or a node outage.
+
 ## TL;DR (2 nodes)
 
 You will configure **two separate things**:
@@ -15,6 +17,18 @@ You will configure **two separate things**:
 - Follower joins via **Join Code**
 
 Important: the VIP is an **IP only** (DNS is port 53 automatically). The **Leader URL** is a **web URL** (HTTP port, usually `8080`).
+
+### What it can do (today)
+
+- **DNS failover in the LAN** via VRRP/VIP: your router points to one DNS IP (the VIP) and keepalived moves it to the other node.
+- **Config HA** via cluster sync: the follower continuously pulls config from the leader.
+- **Split-brain protection**: follower rejects most mutations (read-only guard).
+
+### What it cannot do (yet)
+
+- No query log replication (so history/analytics won’t “move” with the VIP yet).
+- No automatic conflict resolution if you bypass the guard (don’t write to both nodes).
+- Not a multi-site HA solution (VRRP/VIP expects the same L2/broadcast domain).
 
 ## Prerequisites
 
@@ -84,6 +98,11 @@ Sentinel writes `/data/sentinel/ha/config.json` and the keepalived sidecar appli
 Router/DHCP DNS:
 - `192.168.1.53`
 
+Important:
+
+- Use the **VIP only** as DNS server for clients.
+- Avoid configuring a “secondary DNS” with the standby node IP if you want predictable failover behavior. Many clients will keep using the old DNS until caches expire.
+
 That’s it. Your network now points at **one** DNS IP.
 
 ### Step 4 — Enable cluster sync (Leader + Follower)
@@ -92,7 +111,7 @@ On the node that currently owns the VIP (usually the higher priority node):
 
 1. UI → **Step 2 — Leader Setup**
 2. Set **Leader URL** to the address followers can reach:
-   - normally: `http://192.168.1.53:8080`
+   - normally: **use the VIP URL**: `http://192.168.1.53:8080`
    - if you published the UI on a different host port, use that port
 3. Click **Enable Leader**
 4. Load **Join Code**
@@ -102,6 +121,19 @@ On the other node:
 1. UI → **Step 3 — Configure Follower**
 2. Paste Join Code → Configure
 
+Why the Leader URL should be the VIP:
+
+- The follower sync loop always talks to `leaderUrl`.
+- If `leaderUrl` is a node-specific IP/hostname, failover will move the VIP but the follower may still try to sync from the downed node.
+- If `leaderUrl` is the VIP, the follower always reaches the currently active leader.
+
+## Common pitfalls (read this if setup feels “stuck”)
+
+- **Port 53 already in use** on the host (common with `systemd-resolved`). DNS won’t start correctly.
+- **Multicast VRRP blocked**: switch keepalived mode to `unicast` and set peers.
+- **Leader URL set to Node A IP** instead of VIP: sync breaks after failover.
+- Nodes not on the same L2/VLAN: VRRP/VIP failover becomes unreliable.
+
 ## Verify it works
 
 - UI → **Status**:
@@ -109,6 +141,43 @@ On the other node:
   - follower should show Role `follower` and “Follower last sync” updating
 - Stop Node A (or the sentinel container): VIP should move to Node B.
 - After failover, the new VIP owner should become Leader automatically.
+
+## 5-minute failover test (recommended)
+
+Goal: verify DNS stays available for the whole home network.
+
+1) Router/DHCP DNS points to the **VIP only** (example: `192.168.1.53`).
+
+2) From any LAN client, run a DNS query against the VIP:
+
+- Linux/macOS:
+
+```bash
+dig @192.168.1.53 example.com A
+```
+
+- Windows PowerShell:
+
+```powershell
+Resolve-DnsName -Server 192.168.1.53 -Name example.com -Type A
+```
+
+3) Trigger failover:
+
+- Reboot the current VIP owner host, or stop the Sentinel service/container on it.
+
+4) Wait ~5–15 seconds, then run the DNS query again.
+
+Expected:
+
+- DNS query still succeeds via the VIP.
+- The other node becomes **Leader (VIP owner)** in the UI.
+
+If it fails:
+
+- Check Step 2: **Leader URL must point to the VIP URL** (so the follower can always reach the active leader).
+- Check port `53` is free on both hosts.
+- If multicast VRRP is blocked, switch keepalived to `unicast`.
 
 ## HA verification checklist (hands-on)
 

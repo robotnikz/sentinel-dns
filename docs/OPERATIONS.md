@@ -252,12 +252,7 @@ npm run smoke:compose -- --skip-down
 
 ## Remote access (Tailscale) and Exit Node
 
-Sentinel-DNS ships with an embedded `tailscaled`.
-
-- DNS-only access over tailnet: configure tailnet DNS nameserver(s) to Sentinel's Tailscale IP.
-- Exit Node (“VPN back home”): requires `NET_ADMIN`, `/dev/net/tun`, and IP forwarding sysctls.
-
-If Exit Node is enabled, you may need to approve route/exit-node advertisement in the Tailscale admin console.
+See the dedicated guide: [docs/REMOTE_ACCESS_TAILSCALE.md](REMOTE_ACCESS_TAILSCALE.md)
 
 ## Updating the GeoIP database
 
