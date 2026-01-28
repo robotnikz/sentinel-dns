@@ -246,11 +246,20 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
   app.get('/api/cluster/ready', async () => {
     const status = await getClusterStatus(db);
     if (!status.config.enabled) return { ok: true, role: 'standalone' };
-    const role = effectiveRole(config, status.config.role);
-    if (role !== 'follower') return { ok: true, role };
+
+    // Readiness must be based on the configured role, not the effective role.
+    // In HA mode the keepalived notify scripts intentionally override the effective role
+    // (e.g. a configured leader becomes effectively "follower" while it's BACKUP) to keep
+    // the standby node read-only. If readiness used the effective role, the configured leader
+    // would fail readiness (no recent sync) and could never preempt to reclaim the VIP.
+    const configuredRole = status.config.role;
+    const role = effectiveRole(config, configuredRole);
+
+    if (configuredRole !== 'follower') return { ok: true, role, configuredRole };
+
     const last = status.lastSync ? Date.parse(status.lastSync) : 0;
     const ok = last > 0 && Date.now() - last < 20_000;
-    return { ok, role: 'follower', lastSync: status.lastSync ?? null };
+    return { ok, role, configuredRole, lastSync: status.lastSync ?? null };
   });
 
   // Enable leader mode and ensure a cluster PSK exists.
