@@ -84,8 +84,22 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
     const netinfoPath = path.join(config.DATA_DIR || '/data', 'sentinel', 'ha', 'netinfo.json');
     try {
       if (!fs.existsSync(netinfoPath)) return { ok: true, netinfo: null };
-      const raw = fs.readFileSync(netinfoPath, 'utf8');
-      const netinfo = JSON.parse(raw);
+      let raw = fs.readFileSync(netinfoPath, 'utf8');
+
+      // Strip UTF-8 BOM if present.
+      if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+
+      // Backward compatibility: older sidecar wrote JSON with shell-escape backslashes (e.g. \" and \\n continuations).
+      // Try strict parse first; if it fails, attempt a minimal unescape.
+      let netinfo: any;
+      try {
+        netinfo = JSON.parse(raw);
+      } catch {
+        const cleaned = raw
+          .replace(/\\\r?\n/g, '') // remove "\\" line continuations
+          .replace(/\\"/g, '"'); // unescape quotes
+        netinfo = JSON.parse(cleaned);
+      }
       return { ok: true, netinfo };
     } catch {
       return { ok: true, netinfo: null };
@@ -265,6 +279,15 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
 
       await ensureClusterPsk(db, config);
       await setClusterConfig(db, { enabled: true, role: 'leader', leaderUrl: leaderUrl.replace(/\/$/, '') });
+
+      // If keepalived (or a previous run) left a stale role override, clear it so this node
+      // can become leader and pass the keepalived readiness check.
+      try {
+        const roleFile = String(config.CLUSTER_ROLE_FILE || '').trim();
+        if (roleFile && fs.existsSync(roleFile)) fs.unlinkSync(roleFile);
+      } catch {
+        // ignore
+      }
       return { ok: true };
     }
   );
