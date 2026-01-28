@@ -116,6 +116,72 @@ describe('Sidebar', () => {
     expect(setActivePage).toHaveBeenCalledWith('cluster');
   });
 
+  it('shows "Follower offline" when leader is active but follower is offline', async () => {
+    mockFetchOnceJson({
+      '/api/health': { ok: true },
+      '/api/version': { version: '0.0.0-test' },
+      '/api/metrics/summary?hours=24': {
+        windowHours: 24,
+        totalQueries: 10,
+        blockedQueries: 1,
+        activeClients: 2
+      },
+      '/api/cluster/peer-status': {
+        ok: true,
+        clusterEnabled: true,
+        local: { reachable: true, nodeId: 'n1', ready: { ok: true, configuredRole: 'leader', role: 'leader', lastSync: null } },
+        peers: [{ ip: '192.168.1.2', reachable: false, ready: { ok: true, configuredRole: 'follower', role: 'follower', lastSync: null } }]
+      }
+    });
+
+    render(
+      <Sidebar
+        activePage="dashboard"
+        setActivePage={() => undefined}
+        isCollapsed={false}
+        toggleSidebar={() => undefined}
+      />
+    );
+
+    expect(await screen.findByText('Queries (24h)')).toBeInTheDocument();
+    expect(screen.getByText('Follower offline')).toBeInTheDocument();
+    expect(screen.queryByText('Failover active')).not.toBeInTheDocument();
+  });
+
+  it('shows "Failover active" when follower is active because leader is offline', async () => {
+    mockFetchOnceJson({
+      '/api/health': { ok: true },
+      '/api/version': { version: '0.0.0-test' },
+      '/api/metrics/summary?hours=24': {
+        windowHours: 24,
+        totalQueries: 10,
+        blockedQueries: 1,
+        activeClients: 2
+      },
+      '/api/cluster/peer-status': {
+        ok: true,
+        clusterEnabled: true,
+        // Local is configured as follower but is currently acting as leader (VIP owner).
+        local: { reachable: true, nodeId: 'n1', ready: { ok: true, configuredRole: 'follower', role: 'leader', lastSync: null } },
+        // Peer exists but is not reachable (configured leader down).
+        peers: [{ ip: '192.168.1.2', reachable: false, ready: { ok: true, configuredRole: 'leader', role: 'leader', lastSync: null } }]
+      }
+    });
+
+    render(
+      <Sidebar
+        activePage="dashboard"
+        setActivePage={() => undefined}
+        isCollapsed={false}
+        toggleSidebar={() => undefined}
+      />
+    );
+
+    expect(await screen.findByText('Queries (24h)')).toBeInTheDocument();
+    expect(screen.getByText('Failover active')).toBeInTheDocument();
+    expect(screen.queryByText('Follower offline')).not.toBeInTheDocument();
+  });
+
   it('uses titles for collapsed nav items', () => {
     const setActivePage = vi.fn();
 

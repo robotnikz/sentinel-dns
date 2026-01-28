@@ -207,6 +207,7 @@ const App: React.FC = () => {
     const refreshProtectionPause = async () => {
       try {
         const res = await fetch('/api/protection/pause');
+        if (!res.ok) return;
         const data = await res.json().catch(() => null);
         if (cancelled || !data || typeof data !== 'object') return;
 
