@@ -21,6 +21,7 @@ This document tracks the testing pyramid for Sentinel-DNS (LAN appliance, DNS + 
 
 - E2E: query logs basic controls, clients add-device flow, settings notifications save, header notifications bell feed.
 - Server integration: `authStore` semantics, `notifyEvent` persistence + event-disable behavior.
+- Frontend unit/regression: Cluster/HA page render (crash regression), sidebar cluster label semantics, and basic page-render smoke tests (Dashboard/Query Logs/Clients/Filtering/DNS Settings).
 
 ## TODO (industry-standard)
 
