@@ -1,3 +1,11 @@
+## [0.6.4](https://github.com/robotnikz/sentinel-dns/compare/v0.6.3...v0.6.4) (2026-01-28)
+
+* Merge pull request #47 from robotnikz/fix/modal-client-network-settings ([](https://github.com/robotnikz/sentinel-dns/commit/8de6095760ace39eb47542820b29a1bea93500c1)), closes [#47](https://github.com/robotnikz/sentinel-dns/issues/47)
+
+### fix
+
+* restore modal settings + subnet create feedback ([](https://github.com/robotnikz/sentinel-dns/commit/d6cb5ac049bedd36ee53711ef78b6f649adc4096))
+
 ## [0.6.3](https://github.com/robotnikz/sentinel-dns/compare/v0.6.2...v0.6.3) (2026-01-27)
 
 * Merge pull request #46 from robotnikz/fix/trigger-release ([](https://github.com/robotnikz/sentinel-dns/commit/c2fbc7d4b1e9f86546220f0aed665934790bd18e)), closes [#46](https://github.com/robotnikz/sentinel-dns/issues/46)
