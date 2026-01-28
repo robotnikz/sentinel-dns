@@ -1,3 +1,9 @@
+## [0.7.5](https://github.com/robotnikz/sentinel-dns/compare/v0.7.4...v0.7.5) (2026-01-28)
+
+### fix
+
+* **cluster:** preserve local admin sessions on follower ([](https://github.com/robotnikz/sentinel-dns/commit/0eff64a104410eaa91baa2e2d415c8f59d3c6e3f))
+
 ## [0.7.4](https://github.com/robotnikz/sentinel-dns/compare/v0.7.3...v0.7.4) (2026-01-28)
 
 ### fix
