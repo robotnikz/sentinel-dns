@@ -70,6 +70,7 @@ On **Node A** and **Node B**:
 
 1. Deploy with the included compose file:
    - `deploy/compose/docker-compose.yml`
+   - Keepalived is included by default and stays idle until enabled in the UI.
 2. Ensure `/data` is persisted (default `sentinel-data` volume).
 3. Open the UI on each node and create/admin-login if this is the first run.
 
