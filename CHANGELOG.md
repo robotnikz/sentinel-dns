@@ -1,3 +1,17 @@
+## [0.8.1](https://github.com/robotnikz/sentinel-dns/compare/v0.8.0...v0.8.1) (2026-01-28)
+
+### fix
+
+* **ui:** correct HA failover label and prevent cluster page crash ([](https://github.com/robotnikz/sentinel-dns/commit/642c77c6b8d8f106a08eeca50da82eb0b86305b3))
+
+### chore
+
+* ignore local overrides and artifacts ([](https://github.com/robotnikz/sentinel-dns/commit/7781b6120fa535f2bd7ebd6b8c8f21891a3b835a))
+
+### docs
+
+* improve public install docs ([](https://github.com/robotnikz/sentinel-dns/commit/d65debf1daeac147c9e99c84eefd4fb83ffd51d5))
+
 ## [0.8.0](https://github.com/robotnikz/sentinel-dns/compare/v0.7.8...v0.8.0) (2026-01-28)
 
 ### chore
