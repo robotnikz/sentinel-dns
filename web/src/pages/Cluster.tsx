@@ -167,6 +167,39 @@ const Cluster: React.FC = () => {
   const [wizardStep, setWizardStep] = useState<number>(0);
   const [showVipAdvanced, setShowVipAdvanced] = useState<boolean>(false);
 
+  const WIZARD_VIS_KEY = 'sentinel.haWizard.show';
+  const wizardVisPrefExistsRef = useRef<boolean>((() => {
+    try {
+      return window.localStorage.getItem(WIZARD_VIS_KEY) != null;
+    } catch {
+      return false;
+    }
+  })());
+
+  const [showWizard, setShowWizard] = useState<boolean>(() => {
+    try {
+      const v = window.localStorage.getItem(WIZARD_VIS_KEY);
+      if (v === '1') return true;
+      if (v === '0') return false;
+      // No explicit user preference yet. Default to status-only to avoid showing
+      // the setup wizard on already-configured nodes (it will be enabled automatically
+      // if the node is not configured).
+      return false;
+    } catch {
+      return false;
+    }
+  });
+
+  const setWizardVisible = useCallback((visible: boolean) => {
+    setShowWizard(visible);
+    try {
+      window.localStorage.setItem(WIZARD_VIS_KEY, visible ? '1' : '0');
+      wizardVisPrefExistsRef.current = true;
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     try {
       if (wizardRole) window.localStorage.setItem('sentinel.haWizardRole', wizardRole);
@@ -241,6 +274,24 @@ const Cluster: React.FC = () => {
 
   const effectiveRole = (status?.effectiveRole ?? status?.config.role ?? 'standalone') as ClusterRole;
 
+  const isConfigured = Boolean(status?.config.enabled) || Boolean(haEnabled);
+
+  // If the user has not explicitly chosen, automatically show the wizard only when needed.
+  useEffect(() => {
+    if (wizardVisPrefExistsRef.current) return;
+    setShowWizard(!isConfigured);
+  }, [isConfigured]);
+
+  // In HA mode, keepalived can temporarily override the effective role.
+  // When a configured follower becomes the VIP owner (effective leader), follower sync errors/age are expected
+  // until the configured leader comes back.
+  const isFailoverVipOwner = !!(
+    haEnabled &&
+    status?.config.enabled &&
+    status?.config.role === 'follower' &&
+    effectiveRole === 'leader'
+  );
+
   const roleBadge = useMemo(() => {
     const r = effectiveRole;
     const base = 'inline-flex items-center gap-2 px-2.5 py-1 rounded-md text-xs font-medium border';
@@ -248,6 +299,159 @@ const Cluster: React.FC = () => {
     if (r === 'follower') return `${base} bg-indigo-500/10 text-indigo-300 border-indigo-500/30`;
     return `${base} bg-zinc-500/10 text-zinc-300 border-zinc-500/30`;
   }, [effectiveRole]);
+
+  const StatusCards = (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-zinc-400" />
+            <h3 className="font-semibold">Status</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={activeBadge.className}>{activeBadge.text}</span>
+            <span className={roleBadge}>Role: {effectiveRole}</span>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="text-sm text-zinc-400">Loading cluster status…</div>
+        ) : status ? (
+          <div className="grid grid-cols-1 gap-4 text-sm">
+            <div className="space-y-1">
+              <div className="text-zinc-500">Node ID</div>
+              <div className="font-mono text-zinc-200 break-all">{status.nodeId}</div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-zinc-500">Enabled</div>
+              <div className="text-zinc-200">{status.config.enabled ? 'Yes' : 'No'}</div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-zinc-500">Leader URL</div>
+              <div className="font-mono text-zinc-200 break-all">{status.config.leaderUrl || '—'}</div>
+            </div>
+            <div className="space-y-1">
+              <div className="text-zinc-500">Follower last sync</div>
+              <div className="text-zinc-200">{formatWhen(status.lastSync)}</div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-zinc-500">Last sync duration</div>
+              <div className="text-zinc-200">{formatDurationMs(status.lastSyncDurationMs)}</div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-zinc-500">Last snapshot</div>
+              <div className="text-zinc-200">
+                {formatBytes(status.lastSnapshotBytes)}
+                {status.lastSnapshotCounts
+                  ? ` (settings ${status.lastSnapshotCounts.settings}, clients ${status.lastSnapshotCounts.clients}, rules ${status.lastSnapshotCounts.rules}, blocklists ${status.lastSnapshotCounts.blocklists}, secrets ${status.lastSnapshotCounts.secrets})`
+                  : ''}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="text-zinc-500">Last error</div>
+              {isFailoverVipOwner ? (
+                <div>
+                  <div className={status.lastError ? 'text-amber-300 font-mono break-all' : 'text-zinc-400'}>{status.lastError || '—'}</div>
+                  <div className="text-xs text-zinc-500 mt-1">During failover, sync errors are expected until the leader is reachable again.</div>
+                </div>
+              ) : (
+                <div className={status.lastError ? 'text-rose-300 font-mono break-all' : 'text-zinc-400'}>
+                  {status.lastError || '—'}
+                </div>
+              )}
+            </div>
+
+            {warningOverride ? (
+              <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4" />
+                <span>{warningOverride}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="text-sm text-rose-300">Failed to load cluster status. Is the API reachable?</div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="text-sm font-semibold">HA / VIP config</div>
+          {isConfigured && !showWizard ? (
+            <button
+              type="button"
+              onClick={() => setWizardVisible(true)}
+              className="px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium"
+            >
+              Re-run setup
+            </button>
+          ) : null}
+        </div>
+
+        <div className="text-sm space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-500">Enabled</span>
+            <span className="text-zinc-200">{haEnabled ? 'Yes' : 'No'}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-500">VIP</span>
+            <span className="font-mono text-zinc-200">{haVip || '—'}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-500">Mode</span>
+            <span className="text-zinc-200">{haMode}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-500">Interface</span>
+            <span className="font-mono text-zinc-200">{haInterface || '—'}</span>
+          </div>
+          <div className="space-y-1">
+            <div className="text-zinc-500">Unicast peers</div>
+            <div className="font-mono text-zinc-200 break-all">{haPeers?.trim() ? haPeers : '—'}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
+        <div className="text-sm font-semibold mb-3">HA / VIP Readiness</div>
+        <p className="text-sm text-zinc-400 mb-4">
+          Keepalived can poll <span className="font-mono">/api/cluster/ready</span> to decide whether the node is ready to own the VIP.
+        </p>
+
+        {ready ? (
+          <div className="text-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-500">Ready</span>
+              <span className={ready.ok ? 'text-emerald-300' : 'text-rose-300'}>{ready.ok ? 'OK' : 'NOT READY'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-500">Role</span>
+              <span className="text-zinc-200">{ready.role}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-zinc-500">Last sync</span>
+              <span className="text-zinc-200">{formatWhen(ready.lastSync || undefined)}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-zinc-500">No readiness data.</div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
+        <div className="text-sm font-semibold mb-2">Notes</div>
+        <ul className="text-sm text-zinc-400 space-y-2 list-disc pl-5">
+          <li>For a two-host homelab, VRRP/VIP gives you one DNS IP in the router.</li>
+          <li>Set router/DHCP DNS to the VIP only (avoid “two DNS IPs” if you expect seamless failover).</li>
+          <li>For VIP HA, Leader URL should point to the VIP so followers always reach the active leader.</li>
+          <li>Followers are read-only to avoid conflicting writes.</li>
+          <li>Logs sync is not part of this MVP yet (needs batching/retention).</li>
+        </ul>
+      </div>
+    </div>
+  );
 
   const activeBadge = useMemo(() => {
     const base = 'inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border';
@@ -516,13 +720,21 @@ const Cluster: React.FC = () => {
     } else if (status.config.role === 'leader') {
       items.push({ kind: 'ok', label: 'This node is configured as Leader', detail: status.config.leaderUrl ? `Leader URL: ${status.config.leaderUrl}` : undefined });
     } else if (status.config.role === 'follower') {
-      const last = status.lastSync ? Date.parse(status.lastSync) : 0;
-      const fresh = last > 0 && Date.now() - last < 20_000;
-      items.push({
-        kind: fresh ? 'ok' : 'warn',
-        label: fresh ? 'Follower sync is healthy' : 'Follower has not synced recently',
-        detail: fresh ? undefined : 'Paste a Join Code from the leader and ensure Leader URL points to the VIP.'
-      });
+      if (isFailoverVipOwner) {
+        items.push({
+          kind: 'ok',
+          label: 'Failover active: this node is serving the VIP',
+          detail: 'Follower sync from the leader is expected to be stale while the leader is offline.'
+        });
+      } else {
+        const last = status.lastSync ? Date.parse(status.lastSync) : 0;
+        const fresh = last > 0 && Date.now() - last < 20_000;
+        items.push({
+          kind: fresh ? 'ok' : 'warn',
+          label: fresh ? 'Follower sync is healthy' : 'Follower has not synced recently',
+          detail: fresh ? undefined : 'Paste a Join Code from the leader and ensure Leader URL points to the VIP.'
+        });
+      }
     }
 
     if (ready) {
@@ -530,7 +742,7 @@ const Cluster: React.FC = () => {
     }
 
     return items;
-  }, [haAuthPass, haBlockingErrors, haEnabled, haHasStoredPass, haInterface, haMode, haPeers, haVip, netinfo?.interfaces?.length, netinfoAgeMs, ready, status]);
+  }, [haAuthPass, haBlockingErrors, haEnabled, haHasStoredPass, haInterface, haMode, haPeers, haVip, isFailoverVipOwner, netinfo?.interfaces?.length, netinfoAgeMs, ready, status]);
 
   const failoverCommands = useMemo(() => {
     const vip = vipIpOnly(haVip);
@@ -561,14 +773,36 @@ const Cluster: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => void load()}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm text-zinc-200 hover:bg-[#18181b] disabled:opacity-50"
-        >
-          <RefreshCw className={loading ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {isConfigured && !showWizard ? (
+            <button
+              type="button"
+              onClick={() => setWizardVisible(true)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium"
+            >
+              Re-run setup
+            </button>
+          ) : null}
+          {isConfigured && showWizard ? (
+            <button
+              type="button"
+              onClick={() => setWizardVisible(false)}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm text-zinc-200 hover:bg-[#18181b]"
+              title="Hide the guided wizard and show status only"
+            >
+              Hide setup
+            </button>
+          ) : null}
+
+          <button
+            onClick={() => void load()}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm text-zinc-200 hover:bg-[#18181b] disabled:opacity-50"
+          >
+            <RefreshCw className={loading ? 'w-4 h-4 animate-spin' : 'w-4 h-4'} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {msg ? (
@@ -583,9 +817,10 @@ const Cluster: React.FC = () => {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
+      {showWizard ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
             <div className="flex items-center justify-between gap-4 mb-4">
               <div>
                 <div className="text-sm font-semibold">Guided HA setup</div>
@@ -993,116 +1228,13 @@ const Cluster: React.FC = () => {
               </button>
             </div>
           </div>
+          </div>
 
-          
+          <div className="lg:col-span-1">{StatusCards}</div>
         </div>
-
-        <div className="space-y-6">
-          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-zinc-400" />
-                <h3 className="font-semibold">Status</h3>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={activeBadge.className}>{activeBadge.text}</span>
-                <span className={roleBadge}>Role: {effectiveRole}</span>
-              </div>
-            </div>
-
-            {loading ? (
-              <div className="text-sm text-zinc-400">Loading cluster status…</div>
-            ) : status ? (
-              <div className="grid grid-cols-1 gap-4 text-sm">
-                <div className="space-y-1">
-                  <div className="text-zinc-500">Node ID</div>
-                  <div className="font-mono text-zinc-200 break-all">{status.nodeId}</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-zinc-500">Enabled</div>
-                  <div className="text-zinc-200">{status.config.enabled ? 'Yes' : 'No'}</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-zinc-500">Leader URL</div>
-                  <div className="font-mono text-zinc-200 break-all">{status.config.leaderUrl || '—'}</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-zinc-500">Follower last sync</div>
-                  <div className="text-zinc-200">{formatWhen(status.lastSync)}</div>
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-zinc-500">Last sync duration</div>
-                  <div className="text-zinc-200">{formatDurationMs(status.lastSyncDurationMs)}</div>
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-zinc-500">Last snapshot</div>
-                  <div className="text-zinc-200">
-                    {formatBytes(status.lastSnapshotBytes)}
-                    {status.lastSnapshotCounts
-                      ? ` (settings ${status.lastSnapshotCounts.settings}, clients ${status.lastSnapshotCounts.clients}, rules ${status.lastSnapshotCounts.rules}, blocklists ${status.lastSnapshotCounts.blocklists}, secrets ${status.lastSnapshotCounts.secrets})`
-                      : ''}
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-zinc-500">Last error</div>
-                  <div className={status.lastError ? 'text-rose-300 font-mono break-all' : 'text-zinc-400'}>
-                    {status.lastError || '—'}
-                  </div>
-                </div>
-
-                {warningOverride ? (
-                  <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>{warningOverride}</span>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="text-sm text-rose-300">Failed to load cluster status. Is the API reachable?</div>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
-            <div className="text-sm font-semibold mb-3">HA / VIP Readiness</div>
-            <p className="text-sm text-zinc-400 mb-4">
-              Keepalived can poll <span className="font-mono">/api/cluster/ready</span> to decide whether the node is ready to own the VIP.
-            </p>
-
-            {ready ? (
-              <div className="text-sm space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-500">Ready</span>
-                  <span className={ready.ok ? 'text-emerald-300' : 'text-rose-300'}>{ready.ok ? 'OK' : 'NOT READY'}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-500">Role</span>
-                  <span className="text-zinc-200">{ready.role}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-zinc-500">Last sync</span>
-                  <span className="text-zinc-200">{formatWhen(ready.lastSync || undefined)}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="text-sm text-zinc-500">No readiness data.</div>
-            )}
-          </div>
-
-          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
-            <div className="text-sm font-semibold mb-2">Notes</div>
-            <ul className="text-sm text-zinc-400 space-y-2 list-disc pl-5">
-              <li>For a two-host homelab, VRRP/VIP gives you one DNS IP in the router.</li>
-              <li>Set router/DHCP DNS to the VIP only (avoid “two DNS IPs” if you expect seamless failover).</li>
-              <li>For VIP HA, Leader URL should point to the VIP so followers always reach the active leader.</li>
-              <li>Followers are read-only to avoid conflicting writes.</li>
-              <li>Logs sync is not part of this MVP yet (needs batching/retention).</li>
-            </ul>
-          </div>
-        </div>
-      </div>
+      ) : (
+        <div className="max-w-4xl">{StatusCards}</div>
+      )}
     </div>
   );
 };
