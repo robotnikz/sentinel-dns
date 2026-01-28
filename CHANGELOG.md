@@ -1,3 +1,11 @@
+## [0.7.1](https://github.com/robotnikz/sentinel-dns/compare/v0.7.0...v0.7.1) (2026-01-28)
+
+* Merge pull request #50 from robotnikz/fix/compose-keepalived-image ([](https://github.com/robotnikz/sentinel-dns/commit/b3a52c1dafe159a0d8cf0dd09196837f599aed86)), closes [#50](https://github.com/robotnikz/sentinel-dns/issues/50)
+
+### fix
+
+* **compose:** deploy keepalived via image by default ([](https://github.com/robotnikz/sentinel-dns/commit/b96436f3929db51a6c7a61fcd38f7ce552931b06))
+
 ## [0.7.0](https://github.com/robotnikz/sentinel-dns/compare/v0.6.5...v0.7.0) (2026-01-28)
 
 * Merge pull request #49 from robotnikz/node-sync ([](https://github.com/robotnikz/sentinel-dns/commit/3878a74f87e77b2a14d5211c10d63ddf6e9e9c81)), closes [#49](https://github.com/robotnikz/sentinel-dns/issues/49)
