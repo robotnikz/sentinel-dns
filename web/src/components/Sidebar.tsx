@@ -21,6 +21,11 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
     activeClients?: number;
     updatedAt?: string;
     error?: string;
+    cluster?: {
+      enabled: boolean;
+      leader: { state: 'active' | 'standby' | 'offline' | 'unknown'; title: string };
+      follower: { state: 'active' | 'standby' | 'offline' | 'unknown'; title: string };
+    };
   };
 
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({ ok: false });
@@ -31,19 +36,75 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
 
     const load = async () => {
       try {
-        const [healthRes, versionRes, summaryRes] = await Promise.all([
+        const [healthRes, versionRes, summaryRes, clusterRes] = await Promise.all([
           fetch('/api/health', { headers: { Accept: 'application/json' } }),
           fetch('/api/version', { headers: { Accept: 'application/json' } }),
-          fetch('/api/metrics/summary?hours=24', { headers: { Accept: 'application/json' } })
+          fetch('/api/metrics/summary?hours=24', { headers: { Accept: 'application/json' } }),
+          fetch('/api/cluster/peer-status', { headers: { Accept: 'application/json' } })
         ]);
 
         const health = healthRes.ok ? await healthRes.json() : null;
         const version = versionRes.ok ? await versionRes.json() : null;
         const summary = summaryRes.ok ? await summaryRes.json() : null;
+        const cluster = clusterRes.ok ? await clusterRes.json() : null;
 
         if (cancelled) return;
 
         const ok = Boolean(health?.ok);
+
+        const computeCluster = (): SystemStatus['cluster'] | undefined => {
+          const enabled = Boolean(cluster?.clusterEnabled);
+          if (!enabled) return { enabled: false, leader: { state: 'unknown', title: 'Cluster disabled' }, follower: { state: 'unknown', title: 'Cluster disabled' } };
+
+          const localReady = cluster?.local?.ready;
+          const peerReadies = Array.isArray(cluster?.peers) ? cluster.peers : [];
+          const peerReady = peerReadies.find((p: any) => p?.reachable && p?.ready) ?? null;
+
+          const localCfg = String(localReady?.configuredRole || 'standalone');
+          const localRole = String(localReady?.role || 'standalone');
+          const localOk = localReady?.ok !== false;
+
+          const peerCfg = String(peerReady?.ready?.configuredRole || (localCfg === 'leader' ? 'follower' : localCfg === 'follower' ? 'leader' : 'standalone'));
+          const peerRole = String(peerReady?.ready?.role || 'standalone');
+          const peerOk = peerReady?.ready?.ok !== false;
+          const peerReachable = Boolean(peerReady?.reachable);
+
+          const mapState = (reachable: boolean, role: string, okFlag: boolean): { state: 'active' | 'standby' | 'offline' | 'unknown'; title: string } => {
+            if (!reachable) return { state: 'offline', title: 'Offline' };
+            if (role === 'leader') return { state: 'active', title: okFlag ? 'Active' : 'Active (not ready)' };
+            return { state: 'standby', title: okFlag ? 'Standby' : 'Standby (not ready)' };
+          };
+
+          const leader = { state: 'unknown' as const, title: 'Unknown' };
+          const follower = { state: 'unknown' as const, title: 'Unknown' };
+
+          // Place local and peer into L/F buckets by configuredRole.
+          if (localCfg === 'leader') {
+            Object.assign(leader, mapState(true, localRole, localOk));
+          } else if (localCfg === 'follower') {
+            Object.assign(follower, mapState(true, localRole, localOk));
+          }
+
+          if (peerCfg === 'leader') {
+            Object.assign(leader, mapState(peerReachable, peerRole, peerOk));
+          } else if (peerCfg === 'follower') {
+            Object.assign(follower, mapState(peerReachable, peerRole, peerOk));
+          } else if (!peerReachable && peerReadies.length > 0) {
+            // If we have peers but couldn't reach them, mark the opposite side as offline.
+            if (localCfg === 'leader') Object.assign(follower, { state: 'offline' as const, title: 'Offline' });
+            if (localCfg === 'follower') Object.assign(leader, { state: 'offline' as const, title: 'Offline' });
+          }
+
+          // If HA peers aren't configured, keep the other node as unknown (better than a wrong red).
+          if (peerReadies.length === 0) {
+            if (localCfg === 'leader') Object.assign(follower, { state: 'unknown' as const, title: 'No peer configured' });
+            if (localCfg === 'follower') Object.assign(leader, { state: 'unknown' as const, title: 'No peer configured' });
+          }
+
+          return { enabled: true, leader, follower };
+        };
+
+        const clusterUi = computeCluster();
         setSystemStatus({
           ok,
           version: typeof version?.version === 'string' ? version.version : undefined,
@@ -52,7 +113,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
           blockedQueries: typeof summary?.blockedQueries === 'number' ? summary.blockedQueries : undefined,
           activeClients: typeof summary?.activeClients === 'number' ? summary.activeClients : undefined,
           updatedAt: new Date().toISOString(),
-          error: !ok ? 'API not healthy' : undefined
+          error: !ok ? 'API not healthy' : undefined,
+          cluster: clusterUi
         });
         setSystemLoading(false);
       } catch (err: any) {
@@ -250,6 +312,80 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
                     <div className="w-full h-full bg-emerald-500/30 rounded-full"></div>
                   </div>
                 </div>
+
+                {systemStatus.cluster?.enabled ? (
+                  <div>
+                    <div className="flex justify-between text-[11px] text-zinc-400 mb-1 font-mono">
+                      <span>Cluster</span>
+                      <span className="text-zinc-500">L / F</span>
+                    </div>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setActivePage('cluster')}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setActivePage('cluster');
+                        }
+                      }}
+                      className="w-full text-left rounded hover:bg-[#18181b] px-2 py-1 -mx-2 -my-1"
+                      title="Open Cluster / HA"
+                      aria-label="Open Cluster / HA"
+                      data-testid="system-status-open-cluster"
+                    >
+                      <div className="flex items-center gap-4 text-[11px] font-mono text-zinc-300">
+                        <div className="flex items-center gap-2" title={`Leader: ${systemStatus.cluster.leader.title}`}>
+                          <span className="text-zinc-500">L</span>
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              systemStatus.cluster.leader.state === 'active'
+                                ? 'bg-emerald-500'
+                                : systemStatus.cluster.leader.state === 'standby'
+                                ? 'bg-amber-400'
+                                : systemStatus.cluster.leader.state === 'offline'
+                                ? 'bg-rose-500'
+                                : 'bg-zinc-600'
+                            }`}
+                          ></span>
+                        </div>
+
+                        <div className="flex items-center gap-2" title={`Follower: ${systemStatus.cluster.follower.title}`}>
+                          <span className="text-zinc-500">F</span>
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              systemStatus.cluster.follower.state === 'active'
+                                ? 'bg-emerald-500'
+                                : systemStatus.cluster.follower.state === 'standby'
+                                ? 'bg-amber-400'
+                                : systemStatus.cluster.follower.state === 'offline'
+                                ? 'bg-rose-500'
+                                : 'bg-zinc-600'
+                            }`}
+                          ></span>
+                        </div>
+                      </div>
+                      {(() => {
+                      const l = systemStatus.cluster?.leader?.state;
+                      const f = systemStatus.cluster?.follower?.state;
+                      const failover = (f === 'active' && l === 'offline') || (l === 'active' && f === 'offline');
+                      const degraded = (f === 'active' && l === 'standby') || (l === 'active' && f === 'standby');
+                      if (failover) {
+                        return <div className="mt-1 text-[10px] font-mono text-amber-300">Failover active</div>;
+                      }
+                      if (degraded) {
+                        return <div className="mt-1 text-[10px] font-mono text-zinc-500">HA standby</div>;
+                      }
+                      return null;
+                    })()}
+                    </div>
+                  </div>
+                ) : systemStatus.cluster ? (
+                  <div className="flex justify-between text-[11px] text-zinc-500 font-mono">
+                    <span>Cluster</span>
+                    <span>Disabled</span>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="text-[11px] text-rose-400 font-mono">

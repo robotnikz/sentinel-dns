@@ -1,6 +1,7 @@
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import Sidebar from '../../components/Sidebar';
 
 function mockFetchOnceJson(urlToResponse: Record<string, any>) {
@@ -48,6 +49,12 @@ describe('Sidebar', () => {
         totalQueries: 10,
         blockedQueries: 1,
         activeClients: 2
+      },
+      '/api/cluster/peer-status': {
+        ok: true,
+        clusterEnabled: true,
+        local: { reachable: true, nodeId: 'n1', ready: { ok: true, configuredRole: 'leader', role: 'leader', lastSync: null } },
+        peers: [{ ip: '192.168.1.2', reachable: true, ready: { ok: true, configuredRole: 'follower', role: 'follower', lastSync: new Date().toISOString() } }]
       }
     });
 
@@ -67,6 +74,46 @@ describe('Sidebar', () => {
     expect(screen.getByText('10')).toBeInTheDocument();
     expect(screen.getByText(/10%/)).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument();
+
+    // Cluster indicator
+    expect(screen.getByText('Cluster')).toBeInTheDocument();
+  });
+
+  it('navigates to Cluster page when activating Cluster status row', async () => {
+    const setActivePage = vi.fn();
+
+    mockFetchOnceJson({
+      '/api/health': { ok: true },
+      '/api/version': { version: '0.0.0-test' },
+      '/api/metrics/summary?hours=24': {
+        windowHours: 24,
+        totalQueries: 10,
+        blockedQueries: 1,
+        activeClients: 2
+      },
+      '/api/cluster/peer-status': {
+        ok: true,
+        clusterEnabled: true,
+        local: { reachable: true, nodeId: 'n1', ready: { ok: true, configuredRole: 'leader', role: 'leader', lastSync: null } },
+        peers: [{ ip: '192.168.1.2', reachable: true, ready: { ok: true, configuredRole: 'follower', role: 'follower', lastSync: new Date().toISOString() } }]
+      }
+    });
+
+    render(
+      <Sidebar
+        activePage="dashboard"
+        setActivePage={setActivePage}
+        isCollapsed={false}
+        toggleSidebar={() => undefined}
+      />
+    );
+
+    const open = await screen.findByTestId('system-status-open-cluster');
+    expect(open).toHaveAttribute('aria-label', 'Open Cluster / HA');
+
+    const user = userEvent.setup();
+    await user.click(open);
+    expect(setActivePage).toHaveBeenCalledWith('cluster');
   });
 
   it('uses titles for collapsed nav items', () => {

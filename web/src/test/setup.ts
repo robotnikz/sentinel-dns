@@ -1,5 +1,11 @@
 import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
 import { vi } from 'vitest';
+
+afterEach(() => {
+  cleanup();
+});
 
 // Default fetch mock so component tests never hit the network.
 if (!globalThis.fetch) {
