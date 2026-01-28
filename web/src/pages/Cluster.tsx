@@ -154,6 +154,27 @@ const Cluster: React.FC = () => {
 
   const [failoverTestDomain, setFailoverTestDomain] = useState<string>('example.com');
 
+  type WizardRole = 'leader' | 'follower';
+  const [wizardRole, setWizardRole] = useState<WizardRole | ''>(() => {
+    try {
+      const v = window.localStorage.getItem('sentinel.haWizardRole');
+      if (v === 'leader' || v === 'follower') return v;
+      return '';
+    } catch {
+      return '';
+    }
+  });
+  const [wizardStep, setWizardStep] = useState<number>(0);
+  const [showVipAdvanced, setShowVipAdvanced] = useState<boolean>(false);
+
+  useEffect(() => {
+    try {
+      if (wizardRole) window.localStorage.setItem('sentinel.haWizardRole', wizardRole);
+    } catch {
+      // ignore
+    }
+  }, [wizardRole]);
+
   const msgTimer = useRef<number | null>(null);
 
   const showMsg = useCallback((kind: 'success' | 'error', text: string) => {
@@ -434,27 +455,82 @@ const Cluster: React.FC = () => {
     return `Missing: ${missing.join(', ')}`;
   }, [haAuthPass, haEnabled, haHasStoredPass, haMode, haPeers, haVip]);
 
-  const nextSteps = useMemo(() => {
-    const steps: string[] = [];
-
-    if (!haEnabled) {
-      steps.push('Optional (recommended for HA): Enable VIP failover on both nodes (same VIP + password, different priorities).');
-    } else if (haBlockingErrors) {
-      steps.push(haDisabledReason ? `Fix VIP settings: ${haDisabledReason}.` : 'Fix VIP settings to continue.');
-    } else {
-      steps.push('VIP settings look ready. Apply the same VIP + password on the other node too.');
+  const wizardSteps = useMemo(() => {
+    const base = [{ key: 'role', title: 'This node' }, { key: 'vip', title: 'VIP failover' }];
+    if (!wizardRole) return base;
+    if (wizardRole === 'leader') {
+      return [...base, { key: 'leader', title: 'Enable leader' }, { key: 'join', title: 'Join code' }, { key: 'router', title: 'Router & test' }];
     }
+    return [...base, { key: 'join', title: 'Connect' }, { key: 'router', title: 'Router & test' }];
+  }, [wizardRole]);
+
+  useEffect(() => {
+    // Clamp step if role changes.
+    setWizardStep((s) => Math.min(s, Math.max(0, wizardSteps.length - 1)));
+  }, [wizardSteps.length]);
+
+  const wizardKey = wizardSteps[wizardStep]?.key || 'role';
+
+  const netinfoAgeMs = useMemo(() => {
+    const iso = netinfo?.detectedAt;
+    if (!iso) return null;
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return null;
+    return Math.max(0, Date.now() - t);
+  }, [netinfo?.detectedAt]);
+
+  const liveChecks = useMemo(() => {
+    const items: Array<{ kind: 'ok' | 'warn' | 'error'; label: string; detail?: string }> = [];
+
+    // Host netinfo (best signal that keepalived sidecar is running with the shared volume).
+    if (netinfo?.interfaces?.length) {
+      const age = netinfoAgeMs;
+      if (typeof age === 'number' && age > 90_000) {
+        items.push({ kind: 'warn', label: 'Keepalived sidecar: netinfo is stale', detail: 'Restart keepalived if needed.' });
+      } else {
+        items.push({ kind: 'ok', label: 'Keepalived sidecar: netinfo available' });
+      }
+    } else {
+      items.push({
+        kind: 'warn',
+        label: 'Interface autodetect unavailable',
+        detail: 'You can still type the interface manually (e.g. ens18 / eth0).'
+      });
+    }
+
+    if (!vipIpOnly(haVip)) items.push({ kind: haEnabled ? 'error' : 'warn', label: 'VIP not set yet' });
+    if (!haInterface.trim()) items.push({ kind: haEnabled ? 'warn' : 'warn', label: 'Interface not selected yet' });
+    if (!haAuthPass.trim() && !haHasStoredPass) items.push({ kind: haEnabled ? 'error' : 'warn', label: 'Shared VRRP password missing' });
+    if (haMode === 'unicast') {
+      const peers = haPeers
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (peers.length === 0) items.push({ kind: haEnabled ? 'error' : 'warn', label: 'Unicast peers missing' });
+    }
+
+    if (haEnabled && !haBlockingErrors) items.push({ kind: 'ok', label: 'VIP settings ready to apply on this node' });
 
     if (!status?.config.enabled) {
-      steps.push('On the node that should be Leader (usually the VIP owner), click “Enable Leader”.');
-    } else if (effectiveRole === 'leader') {
-      steps.push('Generate a Join Code and paste it into the other node (Configure Follower).');
-    } else if (effectiveRole === 'follower') {
-      steps.push('This node is a Follower. Check “Follower last sync” in Status.');
+      items.push({ kind: 'warn', label: 'Cluster not enabled yet', detail: 'Enable leader on the intended VIP owner.' });
+    } else if (status.config.role === 'leader') {
+      items.push({ kind: 'ok', label: 'This node is configured as Leader', detail: status.config.leaderUrl ? `Leader URL: ${status.config.leaderUrl}` : undefined });
+    } else if (status.config.role === 'follower') {
+      const last = status.lastSync ? Date.parse(status.lastSync) : 0;
+      const fresh = last > 0 && Date.now() - last < 20_000;
+      items.push({
+        kind: fresh ? 'ok' : 'warn',
+        label: fresh ? 'Follower sync is healthy' : 'Follower has not synced recently',
+        detail: fresh ? undefined : 'Paste a Join Code from the leader and ensure Leader URL points to the VIP.'
+      });
     }
 
-    return steps;
-  }, [effectiveRole, haBlockingErrors, haDisabledReason, haEnabled, status?.config.enabled]);
+    if (ready) {
+      items.push({ kind: ready.ok ? 'ok' : 'warn', label: ready.ok ? 'Keepalived readiness: OK' : 'Keepalived readiness: NOT READY', detail: ready.role ? `Role: ${ready.role}` : undefined });
+    }
+
+    return items;
+  }, [haAuthPass, haBlockingErrors, haEnabled, haHasStoredPass, haInterface, haMode, haPeers, haVip, netinfo?.interfaces?.length, netinfoAgeMs, ready, status]);
 
   const failoverCommands = useMemo(() => {
     const vip = vipIpOnly(haVip);
@@ -510,448 +586,415 @@ const Cluster: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
           <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
-            <div className="text-sm font-semibold mb-2">What to do next</div>
-            <ul className="text-sm text-zinc-300 space-y-1 list-disc pl-5">
-              {nextSteps.map((s, idx) => (
-                <li key={idx}>{s}</li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
-            <div className="text-sm font-semibold mb-2">Quick Setup (2 nodes)</div>
-            <ol className="text-sm text-zinc-300 space-y-2 list-decimal pl-5">
-              <li>
-                Deploy the same compose file on both Linux hosts and open the UI on each node.
-                <span className="text-zinc-400"> (Keepalived is included and stays idle until enabled here.)</span>
-              </li>
-              <li>
-                Step 1: On <span className="text-zinc-200">both</span> nodes, configure <span className="text-zinc-200">VIP / Keepalived</span>.
-              </li>
-              <li>
-                Step 2: On the node that currently owns the VIP, enable Leader. Use the <span className="font-mono">VIP URL</span> as Leader URL.
-              </li>
-              <li>
-                Step 3: On the other node, paste the Join Code and configure it as Follower.
-              </li>
-              <li>
-                Set your router/DHCP DNS to the VIP only (one IP). This is what keeps the home network DNS alive during failover.
-              </li>
-            </ol>
-
-            <div className="mt-4 text-xs text-zinc-500">
-              Tip: VIP failover works best when both nodes are in the same L2/VLAN (usually the same subnet). If your network blocks VRRP multicast,
-              switch to <span className="font-mono">unicast</span> mode.
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div>
+                <div className="text-sm font-semibold">Guided HA setup</div>
+                <div className="text-xs text-zinc-500 mt-1">Pick a role for this node and follow the steps in order. Most fields are auto-filled when possible.</div>
+              </div>
+              <div className="text-xs text-zinc-500">{wizardRole ? `Role: ${wizardRole}` : 'Choose a role'}</div>
             </div>
-          </div>
-
-          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <div className="text-sm font-semibold">Step 1 — VIP / Keepalived (VRRP)</div>
-              {haEnabled ? (
-                <span
-                  className={
-                    haBlockingErrors
-                      ? 'text-xs px-2 py-1 rounded border border-rose-500/30 bg-rose-500/10 text-rose-200'
-                      : 'text-xs px-2 py-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                  }
-                >
-                  {haBlockingErrors ? 'Not ready' : 'Ready to apply'}
-                </span>
-              ) : null}
-            </div>
-            <p className="text-sm text-zinc-400 mb-4">
-              Optional but recommended for HA: this enables automatic failover for the VIP (the single DNS IP you put into your router).
-              When enabled, Sentinel saves a small config file into <span className="font-mono">/data</span> and the keepalived sidecar applies it.
-              When this node owns the VIP, it will automatically act as <span className="text-zinc-200">leader</span>.
-            </p>
 
             <div className="mb-4 rounded-md border border-[#27272a] bg-[#121214] px-3 py-3">
-              <div className="text-sm font-medium mb-2">{haChecklist.title}</div>
-              <ul className="text-sm space-y-1">
-                {haChecklist.items.map((it, idx) => (
-                  <li
-                    key={idx}
-                    className={
-                      it.kind === 'error'
-                        ? 'text-rose-200'
-                        : it.kind === 'ok'
-                          ? 'text-emerald-200'
-                          : 'text-amber-200'
-                    }
-                  >
-                    {it.kind === 'error' ? '• (fix) ' : it.kind === 'ok' ? '• (ok) ' : '• '}
-                    {it.text}
-                  </li>
+              <div className="text-sm font-medium mb-2">Live checks</div>
+              <div className="space-y-1 text-sm">
+                {liveChecks.map((c, idx) => (
+                  <div key={idx} className="flex items-start gap-2">
+                    {c.kind === 'ok' ? (
+                      <CheckCircle2 className="w-4 h-4 mt-0.5 text-emerald-300" />
+                    ) : c.kind === 'error' ? (
+                      <AlertTriangle className="w-4 h-4 mt-0.5 text-rose-300" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 mt-0.5 text-amber-300" />
+                    )}
+                    <div className={c.kind === 'ok' ? 'text-emerald-200' : c.kind === 'error' ? 'text-rose-200' : 'text-amber-200'}>
+                      <div>{c.label}</div>
+                      {c.detail ? <div className="text-xs text-zinc-500 mt-0.5">{c.detail}</div> : null}
+                    </div>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </div>
 
-            {netinfo ? (
-              <div className="text-sm space-y-2 mb-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-zinc-500">Default interface</span>
-                  <span className="font-mono text-zinc-200">{netinfo.defaultInterface || '—'}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-zinc-500">Default gateway</span>
-                  <span className="font-mono text-zinc-200">{netinfo.defaultGateway || '—'}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="text-sm text-zinc-500 mb-4">
-                Host network info is not available yet. This usually means the keepalived sidecar hasn't started or is not supported in your environment (needs Linux host networking).
-              </div>
-            )}
+            <div className="flex flex-wrap gap-2 mb-4">
+              {wizardSteps.map((s, idx) => {
+                const active = idx === wizardStep;
+                const done = idx < wizardStep;
+                return (
+                  <button
+                    key={s.key}
+                    onClick={() => setWizardStep(idx)}
+                    className={
+                      'text-xs px-2.5 py-1.5 rounded-md border ' +
+                      (active
+                        ? 'border-indigo-500/40 bg-indigo-500/10 text-indigo-200'
+                        : done
+                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                          : 'border-[#27272a] bg-[#0f0f12] text-zinc-300 hover:bg-[#18181b]')
+                    }
+                  >
+                    {idx + 1}. {s.title}
+                  </button>
+                );
+              })}
+            </div>
 
-            <div className="space-y-3">
-              <label className="flex items-center gap-3 text-sm">
-                <input
-                  type="checkbox"
-                  checked={haEnabled}
-                  onChange={(e) => setHaEnabled(e.target.checked)}
-                  className="accent-indigo-500"
-                />
-                <span className="text-zinc-200">Enable VIP failover on this node</span>
-              </label>
-
+            {wizardKey === 'role' ? (
               <div>
-                <div className="text-xs text-zinc-500 mb-1">VIP</div>
-                <input
-                  value={haVip}
-                  onChange={(e) => setHaVip(e.target.value)}
-                  placeholder="192.168.1.53 (or 192.168.1.53/24)"
-                  disabled={!haEnabled}
-                  className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                />
-              </div>
+                <div className="text-sm font-medium mb-2">Step 1 — Choose what this node should be</div>
+                <div className="text-sm text-zinc-400 mb-4">
+                  This choice controls what the wizard shows. It does not change the server role until you click the relevant action (Enable Leader / Configure as Follower).
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <button
+                    onClick={() => {
+                      setWizardRole('leader');
+                      setWizardStep(1);
+                    }}
+                    className={
+                      'text-left rounded-xl border p-4 ' +
+                      (wizardRole === 'leader'
+                        ? 'border-indigo-500/40 bg-indigo-500/10'
+                        : 'border-[#27272a] bg-[#0f0f12] hover:bg-[#18181b]')
+                    }
+                  >
+                    <div className="text-sm font-semibold text-zinc-100">Leader (preferred VIP owner)</div>
+                    <div className="text-xs text-zinc-500 mt-1">Use this on the node that should own the VIP most of the time.</div>
+                    <div className="text-xs text-zinc-400 mt-3">Recommended priority: <span className="font-mono">120</span></div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setWizardRole('follower');
+                      setWizardStep(1);
+                    }}
+                    className={
+                      'text-left rounded-xl border p-4 ' +
+                      (wizardRole === 'follower'
+                        ? 'border-indigo-500/40 bg-indigo-500/10'
+                        : 'border-[#27272a] bg-[#0f0f12] hover:bg-[#18181b]')
+                    }
+                  >
+                    <div className="text-sm font-semibold text-zinc-100">Follower (standby)</div>
+                    <div className="text-xs text-zinc-500 mt-1">Use this on the second node. It stays read-only and syncs from the leader.</div>
+                    <div className="text-xs text-zinc-400 mt-3">Recommended priority: <span className="font-mono">110</span></div>
+                  </button>
+                </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <div className="text-xs text-zinc-500 mb-1">Interface</div>
-                  {netinfo?.interfaces?.length ? (
-                    <select
-                      value={haInterface}
-                      onChange={(e) => setHaInterface(e.target.value)}
-                      disabled={!haEnabled}
-                      className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                    >
-                      {netinfo.interfaces.map((i) => (
-                        <option key={i.name} value={i.name}>
-                          {i.name} ({i.ipv4}/{i.prefix})
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
+                <div className="mt-4 text-xs text-zinc-500">
+                  Current server config: <span className="font-mono">{status?.config.role || '—'}</span> / enabled: <span className="font-mono">{status?.config.enabled ? 'yes' : 'no'}</span>
+                </div>
+              </div>
+            ) : null}
+
+            {wizardKey === 'vip' ? (
+              <div>
+                <div className="text-sm font-medium mb-2">Step 2 — Configure VIP failover (Keepalived)</div>
+                <div className="text-sm text-zinc-400 mb-4">
+                  Do this on <span className="text-zinc-200">both nodes</span>. Use the same VIP + password on both nodes. Priority should be higher on the preferred VIP owner.
+                </div>
+
+                <div className="space-y-3">
+                  <label className="flex items-center gap-3 text-sm">
+                    <input type="checkbox" checked={haEnabled} onChange={(e) => setHaEnabled(e.target.checked)} className="accent-indigo-500" />
+                    <span className="text-zinc-200">Enable VIP failover on this node</span>
+                  </label>
+
+                  <div>
+                    <div className="text-xs text-zinc-500 mb-1">VIP</div>
                     <input
-                      value={haInterface}
-                      onChange={(e) => setHaInterface(e.target.value)}
-                      placeholder="e.g. eth0 / ens18"
+                      value={haVip}
+                      onChange={(e) => setHaVip(e.target.value)}
+                      placeholder="192.168.1.53 (or 192.168.1.53/24)"
                       disabled={!haEnabled}
                       className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
                     />
-                  )}
-                </div>
-
-                <div>
-                  <div className="text-xs text-zinc-500 mb-1">Priority (per node)</div>
-                  <input
-                    value={haPriority}
-                    onChange={(e) => setHaPriority(e.target.value)}
-                    placeholder="120 (node A), 110 (node B)"
-                    disabled={!haEnabled}
-                    className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <div className="text-xs text-zinc-500 mb-1">VRRP mode</div>
-                  <select
-                    value={haMode}
-                    onChange={(e) => setHaMode(e.target.value as any)}
-                    disabled={!haEnabled}
-                    className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  >
-                    <option value="multicast">multicast</option>
-                    <option value="unicast">unicast</option>
-                  </select>
-                </div>
-
-                <div>
-                  <div className="text-xs text-zinc-500 mb-1">Shared VRRP password</div>
-                  <input
-                    value={haAuthPass}
-                    onChange={(e) => setHaAuthPass(e.target.value)}
-                    placeholder={haHasStoredPass ? '(leave empty to keep current)' : '(required)'}
-                    disabled={!haEnabled}
-                    className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  />
-                  {haHasStoredPass ? <div className="text-xs text-zinc-500 mt-1">A password is already stored for this node.</div> : null}
-                </div>
-              </div>
-
-              <div className="text-xs text-zinc-500">
-                Same on both nodes: <span className="font-mono">VIP</span>, password, mode. Per node: <span className="font-mono">interface</span> and <span className="font-mono">priority</span>.
-              </div>
-
-              {haMode === 'unicast' ? (
-                <div>
-                  <div className="text-xs text-zinc-500 mb-1">Unicast peers (comma separated)</div>
-                  <input
-                    value={haPeers}
-                    onChange={(e) => setHaPeers(e.target.value)}
-                    placeholder="192.168.1.10,192.168.1.11"
-                    disabled={!haEnabled}
-                    className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  />
-                </div>
-              ) : null}
-
-              <div className="mt-3 flex items-center justify-end">
-                <button
-                  onClick={() => void saveHaConfig()}
-                  disabled={busy || haBlockingErrors}
-                  title={haBlockingErrors && haDisabledReason ? haDisabledReason : undefined}
-                  className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium"
-                >
-                  Save & Apply
-                </button>
-              </div>
-
-              {haEnabled && haBlockingErrors && haDisabledReason ? (
-                <div className="mt-2 text-xs text-rose-200 text-right">{haDisabledReason}</div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <ServerCog className="w-4 h-4 text-zinc-400" />
-              <h3 className="font-semibold">Step 2 — Leader Setup</h3>
-            </div>
-            <p className="text-sm text-zinc-400 mb-4">
-              Set the Leader URL to the address that followers can reach.
-              <span className="text-zinc-300"> For real VIP HA, this should be the VIP URL</span>
-              {vipLeaderUrlSuggestion ? (
-                <>
-                  : <span className="font-mono">{vipLeaderUrlSuggestion}</span>
-                </>
-              ) : null}
-              . For a single-node demo, you can use your current UI URL
-              {uiOrigin ? (
-                <>
-                  : <span className="font-mono">{uiOrigin}</span>
-                </>
-              ) : null}
-              . In normal compose this is typically <span className="font-mono">http://&lt;host&gt;:8080</span>.
-              (If you publish the UI to a different host port, use that host port — e.g. smoke demo uses <span className="font-mono">18080</span>.)
-            </p>
-
-            {leaderUrlMismatchWarning ? (
-              <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 mt-0.5" />
-                <span className="text-sm">{leaderUrlMismatchWarning}</span>
-              </div>
-            ) : null}
-
-            <div className="flex flex-col md:flex-row gap-3">
-              <input
-                value={leaderUrl}
-                onChange={(e) => setLeaderUrl(e.target.value)}
-                placeholder={uiOrigin || 'http://<host>:8080'}
-                className="flex-1 px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-              />
-              {haEnabled && vipLeaderUrlSuggestion ? (
-                <button
-                  onClick={() => setLeaderUrl(vipLeaderUrlSuggestion)}
-                  disabled={busy}
-                  className="px-4 py-2 rounded-md border border-[#27272a] bg-[#121214] hover:bg-[#18181b] disabled:opacity-50 text-zinc-200 text-sm font-medium"
-                  title="Recommended for VIP HA"
-                >
-                  Use VIP
-                </button>
-              ) : null}
-              <button
-                onClick={() => void enableLeader()}
-                disabled={busy}
-                className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium"
-              >
-                Enable Leader
-              </button>
-            </div>
-
-            <div className="mt-5 pt-5 border-t border-[#27272a]">
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <div>
-                  <div className="text-sm font-medium">Join Code</div>
-                  <div className="text-xs text-zinc-500">Copy/paste this into the follower node.</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => void fetchJoinCode()}
-                    disabled={joinCodeBusy || !canShowJoinCode}
-                    className="px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm hover:bg-[#18181b] disabled:opacity-50"
-                    title={!canShowJoinCode ? 'Enable leader first (and ensure role is leader)' : undefined}
-                  >
-                    {joinCodeBusy ? 'Loading…' : 'Load'}
-                  </button>
-                  <button
-                    onClick={async () => {
-                      const ok = await copyToClipboard(joinCode);
-                      showMsg(ok ? 'success' : 'error', ok ? 'Copied join code.' : 'Failed to copy.');
-                    }}
-                    disabled={!joinCode}
-                    className="px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm hover:bg-[#18181b] disabled:opacity-50 inline-flex items-center gap-2"
-                  >
-                    <Copy className="w-4 h-4" />
-                    Copy
-                  </button>
-                </div>
-              </div>
-              <textarea
-                value={joinCode}
-                readOnly
-                placeholder="Join code will appear here…"
-                className="w-full h-28 px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 font-mono text-xs focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <CheckCircle2 className="w-4 h-4 text-zinc-400" />
-              <h3 className="font-semibold">Step 3 — Configure Follower</h3>
-            </div>
-            <p className="text-sm text-zinc-400 mb-4">Paste a join code from the leader. This node will start syncing automatically.</p>
-
-            <textarea
-              value={followerJoinCode}
-              onChange={(e) => setFollowerJoinCode(e.target.value)}
-              placeholder="Paste join code here…"
-              className="w-full h-28 px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-            />
-            <div className="mt-3 flex items-center justify-end">
-              <button
-                onClick={() => void configureFollower()}
-                disabled={busy}
-                className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium"
-              >
-                Configure as Follower
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <Shield className="w-4 h-4 text-zinc-400" />
-              <h3 className="font-semibold">Step 4 — Failover Test (DNS)</h3>
-            </div>
-
-            <p className="text-sm text-zinc-400 mb-4">
-              This is a practical check you can run after setup. The goal is: your home network always uses one DNS IP (the VIP), and DNS keeps working when a node goes down.
-            </p>
-
-            {!haEnabled ? (
-              <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 mt-0.5" />
-                <span className="text-sm">VIP failover is currently disabled. Enable Step 1 on both nodes before running the failover test.</span>
-              </div>
-            ) : null}
-
-            {haEnabled && !vipIpOnly(haVip) ? (
-              <div className="mb-4 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-200 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 mt-0.5" />
-                <span className="text-sm">Set a VIP first (example: 192.168.1.53).</span>
-              </div>
-            ) : null}
-
-            <ol className="text-sm text-zinc-300 space-y-2 list-decimal pl-5">
-              <li>
-                Set your router/DHCP DNS to the VIP only (example: <span className="font-mono">{vipIpOnly(haVip) || '192.168.1.53'}</span>).
-              </li>
-              <li>
-                Confirm current role: this page should show one node as <span className="text-zinc-200">Leader (VIP owner)</span> and the other as <span className="text-zinc-200">Standby (Follower)</span>.
-              </li>
-              <li>
-                From any client in your LAN, run a DNS query against the VIP (examples below). You should get a normal answer (NOERROR) for allowed domains.
-              </li>
-              <li>
-                Trigger failover: stop/reboot the current VIP owner (or stop the Sentinel service on it).
-              </li>
-              <li>
-                Wait ~5–15 seconds. The other node should become <span className="text-zinc-200">Leader</span>, and DNS queries against the VIP should still succeed.
-              </li>
-            </ol>
-
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <div className="text-xs text-zinc-500 mb-1">Test domain</div>
-                <input
-                  value={failoverTestDomain}
-                  onChange={(e) => setFailoverTestDomain(e.target.value)}
-                  placeholder="example.com"
-                  className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                />
-              </div>
-
-              <div className="rounded-md border border-[#27272a] bg-[#121214] px-3 py-3">
-                <div className="text-xs text-zinc-500">Expected</div>
-                <div className="text-sm text-zinc-200 mt-1">
-                  {haEnabled && ready
-                    ? ready.ok
-                      ? 'VIP owner should be Ready=OK; follower should stay Ready=OK (recent sync).'
-                      : 'If Ready=NOT READY on follower for >20s, keepalived should avoid assigning it the VIP.'
-                    : 'Leader should be OK; follower should be syncing.'}
-                </div>
-              </div>
-            </div>
-
-            {haEnabled && ready && !ready.ok ? (
-              <div className="mt-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 mt-0.5" />
-                <div className="text-sm">
-                  <div className="font-medium">Why "NOT READY" is expected sometimes</div>
-                  <div className="text-amber-100/90 mt-1">
-                    Keepalived can poll <span className="font-mono">/api/cluster/ready</span>.
-                    If a follower has not synced recently, it reports <span className="font-mono">NOT READY</span> so the VIP
-                    should <span className="text-zinc-50">not</span> fail over onto a stale node.
-                    Fix follower sync (Leader URL should be the VIP URL, network reachable) and Ready should turn OK.
                   </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-xs text-zinc-500 mb-1">Interface</div>
+                      {netinfo?.interfaces?.length ? (
+                        <select
+                          value={haInterface}
+                          onChange={(e) => setHaInterface(e.target.value)}
+                          disabled={!haEnabled}
+                          className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                        >
+                          <option value="">Select…</option>
+                          {netinfo.interfaces.map((i) => (
+                            <option key={i.name} value={i.name}>
+                              {i.name} ({i.ipv4}/{i.prefix})
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={haInterface}
+                          onChange={(e) => setHaInterface(e.target.value)}
+                          placeholder="e.g. ens18 / eth0"
+                          disabled={!haEnabled}
+                          className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                        />
+                      )}
+                      {netinfo?.defaultInterface ? (
+                        <div className="text-xs text-zinc-500 mt-1">
+                          Suggested: <span className="font-mono">{netinfo.defaultInterface}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div>
+                      <div className="text-xs text-zinc-500 mb-1">Shared VRRP password</div>
+                      <input
+                        value={haAuthPass}
+                        onChange={(e) => setHaAuthPass(e.target.value)}
+                        placeholder={haHasStoredPass ? '(leave empty to keep current)' : '(required)'}
+                        disabled={!haEnabled}
+                        className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                      />
+                      {haHasStoredPass ? <div className="text-xs text-zinc-500 mt-1">A password is already stored for this node.</div> : null}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-xs text-zinc-500 mb-1">Priority</div>
+                      <input
+                        value={haPriority}
+                        onChange={(e) => setHaPriority(e.target.value)}
+                        placeholder={wizardRole === 'leader' ? '120 (recommended)' : '110 (recommended)'}
+                        disabled={!haEnabled}
+                        className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                      />
+                      <div className="text-xs text-zinc-500 mt-1">Higher priority usually owns the VIP.</div>
+                    </div>
+                    <div className="flex items-end justify-between">
+                      <button
+                        onClick={() => setShowVipAdvanced((v) => !v)}
+                        className="px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm hover:bg-[#18181b]"
+                        type="button"
+                      >
+                        {showVipAdvanced ? 'Hide advanced' : 'Show advanced'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {showVipAdvanced ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-xs text-zinc-500 mb-1">VRRP mode</div>
+                        <select
+                          value={haMode}
+                          onChange={(e) => setHaMode(e.target.value as any)}
+                          disabled={!haEnabled}
+                          className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                        >
+                          <option value="multicast">multicast</option>
+                          <option value="unicast">unicast</option>
+                        </select>
+                        <div className="text-xs text-zinc-500 mt-1">If multicast is blocked in your network, switch to unicast.</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-zinc-500 mb-1">Unicast peers (comma separated)</div>
+                        <input
+                          value={haPeers}
+                          onChange={(e) => setHaPeers(e.target.value)}
+                          placeholder="192.168.1.10,192.168.1.11"
+                          disabled={!haEnabled || haMode !== 'unicast'}
+                          className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <div className="text-xs text-zinc-500">Same on both nodes: VIP, password, mode. Per node: interface, priority.</div>
+                    <button
+                      onClick={() => void saveHaConfig()}
+                      disabled={busy || haBlockingErrors}
+                      title={haBlockingErrors && haDisabledReason ? haDisabledReason : undefined}
+                      className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium"
+                    >
+                      Save & Apply
+                    </button>
+                  </div>
+
+                  {haEnabled && haBlockingErrors && haDisabledReason ? <div className="mt-2 text-xs text-rose-200">{haDisabledReason}</div> : null}
                 </div>
               </div>
             ) : null}
 
-            <div className="mt-4">
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <div>
-                  <div className="text-sm font-medium">DNS test commands</div>
-                  <div className="text-xs text-zinc-500">Run on any LAN client. Replace VIP if needed.</div>
+            {wizardKey === 'leader' ? (
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <ServerCog className="w-4 h-4 text-zinc-400" />
+                  <div className="text-sm font-medium">Step 3 — Enable Leader</div>
                 </div>
-                <button
-                  onClick={async () => {
-                    const text = failoverCommands.cmds.join('\n');
-                    const ok = await copyToClipboard(text);
-                    showMsg(ok ? 'success' : 'error', ok ? 'Copied DNS test commands.' : 'Failed to copy.');
-                  }}
-                  disabled={!failoverCommands.vip}
-                  className="px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm hover:bg-[#18181b] disabled:opacity-50 inline-flex items-center gap-2"
-                  title={!failoverCommands.vip ? 'Set a VIP in Step 1 first' : undefined}
-                >
-                  <Copy className="w-4 h-4" />
-                  Copy
-                </button>
-              </div>
-              <pre className="w-full whitespace-pre-wrap break-words px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 font-mono text-xs">
-                {failoverCommands.vip ? failoverCommands.cmds.join('\n') : 'Set a VIP in Step 1 to generate commands.'}
-              </pre>
-            </div>
+                <p className="text-sm text-zinc-400 mb-4">
+                  Followers must reach the leader via this URL. For real VIP HA, it should be the VIP URL.
+                </p>
 
-            <div className="mt-4 text-xs text-zinc-500">
-              If DNS does not recover after failover: check that the Leader URL is the VIP URL (Step 2), and that port 53 is free on both hosts.
+                {leaderUrlMismatchWarning ? (
+                  <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 mt-0.5" />
+                    <span className="text-sm">{leaderUrlMismatchWarning}</span>
+                  </div>
+                ) : null}
+
+                <div className="flex flex-col md:flex-row gap-3">
+                  <input
+                    value={leaderUrl}
+                    onChange={(e) => setLeaderUrl(e.target.value)}
+                    placeholder={uiOrigin || 'http://<host>:8080'}
+                    className="flex-1 px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                  />
+                  {haEnabled && vipLeaderUrlSuggestion ? (
+                    <button
+                      onClick={() => setLeaderUrl(vipLeaderUrlSuggestion)}
+                      disabled={busy}
+                      className="px-4 py-2 rounded-md border border-[#27272a] bg-[#121214] hover:bg-[#18181b] disabled:opacity-50 text-zinc-200 text-sm font-medium"
+                      title="Recommended for VIP HA"
+                      type="button"
+                    >
+                      Use VIP
+                    </button>
+                  ) : null}
+                  <button
+                    onClick={() => void enableLeader()}
+                    disabled={busy}
+                    className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium"
+                  >
+                    Enable Leader
+                  </button>
+                </div>
+
+                <div className="mt-3 text-xs text-zinc-500">After enabling leader, go to the Join Code step.</div>
+              </div>
+            ) : null}
+
+            {wizardKey === 'join' ? (
+              <div>
+                {wizardRole === 'leader' ? (
+                  <div>
+                    <div className="text-sm font-medium mb-2">Step 4 — Get Join Code</div>
+                    <div className="text-sm text-zinc-400 mb-4">Copy/paste this into the follower node.</div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <button
+                        onClick={() => void fetchJoinCode()}
+                        disabled={joinCodeBusy || !canShowJoinCode}
+                        className="px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm hover:bg-[#18181b] disabled:opacity-50"
+                        title={!canShowJoinCode ? 'Enable leader first' : undefined}
+                      >
+                        {joinCodeBusy ? 'Loading…' : 'Load join code'}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const ok = await copyToClipboard(joinCode);
+                          showMsg(ok ? 'success' : 'error', ok ? 'Copied join code.' : 'Failed to copy.');
+                        }}
+                        disabled={!joinCode}
+                        className="px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm hover:bg-[#18181b] disabled:opacity-50 inline-flex items-center gap-2"
+                      >
+                        <Copy className="w-4 h-4" />
+                        Copy
+                      </button>
+                    </div>
+                    <textarea
+                      value={joinCode}
+                      readOnly
+                      placeholder="Join code will appear here…"
+                      className="w-full h-28 px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 font-mono text-xs focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <div className="text-sm font-medium mb-2">Step 3 — Connect this follower to the leader</div>
+                    <div className="text-sm text-zinc-400 mb-4">Paste the Join Code from the leader. Sync starts automatically.</div>
+
+                    <textarea
+                      value={followerJoinCode}
+                      onChange={(e) => setFollowerJoinCode(e.target.value)}
+                      placeholder="Paste join code here…"
+                      className="w-full h-28 px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                    />
+                    <div className="mt-3 flex items-center justify-end">
+                      <button
+                        onClick={() => void configureFollower()}
+                        disabled={busy}
+                        className="px-4 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium"
+                      >
+                        Configure as Follower
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {wizardKey === 'router' ? (
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <Shield className="w-4 h-4 text-zinc-400" />
+                  <div className="text-sm font-medium">Final — Router DNS & quick test</div>
+                </div>
+
+                <ol className="text-sm text-zinc-300 space-y-2 list-decimal pl-5">
+                  <li>
+                    Set your router/DHCP DNS to the VIP only (example: <span className="font-mono">{vipIpOnly(haVip) || '192.168.1.53'}</span>).
+                  </li>
+                  <li>
+                    Confirm that one node becomes VIP owner and the other stays standby. (Status card should show <span className="text-zinc-200">Leader</span> + <span className="text-zinc-200">Follower</span>.)
+                  </li>
+                  <li>Run a DNS query against the VIP from any LAN client (commands below).</li>
+                </ol>
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div>
+                      <div className="text-sm font-medium">DNS test commands</div>
+                      <div className="text-xs text-zinc-500">Run on any LAN client.</div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        const text = failoverCommands.cmds.join('\n');
+                        const ok = await copyToClipboard(text);
+                        showMsg(ok ? 'success' : 'error', ok ? 'Copied DNS test commands.' : 'Failed to copy.');
+                      }}
+                      disabled={!failoverCommands.vip}
+                      className="px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm hover:bg-[#18181b] disabled:opacity-50 inline-flex items-center gap-2"
+                      title={!failoverCommands.vip ? 'Set a VIP first' : undefined}
+                      type="button"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copy
+                    </button>
+                  </div>
+                  <pre className="w-full whitespace-pre-wrap break-words px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 font-mono text-xs">
+                    {failoverCommands.vip ? failoverCommands.cmds.join('\n') : 'Set a VIP to generate commands.'}
+                  </pre>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-5 flex items-center justify-between">
+              <button
+                onClick={() => setWizardStep((s) => Math.max(0, s - 1))}
+                disabled={wizardStep === 0}
+                className="px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm hover:bg-[#18181b] disabled:opacity-50"
+                type="button"
+              >
+                Back
+              </button>
+              <button
+                onClick={() => setWizardStep((s) => Math.min(wizardSteps.length - 1, s + 1))}
+                disabled={wizardStep >= wizardSteps.length - 1}
+                className="px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium"
+                type="button"
+              >
+                Next
+              </button>
             </div>
           </div>
+
+          
         </div>
 
         <div className="space-y-6">
