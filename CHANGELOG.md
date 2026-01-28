@@ -1,3 +1,9 @@
+## [0.8.8](https://github.com/robotnikz/sentinel-dns/compare/v0.8.7...v0.8.8) (2026-01-28)
+
+### fix
+
+* **cluster:** make configured follower always read-only ([](https://github.com/robotnikz/sentinel-dns/commit/b82c1040d2d2caf34cfe21d38361213e7c5b15a0))
+
 ## [0.8.7](https://github.com/robotnikz/sentinel-dns/compare/v0.8.6...v0.8.7) (2026-01-28)
 
 ### fix
