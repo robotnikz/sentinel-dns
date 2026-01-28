@@ -1,3 +1,33 @@
+## [0.7.0](https://github.com/robotnikz/sentinel-dns/compare/v0.6.5...v0.7.0) (2026-01-28)
+
+* Merge pull request #49 from robotnikz/node-sync ([](https://github.com/robotnikz/sentinel-dns/commit/3878a74f87e77b2a14d5211c10d63ddf6e9e9c81)), closes [#49](https://github.com/robotnikz/sentinel-dns/issues/49)
+* Merge remote-tracking branch 'origin/main' into node-sync ([](https://github.com/robotnikz/sentinel-dns/commit/d18400f22a54230b77684a71bf38ff8a8ed96dac))
+
+### chore
+
+* **dev:** add local 2-node HA test harness ([](https://github.com/robotnikz/sentinel-dns/commit/0717d7620cf3b05f32a30ea20a91af7d974d0596))
+
+### docs
+
+* **cluster:** add concrete port-53 fix steps ([](https://github.com/robotnikz/sentinel-dns/commit/dc2b8f98339a2a18b2e1a7761b3929aff9c971c3))
+* **cluster:** add Proxmox LXC workaround ([](https://github.com/robotnikz/sentinel-dns/commit/1b1a2e5a083afb65a1d9ebfbf0c943f98faff4a1))
+* keep README basic; link advanced guides ([](https://github.com/robotnikz/sentinel-dns/commit/5ec538956e95e9a35e4241b5a6793fcd6dd9f0eb))
+* **readme:** update compose example ([](https://github.com/robotnikz/sentinel-dns/commit/0d7d344e6dc7d66a673cd91482094714c1032890))
+
+### fix
+
+* **web:** prevent Cluster/HA blank page ([](https://github.com/robotnikz/sentinel-dns/commit/2dcbe6bc65b978c3636ac7d0a93cd8d341e333cb))
+
+### feat
+
+* **cluster:** add VIP HA + sync UI ([](https://github.com/robotnikz/sentinel-dns/commit/c16238553aa9f0d7ddaef3c70b642a64c4d722b8))
+* **cluster:** harden HA guard + add integration tests ([](https://github.com/robotnikz/sentinel-dns/commit/8af4b0b92344160e70da6d110b46535f2818a3de))
+* **cluster:** join-code TTL + sync metrics + HMAC hardening ([](https://github.com/robotnikz/sentinel-dns/commit/b4636d833865261b71d92c5adc0bc29d8799ce5a))
+
+### ui
+
+* **cluster:** show active/standby badge ([](https://github.com/robotnikz/sentinel-dns/commit/c1118bb2ee165ef705e1ea238cf0427ddc48b98b))
+
 ## [0.6.5](https://github.com/robotnikz/sentinel-dns/compare/v0.6.4...v0.6.5) (2026-01-28)
 
 * Merge pull request #48 from robotnikz/fix/remove-dating-and-auditor-domaincheck ([](https://github.com/robotnikz/sentinel-dns/commit/faa745d1a48ed3dcb2142943a958418c7c9e1e71)), closes [#48](https://github.com/robotnikz/sentinel-dns/issues/48)
