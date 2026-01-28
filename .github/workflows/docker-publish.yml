@@ -64,7 +64,8 @@ jobs:
           persist-credentials: true
 
       - name: Lowercase image name
-        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+        run: |
+          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -128,6 +129,17 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.rel.outputs.version }}
             type=raw,value=latest
 
+      - name: Extract Docker metadata (keepalived)
+        id: meta_keepalived
+        if: steps.rel.outputs.released == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-keepalived
+          tags: |
+            type=semver,pattern={{version}},value=${{ steps.rel.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.rel.outputs.version }}
+            type=raw,value=latest
+
       - name: Build and push Docker image
         if: steps.rel.outputs.released == 'true'
         uses: docker/build-push-action@v6
@@ -138,3 +150,14 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Build and push Docker image (keepalived)
+        if: steps.rel.outputs.released == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/keepalived/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta_keepalived.outputs.tags }}
+          labels: ${{ steps.meta_keepalived.outputs.labels }}

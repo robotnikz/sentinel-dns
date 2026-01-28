@@ -45,9 +45,6 @@
 
 Sentinel-DNS is a **self-hosted, network-wide DNS blocker** (Pi-hole/AdGuard-style).
 Point your router or devices to it as the DNS server and it will **filter ads/trackers/malware domains** before they reach your apps.
-
-It also gives you the stuff you actually want day-to-day:
-
 - a clear dashboard (what’s happening right now)
 - per-client visibility (who is asking what)
 - query logs when something breaks
@@ -147,13 +144,11 @@ services:
     restart: unless-stopped
 
   # Optional HA sidecar (VRRP/VIP via keepalived)
-  # - Always included so users can enable HA from the UI without editing compose files.
+  # - Included by default so `docker compose up -d` deploys everything.
   # - Does nothing until the UI writes /data/sentinel/ha/config.json (enabled=true).
   # - Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
   keepalived:
-    build:
-      context: ../..
-      dockerfile: docker/keepalived/Dockerfile
+    image: ghcr.io/robotnikz/sentinel-dns-keepalived:latest
     container_name: sentinel-keepalived
     network_mode: host
     restart: unless-stopped
@@ -179,6 +174,10 @@ Run it:
 ```bash
 docker compose -f deploy/compose/docker-compose.yml up -d
 ```
+
+VIP/HA failover (keepalived) is included by default. Enable it in the UI (Cluster / HA) after startup.
+
+
 
 > [!IMPORTANT]
 > **Upgrade safety (data/history):** keep your `sentinel-data` volume. If you delete or change this mount, Sentinel will start fresh.
