@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bell,
   Check,
@@ -13,9 +13,12 @@ import {
   Route,
   Save,
   Shield,
-  Sparkles
+  Sparkles,
+  Trash2,
+  Upload
 } from 'lucide-react';
 import { getAuthHeaders } from '../services/apiClient';
+import ConfirmModal, { type ConfirmVariant } from '../components/ConfirmModal';
 
 type GeoIpStatus = {
   geoip: { available: boolean; dbPath: string };
@@ -81,6 +84,22 @@ async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+function clampInt(n: any, min: number, max: number, fallback: number): number {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(x)));
+}
+
+type ConfirmOptions = {
+  title: string;
+  subtitle?: string;
+  body: string;
+  confirmText?: string;
+  busyText?: string;
+  variant?: ConfirmVariant;
+  onConfirm: () => Promise<void> | void;
+};
+
 function splitAdvertiseRoutes(routes: string[]): { exitNodeDefaults: string[]; subnetRoutes: string[] } {
   const exitNodeDefaults: string[] = [];
   const subnetRoutes: string[] = [];
@@ -92,10 +111,10 @@ function splitAdvertiseRoutes(routes: string[]): { exitNodeDefaults: string[]; s
 }
 
 const Settings2: React.FC<{
-  presetTab?: 'general' | 'geoip' | 'remote' | 'notifications' | null;
+  presetTab?: 'general' | 'geoip' | 'remote' | 'notifications' | 'maintenance' | null;
   onPresetConsumed?: () => void;
 }> = ({ presetTab, onPresetConsumed }) => {
-  const [tab, setTab] = useState<'general' | 'geoip' | 'remote' | 'notifications'>('general');
+  const [tab, setTab] = useState<'general' | 'geoip' | 'remote' | 'notifications' | 'maintenance'>('general');
 
   useEffect(() => {
     if (!presetTab) return;
@@ -137,6 +156,64 @@ const Settings2: React.FC<{
   });
   const [notifMsg, setNotifMsg] = useState('');
   const [notifBusy, setNotifBusy] = useState(false);
+
+  // Maintenance
+  const [maintMsg, setMaintMsg] = useState('');
+  const [maintBusy, setMaintBusy] = useState(false);
+  const [purgeDays, setPurgeDays] = useState('30');
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState('');
+  const [importSummary, setImportSummary] = useState<any>(null);
+  const [importPayload, setImportPayload] = useState<any>(null);
+  const [importFileName, setImportFileName] = useState('');
+  const importFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const modalBusy = maintBusy || importBusy;
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState('');
+  const [confirmSubtitle, setConfirmSubtitle] = useState('');
+  const [confirmBody, setConfirmBody] = useState('');
+  const [confirmConfirmText, setConfirmConfirmText] = useState('CONFIRM');
+  const [confirmBusyText, setConfirmBusyText] = useState('WORKING…');
+  const [confirmVariant, setConfirmVariant] = useState<ConfirmVariant>('default');
+  const confirmActionRef = useRef<null | (() => Promise<void> | void)>(null);
+
+  const closeConfirm = () => {
+    if (modalBusy) return;
+    setConfirmOpen(false);
+    confirmActionRef.current = null;
+  };
+
+  const openConfirm = (opts: ConfirmOptions) => {
+    setConfirmTitle(opts.title);
+    setConfirmSubtitle(String(opts.subtitle || ''));
+    setConfirmBody(opts.body);
+    setConfirmConfirmText(String(opts.confirmText || 'CONFIRM'));
+    setConfirmBusyText(String(opts.busyText || 'WORKING…'));
+    setConfirmVariant(opts.variant || 'default');
+    confirmActionRef.current = opts.onConfirm;
+    setConfirmOpen(true);
+  };
+
+  const runConfirm = async () => {
+    if (modalBusy) return;
+    const fn = confirmActionRef.current;
+    try {
+      await fn?.();
+    } finally {
+      setConfirmOpen(false);
+      confirmActionRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (!confirmOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeConfirm();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [confirmOpen, modalBusy]);
 
   const tailscaleIp = useMemo(() => {
     const ips = tailscaleStatus?.self?.tailscaleIps || [];
@@ -704,11 +781,323 @@ const Settings2: React.FC<{
     }
   };
 
+  const doFlushQueryLogs = async () => {
+    setMaintMsg('');
+    setMaintBusy(true);
+    try {
+      const res = await fetch('/api/query-logs/flush', {
+        method: 'POST',
+        headers: { ...getAuthHeaders() }
+      });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setMaintMsg(data?.message || data?.error || 'Failed to clear query logs.');
+        return;
+      }
+      const deleted = typeof data?.deleted === 'number' ? data.deleted : Number(data?.deleted || 0);
+      setMaintMsg(Number.isFinite(deleted) && deleted > 0 ? `Cleared ${deleted} log entries.` : 'Query logs cleared.');
+    } catch {
+      setMaintMsg('Backend not reachable.');
+    } finally {
+      setMaintBusy(false);
+    }
+  };
+
+  const flushQueryLogs = () => {
+    if (maintBusy) return;
+    openConfirm({
+      title: 'Clear Query Logs',
+      subtitle: 'Deletes all stored DNS query history.',
+      body: 'This operation is irreversible. It only clears the UI log history; filtering rules and DNS settings stay unchanged.',
+      confirmText: 'CLEAR LOGS',
+      busyText: 'CLEARING…',
+      variant: 'danger',
+      onConfirm: doFlushQueryLogs
+    });
+  };
+
+  const doPurgeOldQueryLogs = async (days: number) => {
+    setMaintMsg('');
+    setMaintBusy(true);
+    try {
+      const res = await fetch('/api/maintenance/query-logs/purge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ olderThanDays: days })
+      });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setMaintMsg(data?.message || data?.error || 'Failed to purge query logs.');
+        return;
+      }
+      const deleted = typeof data?.deleted === 'number' ? data.deleted : Number(data?.deleted || 0);
+      setMaintMsg(Number.isFinite(deleted) ? `Purged ${deleted} log entries.` : 'Purged.');
+    } catch {
+      setMaintMsg('Backend not reachable.');
+    } finally {
+      setMaintBusy(false);
+    }
+  };
+
+  const purgeOldQueryLogs = () => {
+    if (maintBusy) return;
+    const days = clampInt(purgeDays, 1, 3650, 30);
+    openConfirm({
+      title: 'Purge Old Query Logs',
+      subtitle: `Deletes entries older than ${days} days.`,
+      body: 'This will permanently delete older query log entries from the database.',
+      confirmText: 'PURGE',
+      busyText: 'PURGING…',
+      variant: 'warning',
+      onConfirm: () => doPurgeOldQueryLogs(days)
+    });
+  };
+
+  const doClearNotifications = async (mode: 'all' | 'read') => {
+    setMaintMsg('');
+    setMaintBusy(true);
+    try {
+      const res = await fetch('/api/maintenance/notifications/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ mode })
+      });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setMaintMsg(data?.message || data?.error || 'Failed to clear notifications.');
+        return;
+      }
+      const deleted = typeof data?.deleted === 'number' ? data.deleted : Number(data?.deleted || 0);
+      setMaintMsg(Number.isFinite(deleted) ? `Cleared ${deleted} notifications.` : 'Cleared notifications.');
+    } catch {
+      setMaintMsg('Backend not reachable.');
+    } finally {
+      setMaintBusy(false);
+    }
+  };
+
+  const clearNotifications = (mode: 'all' | 'read') => {
+    if (maintBusy) return;
+    const label = mode === 'read' ? 'read notifications' : 'ALL notifications';
+    openConfirm({
+      title: 'Clear Notifications',
+      subtitle: `Deletes ${label}.`,
+      body: 'This will permanently delete notification feed entries from the database.',
+      confirmText: 'CLEAR',
+      busyText: 'CLEARING…',
+      variant: mode === 'all' ? 'danger' : 'warning',
+      onConfirm: () => doClearNotifications(mode)
+    });
+  };
+
+  const doClearIgnoredAnomalies = async (mode: 'all' | 'expired') => {
+    setMaintMsg('');
+    setMaintBusy(true);
+    try {
+      const res = await fetch('/api/maintenance/ignored-anomalies/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ mode })
+      });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setMaintMsg(data?.message || data?.error || 'Failed to clear ignored anomalies.');
+        return;
+      }
+      const deleted = typeof data?.deleted === 'number' ? data.deleted : Number(data?.deleted || 0);
+      setMaintMsg(Number.isFinite(deleted) ? `Cleared ${deleted} ignored signatures.` : 'Cleared ignored signatures.');
+    } catch {
+      setMaintMsg('Backend not reachable.');
+    } finally {
+      setMaintBusy(false);
+    }
+  };
+
+  const clearIgnoredAnomalies = (mode: 'all' | 'expired') => {
+    if (maintBusy) return;
+    const label = mode === 'expired' ? 'expired ignored signatures' : 'ALL ignored signatures';
+    openConfirm({
+      title: 'Clear Ignored Suspicious Activity',
+      subtitle: `Deletes ${label}.`,
+      body: 'This will permanently delete stored ignore signatures from the database.',
+      confirmText: 'CLEAR',
+      busyText: 'CLEARING…',
+      variant: mode === 'all' ? 'danger' : 'warning',
+      onConfirm: () => doClearIgnoredAnomalies(mode)
+    });
+  };
+
+  const refreshEnabledBlocklistsNow = async () => {
+    if (maintBusy) return;
+    setMaintMsg('');
+    setMaintBusy(true);
+    try {
+      const listRes = await fetch('/api/blocklists', { headers: { ...getAuthHeaders() } });
+      const listData = await safeJson(listRes);
+      if (!listRes.ok) {
+        setMaintMsg(listData?.message || listData?.error || 'Failed to load blocklists.');
+        return;
+      }
+      const items = Array.isArray(listData?.items) ? listData.items : [];
+      const enabled = items.filter((b: any) => b && b.enabled === true && b.id != null);
+      if (enabled.length === 0) {
+        setMaintMsg('No enabled blocklists to refresh.');
+        return;
+      }
+
+      let okCount = 0;
+      for (let i = 0; i < enabled.length; i++) {
+        const b = enabled[i];
+        setMaintMsg(`Refreshing ${i + 1}/${enabled.length}: ${String(b.name || b.url)}`);
+        const r = await fetch(`/api/blocklists/${encodeURIComponent(String(b.id))}/refresh`, {
+          method: 'POST',
+          headers: { ...getAuthHeaders() }
+        });
+        if (r.ok) okCount += 1;
+      }
+      setMaintMsg(`Refreshed ${okCount}/${enabled.length} enabled blocklists.`);
+    } catch {
+      setMaintMsg('Backend not reachable.');
+    } finally {
+      setMaintBusy(false);
+    }
+  };
+
+  const doRestartResolver = async (mode: 'reload' | 'restart') => {
+    setMaintMsg('');
+    setMaintBusy(true);
+    try {
+      const url = mode === 'reload' ? '/api/maintenance/dns/reload-resolver' : '/api/maintenance/dns/restart-resolver';
+      const res = await fetch(url, { method: 'POST', headers: { ...getAuthHeaders() } });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setMaintMsg(data?.message || data?.error || 'Resolver control not supported in this deployment.');
+        return;
+      }
+      setMaintMsg(mode === 'reload' ? 'Resolver reload requested.' : 'Resolver restart requested.');
+    } catch {
+      setMaintMsg('Backend not reachable.');
+    } finally {
+      setMaintBusy(false);
+    }
+  };
+
+  const restartResolver = (mode: 'reload' | 'restart') => {
+    if (maintBusy) return;
+    const label = mode === 'reload' ? 'Reload resolver configuration' : 'Restart resolver (clears cache)';
+    openConfirm({
+      title: label,
+      subtitle: mode === 'reload' ? 'Sends a HUP to Unbound (where supported).' : 'Restarts Unbound (more disruptive).',
+      body: 'If you are currently testing DNS, clients may experience a brief interruption.',
+      confirmText: mode === 'reload' ? 'RELOAD' : 'RESTART',
+      busyText: mode === 'reload' ? 'RELOADING…' : 'RESTARTING…',
+      variant: mode === 'reload' ? 'warning' : 'warning',
+      onConfirm: () => doRestartResolver(mode)
+    });
+  };
+
+  const downloadJson = async (url: string, filename: string) => {
+    if (maintBusy) return;
+    setMaintMsg('');
+    setMaintBusy(true);
+    try {
+      const res = await fetch(url, { headers: { ...getAuthHeaders() } });
+      if (!res.ok) {
+        const data = await safeJson(res);
+        setMaintMsg(data?.message || data?.error || 'Download failed.');
+        return;
+      }
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(href);
+      setMaintMsg('Downloaded.');
+    } catch {
+      setMaintMsg('Backend not reachable.');
+    } finally {
+      setMaintBusy(false);
+    }
+  };
+
+  const onImportFileSelected = async (file: File | null) => {
+    setImportMsg('');
+    setImportSummary(null);
+    setImportPayload(null);
+    setImportFileName(file?.name || '');
+    if (!file) return;
+    setImportBusy(true);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      setImportPayload(parsed);
+
+      const res = await fetch('/api/maintenance/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ dryRun: true, ...(parsed || {}) })
+      });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setImportMsg(data?.message || data?.error || 'Dry-run failed.');
+        return;
+      }
+      setImportSummary(data?.summary || null);
+      setImportMsg('Dry-run OK. Review summary and apply.');
+    } catch {
+      setImportMsg('Invalid JSON or backend not reachable.');
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const doApplyImport = async () => {
+    if (!importPayload) return;
+    setImportBusy(true);
+    setImportMsg('');
+    try {
+      const res = await fetch('/api/maintenance/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ dryRun: false, ...(importPayload || {}) })
+      });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setImportMsg(data?.message || data?.error || 'Import failed.');
+        return;
+      }
+      setImportSummary(data?.summary || null);
+      setImportMsg('Import applied.');
+    } catch {
+      setImportMsg('Backend not reachable.');
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const applyImport = () => {
+    if (!importPayload || importBusy || maintBusy) return;
+    openConfirm({
+      title: 'Apply Import',
+      subtitle: 'Upserts settings/clients/blocklists and adds new rules (no deletes).',
+      body: 'Apply the import now? This will change the running configuration and is intended for restores/migrations.',
+      confirmText: 'APPLY',
+      busyText: 'APPLYING…',
+      variant: 'warning',
+      onConfirm: doApplyImport
+    });
+  };
+
   const tabs = [
     { id: 'general' as const, label: 'AI Keys', icon: Sparkles },
     { id: 'geoip' as const, label: 'GeoIP / World Map', icon: Globe },
     { id: 'remote' as const, label: 'Tailscale', icon: Network },
-    { id: 'notifications' as const, label: 'Notifications', icon: Bell }
+    { id: 'notifications' as const, label: 'Notifications', icon: Bell },
+    { id: 'maintenance' as const, label: 'Maintenance', icon: Trash2 }
   ];
 
   return (
@@ -1096,7 +1485,8 @@ const Settings2: React.FC<{
                 </div>
 
                 <div className="mt-3 text-[11px] text-zinc-500">
-                  In the Tailscale admin console: DNS → Nameservers → Add nameserver → use the IP above. Then enable “Use Tailscale DNS” on clients.
+                  In the Tailscale admin console: DNS → Nameservers → Add nameserver → use the IP above. Make sure “Override DNS Servers” is enabled.
+                  Then enable “Use Tailscale DNS” on clients.
                 </div>
               </div>
             </div>
@@ -1195,8 +1585,311 @@ const Settings2: React.FC<{
             </div>
           </div>
         )}
+
+        {tab === 'maintenance' && (
+          <div className="dashboard-card p-6 rounded-lg">
+            <h2 className="text-white font-bold text-lg flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-rose-400" /> Maintenance
+            </h2>
+            <p className="text-zinc-500 text-sm mt-1">Administrative cleanup actions (admin-only).</p>
+
+            <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="p-4 rounded border border-[#27272a] bg-[#09090b]">
+                <div className="text-[10px] uppercase font-bold text-zinc-500">Log / DB Cleanup</div>
+
+                <div className="mt-3 space-y-3">
+                  <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
+                    <div className="text-xs text-zinc-300 font-bold">Query Logs</div>
+                    <div className="text-[11px] text-zinc-500 mt-1">Purge old entries or clear everything.</div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <input
+                        value={purgeDays}
+                        onChange={(e) => setPurgeDays(e.target.value)}
+                        placeholder="Days"
+                        className="w-24 bg-[#09090b] border border-[#27272a] text-zinc-200 px-3 py-2 rounded text-xs font-mono focus:outline-none focus:border-zinc-500"
+                      />
+                      <button
+                        onClick={purgeOldQueryLogs}
+                        disabled={maintBusy}
+                        className={classNames(
+                          'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                        )}
+                      >
+                        PURGE OLDER THAN (DAYS)
+                      </button>
+
+                      <button
+                        onClick={flushQueryLogs}
+                        disabled={maintBusy}
+                        className={classNames(
+                          'px-3 py-2 rounded text-xs font-bold border flex items-center gap-2',
+                          maintBusy
+                            ? 'opacity-50 cursor-not-allowed bg-[#18181b] border-[#27272a] text-zinc-400'
+                            : 'bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50'
+                        )}
+                      >
+                        {maintBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        CLEAR ALL
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
+                    <div className="text-xs text-zinc-300 font-bold">Notifications</div>
+                    <div className="text-[11px] text-zinc-500 mt-1">Clean up the bell feed storage.</div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => clearNotifications('read')}
+                        disabled={maintBusy}
+                        className={classNames(
+                          'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                        )}
+                      >
+                        CLEAR READ
+                      </button>
+                      <button
+                        onClick={() => clearNotifications('all')}
+                        disabled={maintBusy}
+                        className={classNames(
+                          'px-3 py-2 rounded text-xs font-bold border bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50',
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                        )}
+                      >
+                        CLEAR ALL
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
+                    <div className="text-xs text-zinc-300 font-bold">Ignored Suspicious Activity</div>
+                    <div className="text-[11px] text-zinc-500 mt-1">Remove stored ignore signatures.</div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => clearIgnoredAnomalies('expired')}
+                        disabled={maintBusy}
+                        className={classNames(
+                          'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                        )}
+                      >
+                        PURGE EXPIRED
+                      </button>
+                      <button
+                        onClick={() => clearIgnoredAnomalies('all')}
+                        disabled={maintBusy}
+                        className={classNames(
+                          'px-3 py-2 rounded text-xs font-bold border bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50',
+                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                        )}
+                      >
+                        CLEAR ALL
+                      </button>
+                    </div>
+                  </div>
+
+                  {maintMsg && <div className="text-xs text-zinc-400 font-mono">{maintMsg}</div>}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="p-4 rounded border border-[#27272a] bg-[#09090b]">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">Blocklists & DNS Runtime</div>
+
+                  <div className="mt-3 space-y-3">
+                    <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
+                      <div className="text-xs text-zinc-300 font-bold">Blocklists</div>
+                      <div className="text-[11px] text-zinc-500 mt-1">Manually refresh enabled blocklists now.</div>
+                      <div className="mt-3">
+                        <button
+                          onClick={refreshEnabledBlocklistsNow}
+                          disabled={maintBusy}
+                          className={classNames(
+                            'px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2',
+                            maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          )}
+                        >
+                          {maintBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                          REFRESH ENABLED BLOCKLISTS
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
+                      <div className="text-xs text-zinc-300 font-bold">Resolver (Unbound)</div>
+                      <div className="text-[11px] text-zinc-500 mt-1">In single-container mode this uses Supervisor to control Unbound.</div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => restartResolver('reload')}
+                          disabled={maintBusy}
+                          className={classNames(
+                            'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
+                            maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          )}
+                        >
+                          RELOAD CONFIG
+                        </button>
+                        <button
+                          onClick={() => restartResolver('restart')}
+                          disabled={maintBusy}
+                          className={classNames(
+                            'px-3 py-2 rounded text-xs font-bold border bg-amber-950/30 border-amber-900/50 text-amber-300 hover:bg-amber-950/50',
+                            maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          )}
+                        >
+                          RESTART (CLEARS CACHE)
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded border border-[#27272a] bg-[#09090b]">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">Export / Import</div>
+
+                  <div className="mt-3 space-y-3">
+                    <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
+                      <div className="text-xs text-zinc-300 font-bold">Export</div>
+                      <div className="text-[11px] text-zinc-500 mt-1">Downloads settings, rules, clients and blocklists (no secrets).</div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() =>
+                            downloadJson(
+                              '/api/maintenance/export?download=true',
+                              `sentinel-export-${new Date().toISOString().slice(0, 10)}.json`
+                            )
+                          }
+                          disabled={maintBusy}
+                          className={classNames(
+                            'px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2',
+                            maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          )}
+                        >
+                          <Copy className="w-3.5 h-3.5" /> DOWNLOAD EXPORT
+                        </button>
+                        <button
+                          onClick={() =>
+                            downloadJson(
+                              '/api/maintenance/diagnostics?download=true',
+                              `sentinel-diagnostics-${new Date().toISOString().slice(0, 10)}.json`
+                            )
+                          }
+                          disabled={maintBusy}
+                          className={classNames(
+                            'px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2',
+                            maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          )}
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" /> DOWNLOAD DIAGNOSTICS
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
+                      <div className="text-xs text-zinc-300 font-bold">Import</div>
+                      <div className="text-[11px] text-zinc-500 mt-1">Uploads a previous export. Dry-run first, then apply (safe upsert; no deletes).</div>
+
+                      <div className="mt-3">
+                        <input
+                          ref={importFileInputRef}
+                          type="file"
+                          accept="application/json"
+                          disabled={importBusy || maintBusy}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            void onImportFileSelected(file);
+                            // Allow selecting the same file again.
+                            e.currentTarget.value = '';
+                          }}
+                          className="hidden"
+                        />
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            onClick={() => importFileInputRef.current?.click()}
+                            disabled={importBusy || maintBusy}
+                            className={classNames(
+                              'px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2',
+                              importBusy || maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                            )}
+                          >
+                            <Upload className="w-3.5 h-3.5" /> CHOOSE FILE
+                          </button>
+
+                          <div className="text-xs font-mono text-zinc-500 truncate max-w-[340px]">
+                            {importFileName ? `Selected: ${importFileName}` : 'No file selected.'}
+                          </div>
+
+                          {importFileName ? (
+                            <button
+                              onClick={() => {
+                                if (importBusy || maintBusy) return;
+                                setImportMsg('');
+                                setImportSummary(null);
+                                setImportPayload(null);
+                                setImportFileName('');
+                                if (importFileInputRef.current) importFileInputRef.current.value = '';
+                              }}
+                              disabled={importBusy || maintBusy}
+                              className={classNames(
+                                'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
+                                importBusy || maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                              )}
+                            >
+                              CLEAR
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {importMsg ? <div className="mt-2 text-xs text-zinc-400">{importMsg}</div> : null}
+
+                      {importSummary ? (
+                        <div className="mt-3 p-3 rounded border border-[#27272a] bg-[#09090b]">
+                          <div className="text-[10px] uppercase font-bold text-zinc-500">Dry-run summary</div>
+                          <pre className="mt-2 text-[10px] text-zinc-300 font-mono whitespace-pre-wrap">{JSON.stringify(importSummary, null, 2)}</pre>
+                          <div className="mt-3 flex items-center gap-2">
+                            <button
+                              onClick={applyImport}
+                              disabled={importBusy || maintBusy || !importPayload}
+                              className={classNames(
+                                'px-4 py-2 rounded text-xs font-bold border flex items-center gap-2',
+                                importBusy || maintBusy
+                                  ? 'opacity-50 cursor-not-allowed bg-[#18181b] border-[#27272a] text-zinc-400'
+                                  : 'bg-emerald-950/30 border-emerald-900/50 text-emerald-300 hover:bg-emerald-950/50'
+                              )}
+                            >
+                              {importBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                              APPLY IMPORT
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         </div>
-      </div>
+        </div>
+
+        <ConfirmModal
+          open={confirmOpen}
+          title={confirmTitle}
+          subtitle={confirmSubtitle}
+          body={confirmBody}
+          confirmText={confirmConfirmText}
+          busyText={confirmBusyText}
+          variant={confirmVariant}
+          busy={modalBusy}
+          onCancel={closeConfirm}
+          onConfirm={() => void runConfirm()}
+          message={maintMsg || importMsg ? (maintMsg ? maintMsg : importMsg) : null}
+        />
     </div>
   );
 };

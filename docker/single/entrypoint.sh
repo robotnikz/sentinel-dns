@@ -1,6 +1,66 @@
 #!/bin/sh
 set -eu
 
+dns_probe() {
+  # Returns 0 if we can resolve at least one well-known public hostname.
+  # Use getent if available (Debian base), otherwise fall back to ping.
+  if command -v getent >/dev/null 2>&1; then
+    getent ahostsv4 cloudflare-dns.com >/dev/null 2>&1 && return 0
+    getent ahostsv4 dns.google >/dev/null 2>&1 && return 0
+    return 1
+  fi
+
+  if command -v ping >/dev/null 2>&1; then
+    ping -c 1 -W 2 cloudflare-dns.com >/dev/null 2>&1 && return 0
+    ping -c 1 -W 2 dns.google >/dev/null 2>&1 && return 0
+    return 1
+  fi
+
+  return 1
+}
+
+maybe_bootstrap_resolv_conf() {
+  # Some homelab setups point the Docker host/VM DNS back to this container.
+  # After a restart, Docker's internal DNS (127.0.0.11) can loop and break
+  # outbound name resolution needed for DoH/DoT upstream hostnames.
+  #
+  # If DNS works, do nothing.
+  dns_probe && return 0
+
+  if [ ! -r /etc/resolv.conf ]; then
+    return 0
+  fi
+
+  if ! grep -qE '^nameserver\s+127\.0\.0\.11\b' /etc/resolv.conf; then
+    return 0
+  fi
+
+  BOOTSTRAP_DNS_SERVERS="${BOOTSTRAP_DNS_SERVERS:-1.1.1.1 8.8.8.8}"
+  echo "[entrypoint] outbound DNS probe failed; bootstrapping /etc/resolv.conf with: $BOOTSTRAP_DNS_SERVERS" >&2
+
+  tmp="$(mktemp)"
+  for server in $BOOTSTRAP_DNS_SERVERS; do
+    echo "nameserver $server" >> "$tmp"
+  done
+  # Preserve search/options lines (useful in some LANs)
+  grep -E '^(search|options)\b' /etc/resolv.conf >> "$tmp" 2>/dev/null || true
+
+  if cat "$tmp" > /etc/resolv.conf 2>/dev/null; then
+    rm -f "$tmp"
+    # Best-effort re-probe for logging only
+    if dns_probe; then
+      echo "[entrypoint] outbound DNS bootstrap succeeded." >&2
+    else
+      echo "[entrypoint] outbound DNS bootstrap attempted, but DNS probe still fails." >&2
+    fi
+  else
+    rm -f "$tmp"
+    echo "[entrypoint] failed to update /etc/resolv.conf (read-only or restricted)." >&2
+  fi
+}
+
+maybe_bootstrap_resolv_conf || true
+
 DATA_DIR=/data
 PG_DIR="$DATA_DIR/postgres"
 SENTINEL_DIR="$DATA_DIR/sentinel"

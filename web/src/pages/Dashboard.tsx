@@ -9,6 +9,7 @@ import { analyzeDomain } from '../services/geminiService';
 import { DnsQuery, QueryStatus, type Anomaly, type ChartDataPoint } from '../types';
 import { useRules } from '../contexts/RulesContext';
 import { useClients } from '../contexts/ClientsContext';
+import { apiFetch } from '../services/apiClient';
 
 const IGNORED_ANOMALY_KEY = 'sentinel_ignored_anomaly_signatures';
 
@@ -163,29 +164,73 @@ const Dashboard: React.FC = () => {
   }, []);
 
   const loadIgnoredSignatures = () => {
+    void (async () => {
+      try {
+        const res = await apiFetch('/api/suspicious/ignored');
+        if (res.ok) {
+          const data = await res.json();
+          const items = Array.isArray((data as any)?.items) ? (data as any).items : [];
+          setIgnoredSignatures(
+            items
+              .map((it: any) => String(it?.signature ?? '').trim())
+              .filter((s: string) => Boolean(s))
+          );
+          return;
+        }
+      } catch {
+        // ignore
+      }
+
+      // Fallback to legacy localStorage.
+      try {
+        const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed)) {
+          setIgnoredSignatures(parsed.filter((s) => typeof s === 'string'));
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  };
+
+  const migrateLegacyIgnoredSignatures = async () => {
     try {
       const raw = localStorage.getItem(IGNORED_ANOMALY_KEY);
       const parsed = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) {
-        setIgnoredSignatures(parsed.filter((s) => typeof s === 'string'));
+      if (!Array.isArray(parsed) || parsed.length === 0) return;
+
+      const sigs = parsed.map((s: any) => (typeof s === 'string' ? s.trim() : '')).filter(Boolean);
+      if (sigs.length === 0) return;
+
+      for (const signature of sigs) {
+        try {
+          await apiFetch('/api/suspicious/ignored', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ signature })
+          });
+        } catch {
+          // ignore
+        }
       }
+
+      localStorage.removeItem(IGNORED_ANOMALY_KEY);
     } catch {
       // ignore
     }
   };
 
   useEffect(() => {
-    loadIgnoredSignatures();
+    void (async () => {
+      await migrateLegacyIgnoredSignatures();
+      loadIgnoredSignatures();
+    })();
 
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === IGNORED_ANOMALY_KEY) loadIgnoredSignatures();
-    };
     const onIgnored = () => loadIgnoredSignatures();
 
-    window.addEventListener('storage', onStorage);
     window.addEventListener('sentinel:ignored-anomalies', onIgnored as any);
     return () => {
-      window.removeEventListener('storage', onStorage);
       window.removeEventListener('sentinel:ignored-anomalies', onIgnored as any);
     };
   }, []);
@@ -205,15 +250,14 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     Promise.all([
-      fetch('/api/metrics/summary?hours=24').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/metrics/top-domains?hours=24&limit=20').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/metrics/top-blocked?hours=24&limit=20').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/geo/countries?hours=24&limit=40').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch('/api/query-logs?limit=500').then((r) => (r.ok ? r.json() : null)).catch(() => null)
+      apiFetch('/api/metrics/summary?hours=24', { signal: controller.signal }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      apiFetch('/api/geo/countries?hours=24&limit=40', { signal: controller.signal }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      apiFetch('/api/query-logs?limit=500', { signal: controller.signal }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
     ])
-      .then(([summaryRes, topRes, blockedRes, geoRes, logsRes]) => {
+      .then(([summaryRes, geoRes, logsRes]) => {
         if (cancelled) return;
 
         if (summaryRes && typeof summaryRes === 'object') {
@@ -225,21 +269,6 @@ const Dashboard: React.FC = () => {
         } else {
           setSummary(null);
         }
-
-        const blockedItemsRaw = Array.isArray(blockedRes?.items) ? blockedRes.items : [];
-        const blockedItems = blockedItemsRaw
-          .filter((r: any) => typeof r?.domain === 'string')
-          .map((r: any) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }));
-        setBlockedTargets(computePct(blockedItems));
-
-        const blockedSet = new Set(blockedItems.map((b) => b.domain.trim().toLowerCase()).filter(Boolean));
-
-        const topItemsRaw = Array.isArray(topRes?.items) ? topRes.items : [];
-        const topItems = topItemsRaw
-          .filter((r: any) => typeof r?.domain === 'string')
-          .map((r: any) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }))
-          .filter((r) => !blockedSet.has(r.domain.trim().toLowerCase()));
-        setTopDomains(computePct(topItems));
 
         if (geoRes && typeof geoRes === 'object') {
           const items = Array.isArray((geoRes as any).items) ? (geoRes as any).items : [];
@@ -272,8 +301,6 @@ const Dashboard: React.FC = () => {
       .catch(() => {
         if (cancelled) return;
         setSummary(null);
-        setTopDomains([]);
-        setBlockedTargets([]);
           setGeoData([]);
           setGeoStatus(null);
           setGeoPoints([]);
@@ -282,13 +309,57 @@ const Dashboard: React.FC = () => {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
-    fetch(`/api/metrics/timeseries?hours=${encodeURIComponent(String(trafficWindowHours))}`)
+    Promise.all([
+      apiFetch(`/api/metrics/top-domains?hours=${encodeURIComponent(String(trafficWindowHours))}&limit=20&excludeUpstreams=1`, { signal: controller.signal })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+      apiFetch(`/api/metrics/top-blocked?hours=${encodeURIComponent(String(trafficWindowHours))}&limit=20`, { signal: controller.signal })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null)
+    ])
+      .then(([topRes, blockedRes]) => {
+        if (cancelled) return;
+
+        const blockedItemsRaw = Array.isArray(blockedRes?.items) ? blockedRes.items : [];
+        const blockedItems = blockedItemsRaw
+          .filter((r: any) => typeof r?.domain === 'string')
+          .map((r: any) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }));
+        setBlockedTargets(computePct(blockedItems));
+
+        const blockedSet = new Set(blockedItems.map((b) => b.domain.trim().toLowerCase()).filter(Boolean));
+
+        const topItemsRaw = Array.isArray(topRes?.items) ? topRes.items : [];
+        const topItems = topItemsRaw
+          .filter((r: any) => typeof r?.domain === 'string')
+          .map((r: any) => ({ domain: String(r.domain), count: Number(r.count ?? 0) }))
+          .filter((r) => !blockedSet.has(r.domain.trim().toLowerCase()));
+        setTopDomains(computePct(topItems));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTopDomains([]);
+        setBlockedTargets([]);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [trafficWindowHours]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    apiFetch(`/api/metrics/timeseries?hours=${encodeURIComponent(String(trafficWindowHours))}`, { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((tsRes) => {
         if (cancelled) return;
@@ -310,6 +381,7 @@ const Dashboard: React.FC = () => {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [trafficWindowHours]);
 
@@ -396,19 +468,21 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleIgnoreAnomaly = () => {
+  const handleIgnoreAnomaly = async () => {
     if (!selectedAnomaly) return;
     const sig = signatureForAnomaly(selectedAnomaly);
 
-    const next = Array.from(new Set([...ignoredSignatures, sig]));
-    setIgnoredSignatures(next);
     try {
-      localStorage.setItem(IGNORED_ANOMALY_KEY, JSON.stringify(next));
+      await apiFetch('/api/suspicious/ignored', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signature: sig })
+      });
     } catch {
       // ignore
     }
+    loadIgnoredSignatures();
     window.dispatchEvent(new CustomEvent('sentinel:ignored-anomalies'));
-
     setSelectedAnomaly(null);
   };
 
@@ -874,17 +948,17 @@ const Dashboard: React.FC = () => {
             <div className="p-4 border-t border-[#27272a] bg-[#121214] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <button
                 onClick={handleIgnoreAnomaly}
-                className="h-9 px-4 rounded text-xs font-bold whitespace-nowrap inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-zinc-300 border border-[#27272a] bg-[#09090b]/40 hover:bg-[#18181b] transition-all"
+                className="h-9 w-full sm:w-auto px-4 rounded text-xs font-bold inline-flex items-center justify-center gap-2 text-zinc-500 hover:text-zinc-300 border border-[#27272a] bg-[#09090b]/40 hover:bg-[#18181b] transition-all"
                 title="Permanently ignore alerts for this issue on this device"
               >
                 <EyeOff className="w-3.5 h-3.5" />
                 IGNORE ALERT
               </button>
 
-              <div className="flex flex-wrap sm:flex-nowrap gap-2 sm:justify-end">
+              <div className="flex flex-col sm:flex-row w-full sm:w-auto gap-2 sm:justify-end">
                 <button
                   onClick={handleOpenInLogs}
-                  className="h-9 px-4 rounded whitespace-nowrap inline-flex items-center justify-center gap-2 bg-[#18181b] hover:bg-[#1f1f22] text-zinc-200 border border-[#27272a] transition-all text-xs font-bold"
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center gap-2 bg-[#18181b] hover:bg-[#1f1f22] text-zinc-200 border border-[#27272a] transition-all text-xs font-bold"
                   title="Open Query Inspector with filters"
                 >
                   <Info className="w-3.5 h-3.5" />
@@ -892,13 +966,13 @@ const Dashboard: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setSelectedAnomaly(null)}
-                  className="h-9 px-4 rounded whitespace-nowrap inline-flex items-center justify-center bg-[#09090b]/40 hover:bg-[#18181b] text-zinc-300 border border-[#27272a] transition-all text-xs font-bold"
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center bg-[#09090b]/40 hover:bg-[#18181b] text-zinc-300 border border-[#27272a] transition-all text-xs font-bold"
                 >
                   DISMISS
                 </button>
                 <button
                   onClick={handleBlockFromAnomaly}
-                  className="h-9 px-4 rounded whitespace-nowrap inline-flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold"
+                  className="h-9 w-full sm:w-auto px-4 rounded inline-flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-900/20 transition-all text-xs font-bold"
                 >
                   <XCircle className="w-3.5 h-3.5" />
                   BLOCK DOMAIN

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { generateSessionId, getAdminCookieName, hashSessionId, isAdmin, requireAdmin } from '../auth.js';
 import { hashPassword, verifyPassword, type PasswordHashRecord } from '../authPassword.js';
@@ -14,8 +15,6 @@ const cookieOptionsBase = {
 };
 
 function isHttps(request: FastifyRequest): boolean {
-  const xf = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0].trim().toLowerCase();
-  if (xf === 'https') return true;
   const proto = (request as any).protocol as string | undefined;
   return proto === 'https';
 }
@@ -25,6 +24,7 @@ function cookieOptionsFor(request: FastifyRequest) {
 }
 
 export async function registerAuthRoutes(app: FastifyInstance, _config: unknown, db: Db): Promise<void> {
+  void (_config as AppConfig);
   app.get(
     '/api/auth/status',
     {

@@ -57,6 +57,14 @@ describe('integration: metrics + geo routes', () => {
       mkEntry({ domain: 'blocked-noip.test', status: 'BLOCKED', answerIps: [], type: 'A' })
     ]);
 
+    // Seed a couple of well-known upstream-style domains that may appear due to DoH/DoT host resolution.
+    await pool.query('INSERT INTO query_logs(entry) VALUES ($1), ($2), ($3), ($4)', [
+      mkEntry({ domain: 'security.cloudflare-dns.com', status: 'PERMITTED', clientIp: '192.168.1.10' }),
+      mkEntry({ domain: 'cloudflare-dns.com', status: 'PERMITTED', clientIp: '192.168.1.10' }),
+      mkEntry({ domain: 'dns.google', status: 'PERMITTED', clientIp: '192.168.1.10' }),
+      mkEntry({ domain: 'ok.test', status: 'PERMITTED', clientIp: '192.168.1.10' })
+    ]);
+
     // Geo: successful lookup with no IP answers but non-A type
     await pool.query('INSERT INTO query_logs(entry) VALUES ($1)', [
       mkEntry({ domain: 'https-record.test', status: 'PERMITTED', answerIps: [], type: 'HTTPS' })
@@ -107,6 +115,41 @@ describe('integration: metrics + geo routes', () => {
     expect(blockedItems.some((r: any) => r.domain === 'ads.test')).toBe(true);
   });
 
+  it('GET /api/metrics/top-domains can exclude configured upstream domains', async () => {
+    if (!dockerOk) return;
+
+    // Pretend our upstream resolver is a subdomain; resolution can also touch its parent/CNAME target.
+    await pool?.query(
+      `INSERT INTO settings(key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [
+        'dns_settings',
+        {
+          upstreamMode: 'forward',
+          forward: {
+            transport: 'dot',
+            host: 'security.cloudflare-dns.com',
+            port: 853
+          }
+        }
+      ]
+    );
+
+    const top = await app.inject({
+      method: 'GET',
+      url: '/api/metrics/top-domains?hours=24&limit=10&excludeUpstreams=1',
+      headers: { cookie }
+    });
+    expect(top.statusCode).toBe(200);
+
+    const topItems = Array.isArray(top.json()?.items) ? top.json().items : [];
+    expect(topItems.length).toBeGreaterThan(0);
+    expect(topItems.some((r: any) => r.domain === 'security.cloudflare-dns.com')).toBe(false);
+    expect(topItems.some((r: any) => r.domain === 'cloudflare-dns.com')).toBe(false);
+    expect(topItems.some((r: any) => r.domain === 'dns.google')).toBe(false);
+    expect(topItems.some((r: any) => r.domain === 'ok.test')).toBe(true);
+  });
+
   it('GET /api/metrics/clients and client-detail return expected shapes', async () => {
     if (!dockerOk) return;
 
@@ -129,16 +172,26 @@ describe('integration: metrics + geo routes', () => {
     expect(detail.json()).toHaveProperty('topBlocked');
   });
 
-  it('GET /api/metrics/timeseries returns hour buckets', async () => {
+  it('GET /api/metrics/timeseries returns window-appropriate buckets', async () => {
     if (!dockerOk) return;
 
     const res = await app.inject({ method: 'GET', url: '/api/metrics/timeseries?hours=1', headers: { cookie } });
     expect(res.statusCode).toBe(200);
     const items = Array.isArray(res.json()?.items) ? res.json().items : [];
-    expect(items.length).toBeGreaterThan(0);
+    // 1h uses 5-minute buckets -> should be notably more than a handful.
+    expect(items.length).toBeGreaterThanOrEqual(10);
     expect(items[0]).toHaveProperty('ts');
     expect(items[0]).toHaveProperty('queries');
     expect(items[0]).toHaveProperty('ads');
+
+    // Ensure bucket step is 5 minutes (best-effort: only if we have at least 2 points).
+    if (items.length >= 2) {
+      const a = Date.parse(items[0].ts);
+      const b = Date.parse(items[1].ts);
+      expect(Number.isFinite(a)).toBe(true);
+      expect(Number.isFinite(b)).toBe(true);
+      expect(b - a).toBe(5 * 60 * 1000);
+    }
   });
 
   it('GET /api/geo/countries classifies missing IPs and GeoIP-not-configured', async () => {

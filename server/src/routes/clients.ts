@@ -76,6 +76,20 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
         }
       }
 
+      // Prevent ambiguous matching: only one non-subnet client should own a given IP.
+      const ip = typeof (profile as any).ip === 'string' ? String((profile as any).ip).trim() : '';
+      if (ip && profile.type !== 'subnet') {
+        await db.pool.query(
+          `
+          DELETE FROM clients
+          WHERE id <> $1
+            AND profile->>'ip' = $2
+            AND COALESCE(profile->>'type', '') <> 'subnet'
+          `,
+          [id, ip]
+        );
+      }
+
       const res = await db.pool.query(
         `INSERT INTO clients(id, profile, updated_at)
          VALUES ($1, $2, NOW())
@@ -100,11 +114,48 @@ export async function registerClientsRoutes(app: FastifyInstance, config: AppCon
       await requireAdmin(db, request);
 
       const { id } = request.params;
-      const res = await db.pool.query('DELETE FROM clients WHERE id = $1', [id]);
 
-      if (res.rowCount === 0) {
-        reply.code(404);
-        return { error: 'NOT_FOUND' };
+      const escapeLike = (v: string): string => String(v ?? '').replace(/[\\%_]/g, (m) => `\\${m}`);
+      const escapedId = escapeLike(id);
+      const clientExact = `Client:${id}`;
+      const clientPrefix = `Client:${escapedId}:%`;
+      const subnetExact = `Subnet:${id}`;
+      const subnetPrefix = `Subnet:${escapedId}:%`;
+
+      const conn = await db.pool.connect();
+      try {
+        await conn.query('BEGIN');
+
+        // Best-effort cleanup of any client/subnet-scoped rules so deleting a profile
+        // never leaves behind orphaned enforcement.
+        await conn.query(
+          `
+          DELETE FROM rules
+          WHERE category = $1
+             OR category LIKE $2 ESCAPE '\\'
+             OR category = $3
+             OR category LIKE $4 ESCAPE '\\'
+          `,
+          [clientExact, clientPrefix, subnetExact, subnetPrefix]
+        );
+
+        const res = await conn.query('DELETE FROM clients WHERE id = $1', [id]);
+        if (res.rowCount === 0) {
+          await conn.query('ROLLBACK');
+          reply.code(404);
+          return { error: 'NOT_FOUND' };
+        }
+
+        await conn.query('COMMIT');
+      } catch (e) {
+        try {
+          await conn.query('ROLLBACK');
+        } catch {
+          // ignore
+        }
+        throw e;
+      } finally {
+        conn.release();
       }
 
       reply.code(204);

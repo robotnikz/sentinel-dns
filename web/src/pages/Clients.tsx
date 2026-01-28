@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Smartphone, Laptop, Tv, Gamepad2, Tablet, Search, Shield, GlobeLock, X, Filter, Lock, Skull, Heart, MessageCircle, Play, ShoppingCart, Ban, Grid, HelpCircle, Info, Moon, Clock, Calendar, Check, Pause, ChevronDown, ChevronUp, WifiOff, Power, Youtube, Network, Router, Sliders, Plus, Save, Fingerprint, RefreshCw, Pencil, Trash2 } from 'lucide-react';
-import { ClientProfile, ContentCategory, AppService, ScheduleModeType, BlocklistMode } from '../types';
+import { ClientProfile, ContentCategory, AppService, ScheduleModeType, BlocklistMode, Schedule } from '../types';
 import { AppLogo } from '../components/AppLogo';
 import { useClients } from '../contexts/ClientsContext';
 import Modal from '../components/Modal';
@@ -25,6 +25,9 @@ const Clients: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [addMode, setAddMode] = useState<'manual' | 'scan'>('manual'); // New: Switch between manual and scan
     const [editingClient, setEditingClient] = useState<ClientProfile | null>(null);
+        const [clientToDelete, setClientToDelete] = useState<ClientProfile | null>(null);
+                const [scheduleToDelete, setScheduleToDelete] = useState<Schedule | null>(null);
+        const [addNodeError, setAddNodeError] = useState<string | null>(null);
 
     // Discovered clients (best-effort from DNS logs + optional reverse DNS)
     const [discovered, setDiscovered] = useState<Array<{ ip: string; hostname: string | null; lastSeen?: string | null }>>([]);
@@ -172,8 +175,7 @@ const Clients: React.FC = () => {
       adult: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/nsfw.txt'],
       gambling: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/gambling.txt'],
       social: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt'],
-      piracy: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt'],
-      dating: ['https://raw.githubusercontent.com/nextdns/services/main/services/tinder']
+      piracy: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt']
   };
 
   const APP_LIST_URLS: Partial<Record<AppService, string[]>> = {
@@ -284,7 +286,6 @@ const Clients: React.FC = () => {
     { id: 'adult', label: 'Pornography', icon: Lock },
     { id: 'gambling', label: 'Gambling', icon: Grid },
     { id: 'piracy', label: 'Piracy', icon: Skull },
-    { id: 'dating', label: 'Dating', icon: Heart },
     { id: 'social', label: 'Social Media', icon: MessageCircle },
     { id: 'crypto', label: 'Crypto', icon: Ban },
     { id: 'shopping', label: 'Shopping', icon: ShoppingCart },
@@ -422,6 +423,7 @@ const Clients: React.FC = () => {
   const openCreateModal = () => {
       setEditingClient(null);
       setAddMode('manual');
+      setAddNodeError(null);
       resetNewNodeData();
       setShowAddModal(true);
   };
@@ -430,6 +432,7 @@ const Clients: React.FC = () => {
       const isSubnet = client.isSubnet || client.type === 'subnet';
       setEditingClient(client);
       setAddMode('manual');
+      setAddNodeError(null);
       setActiveView(isSubnet ? 'networks' : 'devices');
       setNewNodeData({
           name: client.name || '',
@@ -445,15 +448,29 @@ const Clients: React.FC = () => {
       setShowAddModal(false);
       setEditingClient(null);
       setAddMode('manual');
+      setAddNodeError(null);
       resetNewNodeData();
   };
 
-    const handleAddNode = () => {
+    const handleAddNode = async () => {
       if(!newNodeData.name) return;
+      setAddNodeError(null);
 
       const isNetworkCreation = editingClient
           ? editingClient.isSubnet || editingClient.type === 'subnet'
           : activeView === 'networks';
+
+      const cidr = String(newNodeData.cidr ?? '').trim();
+      if (isNetworkCreation) {
+          if (!cidr) {
+              setAddNodeError('CIDR is required for network segments.');
+              return;
+          }
+          if (!cidr.includes('/')) {
+              setAddNodeError('CIDR must include a prefix length (e.g. 192.168.20.0/24).');
+              return;
+          }
+      }
 
       if (editingClient) {
           const updatedProfile: ClientProfile = {
@@ -461,22 +478,31 @@ const Clients: React.FC = () => {
               name: newNodeData.name,
               type: isNetworkCreation ? 'subnet' : (newNodeData.deviceIcon as any),
               isSubnet: isNetworkCreation,
-              cidr: isNetworkCreation ? newNodeData.cidr : undefined,
+              cidr: isNetworkCreation ? cidr : undefined,
               mac: !isNetworkCreation ? newNodeData.mac : undefined,
               ip: !isNetworkCreation ? newNodeData.ip : undefined
           };
-          void updateClient(updatedProfile);
+
+          const ok = await updateClient(updatedProfile);
+          if (!ok) {
+              setAddNodeError('Save failed. Please check your inputs (CIDR format) and permissions.');
+              return;
+          }
+
           closeAddModal();
           return;
       }
 
+      const idPrefix = isNetworkCreation ? 's-' : 'c-';
+      const id = `${idPrefix}${Date.now()}`;
+
       const newProfile: ClientProfile = {
-          id: Date.now().toString(),
+          id,
           name: newNodeData.name,
           type: isNetworkCreation ? 'subnet' : newNodeData.deviceIcon as any,
           isSubnet: isNetworkCreation,
           // Network Fields
-          cidr: isNetworkCreation ? newNodeData.cidr : undefined,
+          cidr: isNetworkCreation ? cidr : undefined,
           // Device Fields
           mac: !isNetworkCreation ? newNodeData.mac : undefined,
           ip: !isNetworkCreation ? newNodeData.ip : undefined,
@@ -495,16 +521,45 @@ const Clients: React.FC = () => {
       };
 
       // Best-effort persist; show feedback in the modal when editing, not on creation.
-      void addClient(newProfile);
+      const ok = await addClient(newProfile);
+      if (!ok) {
+          setAddNodeError('Create failed. Please check your inputs (CIDR format) and permissions.');
+          return;
+      }
+
       closeAddModal();
   };
 
   const handleDeleteClient = (client: ClientProfile) => {
-      if (!window.confirm(`Delete ${client.name}?`)) return;
-      void removeClient(client.id);
-      if (selectedClient?.id === client.id) {
-          setSelectedClient(null);
-      }
+      setClientToDelete(client);
+  };
+
+  const confirmDeleteClient = () => {
+      if (!clientToDelete) return;
+
+      const id = clientToDelete.id;
+      const wasSelected = selectedClient?.id === id;
+
+      const seq = ++saveSeqRef.current;
+      setClientSaveMsg('Deleting…');
+      void removeClient(id).then((ok) => {
+          if (seq !== saveSeqRef.current) return;
+          setClientSaveMsg(ok ? 'Deleted' : 'Delete failed');
+          if (ok && wasSelected) setSelectedClient(null);
+      });
+
+      setClientToDelete(null);
+  };
+
+  const confirmDeleteSchedule = () => {
+      if (!selectedClient || !scheduleToDelete) return;
+
+      const scheduleId = scheduleToDelete.id;
+      const updatedSchedules = selectedClient.schedules.filter((s) => s.id !== scheduleId);
+      if (editingScheduleId === scheduleId) setEditingScheduleId(null);
+
+      handleUpdateClient({ ...selectedClient, schedules: updatedSchedules });
+      setScheduleToDelete(null);
   };
 
   // Wrapper for updating client that updates both local view state and global state
@@ -812,7 +867,7 @@ const Clients: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+        <div className={`space-y-6 animate-fade-in ${selectedClient ? 'xl:pr-[520px]' : ''}`}>
       {/* Header & Controls */}
       <div className="flex flex-col gap-6">
         <div className="flex justify-between items-end">
@@ -994,6 +1049,12 @@ const Clients: React.FC = () => {
                                             <button onClick={closeAddModal} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
                   </div>
                   <div className="p-6 space-y-4">
+
+                      {addNodeError && (
+                          <div className="text-xs text-rose-300 bg-rose-950/20 border border-rose-800/30 rounded px-3 py-2">
+                              {addNodeError}
+                          </div>
+                      )}
                       
                       {/* Name Field (Common) */}
                       <div>
@@ -1161,7 +1222,7 @@ const Clients: React.FC = () => {
                   <div className="p-5 border-t border-[#27272a] bg-[#121214] flex justify-end gap-3">
                       <button onClick={closeAddModal} className="px-4 py-2 rounded text-xs font-bold text-zinc-400 hover:text-white">CANCEL</button>
                       <button 
-                        onClick={handleAddNode}
+                        onClick={() => void handleAddNode()}
                                                 disabled={!newNodeData.name || (activeView === 'networks' && !newNodeData.cidr.trim())}
                         className="btn-primary px-6 py-2 rounded text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
@@ -1171,10 +1232,19 @@ const Clients: React.FC = () => {
               </div>
       </Modal>
 
-      {/* DETAIL SIDEBAR MODAL (Simplified for brevity - logic remains same but using handleUpdateClient) */}
-        {selectedClient && (
-            <Modal open={true} onClose={() => setSelectedClient(null)} zIndex={1100}>
-                <div className={`w-full max-w-5xl h-[85vh] max-h-[calc(100vh-2rem)] flex flex-col rounded-lg overflow-hidden shadow-2xl bg-[#09090b] relative border animate-fade-in ${selectedClient.isInternetPaused ? 'border-rose-900' : 'border-[#27272a]'}`}>
+            {/* CLIENT/NETWORK DETAILS POPUP (center modal) */}
+            <Modal
+                open={!!selectedClient}
+                onClose={() => setSelectedClient(null)}
+                zIndex={1100}
+            >
+                {selectedClient ? (
+                    <div
+                        className={`w-full max-w-5xl max-h-[90vh] rounded-xl overflow-hidden shadow-2xl bg-[#09090b] border ${
+                            selectedClient.isInternetPaused ? 'border-rose-900' : 'border-[#27272a]'
+                        }`}
+                    >
+                    <div className="h-full max-h-[90vh] flex flex-col overflow-hidden">
                     {/* Header */}
                     <div className="p-5 border-b border-[#27272a] bg-[#121214] flex items-start justify-between gap-6">
                         <div className="flex items-start gap-4 min-w-0">
@@ -1490,11 +1560,29 @@ const Clients: React.FC = () => {
                                                   onChange={(e) => updateScheduleFields(schedule.id, { name: e.target.value })}
                                                   className="bg-transparent border border-transparent focus:border-[#27272a] rounded px-2 py-1 text-sm font-bold text-zinc-200 w-full"
                                               />
-                                              <div
-                                                  onClick={() => toggleScheduleActive(schedule.id)}
-                                                  className={`w-10 h-5 rounded-full relative cursor-pointer transition-colors flex-shrink-0 ${schedule.active ? 'bg-emerald-600' : 'bg-zinc-700'}`}
-                                              >
-                                                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${schedule.active ? 'right-0.5' : 'left-0.5'}`}></div>
+                                              <div className="flex items-center gap-1 flex-shrink-0">
+                                                  <button
+                                                      onClick={() => setEditingScheduleId((prev) => (prev === schedule.id ? null : schedule.id))}
+                                                      className="p-1.5 rounded text-zinc-500 hover:text-white hover:bg-[#18181b]"
+                                                      title="Edit schedule"
+                                                      aria-label={`Edit schedule ${schedule.name}`}
+                                                  >
+                                                      <Pencil className="w-3.5 h-3.5" />
+                                                  </button>
+                                                  <button
+                                                      onClick={() => setScheduleToDelete(schedule)}
+                                                      className="p-1.5 rounded text-zinc-500 hover:text-rose-300 hover:bg-[#18181b]"
+                                                      title="Delete schedule"
+                                                      aria-label={`Delete schedule ${schedule.name}`}
+                                                  >
+                                                      <Trash2 className="w-3.5 h-3.5" />
+                                                  </button>
+                                                  <div
+                                                      onClick={() => toggleScheduleActive(schedule.id)}
+                                                      className={`w-10 h-5 rounded-full relative cursor-pointer transition-colors flex-shrink-0 ${schedule.active ? 'bg-emerald-600' : 'bg-zinc-700'}`}
+                                                  >
+                                                      <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${schedule.active ? 'right-0.5' : 'left-0.5'}`}></div>
+                                                  </div>
                                               </div>
                                           </div>
 
@@ -1588,8 +1676,87 @@ const Clients: React.FC = () => {
                              </div>
                          )}
                     </div>
+                    </div>
                 </div>
+                ) : null}
             </Modal>
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {clientToDelete && (
+          <Modal open={true} onClose={() => setClientToDelete(null)} zIndex={1200}>
+              <div className="w-full max-w-md bg-[#09090b] border border-[#27272a] rounded-lg overflow-hidden shadow-2xl animate-fade-in">
+                  <div className="p-5 border-b border-[#27272a] flex justify-between items-center bg-[#121214]">
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                          <Trash2 className="w-4 h-4 text-rose-500" />
+                          Delete Client
+                      </h3>
+                      <button onClick={() => setClientToDelete(null)} className="text-zinc-500 hover:text-white" aria-label="Close">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  <div className="p-6 space-y-3">
+                      <div className="text-sm text-zinc-200">
+                          Delete <span className="font-bold">{clientToDelete.name}</span>?
+                      </div>
+                      <div className="text-xs text-zinc-500">
+                          This removes the client profile and its policy overrides. DNS logs remain unchanged.
+                      </div>
+                  </div>
+                  <div className="p-5 border-t border-[#27272a] bg-[#121214] flex flex-col sm:flex-row justify-end gap-3">
+                      <button
+                          onClick={() => setClientToDelete(null)}
+                          className="px-4 py-2 rounded text-xs font-bold text-zinc-400 hover:text-white"
+                      >
+                          CANCEL
+                      </button>
+                      <button
+                          onClick={confirmDeleteClient}
+                          className="px-6 py-2 rounded text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white"
+                      >
+                          DELETE
+                      </button>
+                  </div>
+              </div>
+          </Modal>
+      )}
+
+      {/* DELETE SCHEDULE CONFIRMATION MODAL */}
+      {scheduleToDelete && selectedClient && (
+          <Modal open={true} onClose={() => setScheduleToDelete(null)} zIndex={1200}>
+              <div className="w-full max-w-md bg-[#09090b] border border-[#27272a] rounded-lg overflow-hidden shadow-2xl animate-fade-in">
+                  <div className="p-5 border-b border-[#27272a] flex justify-between items-center bg-[#121214]">
+                      <h3 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                          <Trash2 className="w-4 h-4 text-rose-500" />
+                          Delete Schedule
+                      </h3>
+                      <button onClick={() => setScheduleToDelete(null)} className="text-zinc-500 hover:text-white" aria-label="Close">
+                          <X className="w-5 h-5" />
+                      </button>
+                  </div>
+                  <div className="p-6 space-y-3">
+                      <div className="text-sm text-zinc-200">
+                          Delete <span className="font-bold">{scheduleToDelete.name}</span>?
+                      </div>
+                      <div className="text-xs text-zinc-500">
+                          This removes the schedule from <span className="font-bold">{selectedClient.name}</span>. You can recreate it anytime.
+                      </div>
+                  </div>
+                  <div className="p-5 border-t border-[#27272a] bg-[#121214] flex flex-col sm:flex-row justify-end gap-3">
+                      <button
+                          onClick={() => setScheduleToDelete(null)}
+                          className="px-4 py-2 rounded text-xs font-bold text-zinc-400 hover:text-white"
+                      >
+                          CANCEL
+                      </button>
+                      <button
+                          onClick={confirmDeleteSchedule}
+                          className="px-6 py-2 rounded text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white"
+                      >
+                          DELETE
+                      </button>
+                  </div>
+              </div>
+          </Modal>
       )}
     </div>
   );

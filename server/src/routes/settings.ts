@@ -28,6 +28,14 @@ export async function registerSettingsRoutes(app: FastifyInstance, config: AppCo
       },
       preHandler: app.rateLimit(),
       schema: {
+        params: {
+          type: 'object',
+          required: ['key'],
+          additionalProperties: false,
+          properties: {
+            key: { type: 'string', minLength: 1, maxLength: 64, pattern: '^[a-z0-9_\-]+$' }
+          }
+        },
         body: {
           type: 'object'
         }

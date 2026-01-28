@@ -78,4 +78,18 @@ describe('integration: settings CRUD', () => {
     expect(row.value).toEqual(value);
     expect(typeof row.updated_at).toBe('string');
   });
+
+  it('rejects invalid settings key', async () => {
+    if (!dockerOk) return;
+
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/api/settings/bad$key',
+      headers: { cookie },
+      payload: { ok: true }
+    });
+
+    // Fastify schema validation
+    expect(put.statusCode).toBe(400);
+  });
 });

@@ -1,3 +1,181 @@
+## [0.6.5](https://github.com/robotnikz/sentinel-dns/compare/v0.6.4...v0.6.5) (2026-01-28)
+
+* Merge pull request #48 from robotnikz/fix/remove-dating-and-auditor-domaincheck ([](https://github.com/robotnikz/sentinel-dns/commit/faa745d1a48ed3dcb2142943a958418c7c9e1e71)), closes [#48](https://github.com/robotnikz/sentinel-dns/issues/48)
+
+### fix
+
+* remove dating category and improve policy auditing ([](https://github.com/robotnikz/sentinel-dns/commit/b693a9ab123abd06baa0e5dc5bb622aeaeceab97))
+
+## [0.6.4](https://github.com/robotnikz/sentinel-dns/compare/v0.6.3...v0.6.4) (2026-01-28)
+
+* Merge pull request #47 from robotnikz/fix/modal-client-network-settings ([](https://github.com/robotnikz/sentinel-dns/commit/8de6095760ace39eb47542820b29a1bea93500c1)), closes [#47](https://github.com/robotnikz/sentinel-dns/issues/47)
+
+### fix
+
+* restore modal settings + subnet create feedback ([](https://github.com/robotnikz/sentinel-dns/commit/d6cb5ac049bedd36ee53711ef78b6f649adc4096))
+
+## [0.6.3](https://github.com/robotnikz/sentinel-dns/compare/v0.6.2...v0.6.3) (2026-01-27)
+
+* Merge pull request #46 from robotnikz/fix/trigger-release ([](https://github.com/robotnikz/sentinel-dns/commit/c2fbc7d4b1e9f86546220f0aed665934790bd18e)), closes [#46](https://github.com/robotnikz/sentinel-dns/issues/46)
+
+### fix
+
+* **dns:** fix DoH IPv4-first lookup for undici ([](https://github.com/robotnikz/sentinel-dns/commit/6262ae640b9b21a84729abab7e61ed30519ded7d))
+* **release:** trigger patch release ([](https://github.com/robotnikz/sentinel-dns/commit/aad150889d9a9f24429ba5f98f1b2f79048ad3af))
+
+## [0.6.2](https://github.com/robotnikz/sentinel-dns/compare/v0.6.1...v0.6.2) (2026-01-27)
+
+* Merge pull request #45 from robotnikz/fix/dns-forward-timeouts ([](https://github.com/robotnikz/sentinel-dns/commit/80083934449881d512ce346eb0c99d97baa55daa)), closes [#45](https://github.com/robotnikz/sentinel-dns/issues/45)
+
+### fix
+
+* **dns:** default DoH prefer IPv4 with fallback ([](https://github.com/robotnikz/sentinel-dns/commit/917f62ae73b2687d74f58fc6305c69841a0b46d9))
+* **dns:** DoH keep-alive + optional IPv4 prefer ([](https://github.com/robotnikz/sentinel-dns/commit/23231a4a8950465055f264b2e3c1e3df1de5b455))
+* **dns:** prefer DoH over HTTP/1 ([](https://github.com/robotnikz/sentinel-dns/commit/bb2679f9c1cc275f5b22d1080e79166e0a148a69))
+
+## [0.6.1](https://github.com/robotnikz/sentinel-dns/compare/v0.6.0...v0.6.1) (2026-01-27)
+
+* Merge pull request #44 from robotnikz/fix/dns-forward-timeouts ([](https://github.com/robotnikz/sentinel-dns/commit/79893372d0bd5353db9731012d3c46c26d9d2729)), closes [#44](https://github.com/robotnikz/sentinel-dns/issues/44)
+
+### fix
+
+* **dns:** configurable forward timeouts ([](https://github.com/robotnikz/sentinel-dns/commit/fba135b8be8cacc738befa2b96e55dd600a4b7dd))
+* **dns:** default forward timeouts when missing ([](https://github.com/robotnikz/sentinel-dns/commit/e547639594efaf56ce8ef931465b55afd1361231))
+* **dns:** raise default DoH forward timeout ([](https://github.com/robotnikz/sentinel-dns/commit/17ff7a3d231db36473fca306264a45508c48c6b3))
+
+## [0.6.0](https://github.com/robotnikz/sentinel-dns/compare/v0.5.6...v0.6.0) (2026-01-27)
+
+* Merge pull request #43 from robotnikz/fix/dns-upstream-telemetry ([](https://github.com/robotnikz/sentinel-dns/commit/966810e6ff2a2520308bd00493d55a5d4bd744c7)), closes [#43](https://github.com/robotnikz/sentinel-dns/issues/43)
+
+### feat
+
+* **dns:** add upstream forward telemetry ([](https://github.com/robotnikz/sentinel-dns/commit/953c76e7e75ef7b5097397c87fd36d4f05df280c))
+* **server:** add maintenance endpoints ([](https://github.com/robotnikz/sentinel-dns/commit/51e079bb26edac8a288865aa0b938277fe232262))
+* **server:** add query logs flush endpoint ([](https://github.com/robotnikz/sentinel-dns/commit/245fd13e15d1136611475a3cfd497f3cc4730dea))
+* **web:** add maintenance settings UI ([](https://github.com/robotnikz/sentinel-dns/commit/e03144fe31cf61a037533106854c48e1a5d143ff))
+* **web:** add reusable modal components ([](https://github.com/robotnikz/sentinel-dns/commit/6b18b9338b7fe3791013df94bc9e951f11df6f6f))
+* **web:** slide-in client details sidebar ([](https://github.com/robotnikz/sentinel-dns/commit/738463df143f62c39ca1b354a22e937eaec239e2))
+* **web:** slide-in network map details panel ([](https://github.com/robotnikz/sentinel-dns/commit/207cff0c2bcac2bd98d617c2bfa8aef31dbdb8e9))
+
+### fix
+
+* **web:** allow deleting schedules ([](https://github.com/robotnikz/sentinel-dns/commit/149f5114a35212fe10886239e2ac78a9e259d40d))
+* **web:** avoid mixed dynamic import warning ([](https://github.com/robotnikz/sentinel-dns/commit/f53a96932af7c362be7767ca38cc05f418262aa1))
+* **web:** keep custom upstream resolvers on select ([](https://github.com/robotnikz/sentinel-dns/commit/746411835c6c4a715796f9cb03595913e15a6c32))
+* **web:** prevent custom upstream from disappearing on select ([](https://github.com/robotnikz/sentinel-dns/commit/0e5a97cc2f2b1bcc99d9ac08e2c1be4d033f4be0))
+
+### refactor
+
+* **web:** standardize query log modals ([](https://github.com/robotnikz/sentinel-dns/commit/e26727d3e99288fef46e5cdd1bac3af83a2c7753))
+
+### chore
+
+* **deploy:** add local compose override ([](https://github.com/robotnikz/sentinel-dns/commit/a02c0c705527d1332a9569616821d387281ffb68))
+
+## [0.5.6](https://github.com/robotnikz/sentinel-dns/compare/v0.5.5...v0.5.6) (2026-01-27)
+
+### fix
+
+* mention Tailscale Override DNS Servers ([](https://github.com/robotnikz/sentinel-dns/commit/9fd254b545ef2e4fb8a02c2815fbedd63b169d40))
+
+## [0.5.5](https://github.com/robotnikz/sentinel-dns/compare/v0.5.4...v0.5.5) (2026-01-27)
+
+### fix
+
+* add DNS status + normalize client IPs ([](https://github.com/robotnikz/sentinel-dns/commit/cee3b5b051d2ec546f4ea8db493faed83fca444d))
+
+## [0.5.4](https://github.com/robotnikz/sentinel-dns/compare/v0.5.3...v0.5.4) (2026-01-27)
+
+### fix
+
+* trigger patch release ([](https://github.com/robotnikz/sentinel-dns/commit/7a2f7bb107af1b95d164017ecb0bd05f79e0fefa))
+
+* Merge pull request #42 from robotnikz/fix/tailscale-dns-logs ([](https://github.com/robotnikz/sentinel-dns/commit/918e552bd4c9e5d0d790a4092f3c30d8cb80ea52)), closes [#42](https://github.com/robotnikz/sentinel-dns/issues/42)
+
+### Fix
+
+* log Tailscale IPv6 DNS queries ([](https://github.com/robotnikz/sentinel-dns/commit/cf1d765c4d4b4bdeb754a2fc5ac6228a264dfb9e))
+
+### docs
+
+* overhaul app audit and mark completed items ([](https://github.com/robotnikz/sentinel-dns/commit/9d69d6153a8efce5fceb621de4794601ee64d3a8))
+
+## [0.5.3](https://github.com/robotnikz/sentinel-dns/compare/v0.5.2...v0.5.3) (2026-01-27)
+
+* Merge pull request #40 from robotnikz/bugfixes ([](https://github.com/robotnikz/sentinel-dns/commit/7462b9a9d724c749cdfd6c05fbbfd0577190b14d)), closes [#40](https://github.com/robotnikz/sentinel-dns/issues/40)
+
+### web
+
+* smooth live query log row updates ([](https://github.com/robotnikz/sentinel-dns/commit/5dcce3cfc98911fec6e3207aaedc25e7dd199ef7))
+
+### docs
+
+* add audit, threat model and test cases ([](https://github.com/robotnikz/sentinel-dns/commit/fa331c7ef32d5133ee6c1b0424a7be3d0bc4f351))
+* clarify LAN/proxy defaults and retention ([](https://github.com/robotnikz/sentinel-dns/commit/0384512fb4ad96b2a4bc7d9e507ac7b12838e5cb))
+
+### test
+
+* **frontend:** cover apiFetch shim and clients loading ([](https://github.com/robotnikz/sentinel-dns/commit/6afd5ed27cfcfcfda241f2aa9520f9c51eb16122))
+
+### fix
+
+* **frontend:** default /api fetch to include cookies ([](https://github.com/robotnikz/sentinel-dns/commit/422403fcaad6838c9fec41935e35848b90b85b57))
+* **server:** make trust proxy configurable ([](https://github.com/robotnikz/sentinel-dns/commit/c4a5c36022b80a5c6c794629c3bd0c8daf8449b6))
+
+### perf
+
+* **server:** batch query-logs ingest ([](https://github.com/robotnikz/sentinel-dns/commit/13ca013e74d5f54e62943699059fac2c937f5986))
+* **server:** indexes, retention and metrics TTL cache ([](https://github.com/robotnikz/sentinel-dns/commit/060ac923ba83e5aa737511f4e795bade5b67c19a))
+
+### security
+
+* **server:** harden settings/secrets validation ([](https://github.com/robotnikz/sentinel-dns/commit/fb02a12124962b9322e371aba0af49cc17a2ad64))
+
+### chore
+
+* **release:** upgrade semantic-release toolchain ([](https://github.com/robotnikz/sentinel-dns/commit/4da1c1700d84bc5cdedfef6b5c436ef2579f1e76))
+
+## <small>0.5.2 (2026-01-27)</small>
+
+* fix: make client deletion reliable ([da13516](https://github.com/robotnikz/sentinel-dns/commit/da13516))
+
+## <small>0.5.1 (2026-01-27)</small>
+
+* fix: client/subnet policy precedence and clients page rename ([3e429d6](https://github.com/robotnikz/sentinel-dns/commit/3e429d6)), closes [#39](https://github.com/robotnikz/sentinel-dns/issues/39)
+* Fix client/subnet rule precedence and cleanup ([c86ad93](https://github.com/robotnikz/sentinel-dns/commit/c86ad93))
+* Fix e2e navigation after Clients rename ([1eded14](https://github.com/robotnikz/sentinel-dns/commit/1eded14))
+* Merge pull request #39 from robotnikz/fix/quick-fixes ([3dbbd61](https://github.com/robotnikz/sentinel-dns/commit/3dbbd61)), closes [#39](https://github.com/robotnikz/sentinel-dns/issues/39)
+* Remove Network Map graph tab and rename menu ([557b240](https://github.com/robotnikz/sentinel-dns/commit/557b240))
+
+## 0.5.0 (2026-01-26)
+
+* Merge pull request #38 from robotnikz/feat/dashboard-toplists-timeframe ([9099fa4](https://github.com/robotnikz/sentinel-dns/commit/9099fa4)), closes [#38](https://github.com/robotnikz/sentinel-dns/issues/38)
+* feat(dashboard): sync toplists with traffic timeframe ([7711360](https://github.com/robotnikz/sentinel-dns/commit/7711360))
+
+## <small>0.4.3 (2026-01-26)</small>
+
+* Merge pull request #37 from robotnikz/fix/top-domains-resolver-noise ([eb64321](https://github.com/robotnikz/sentinel-dns/commit/eb64321)), closes [#37](https://github.com/robotnikz/sentinel-dns/issues/37)
+* fix(metrics): exclude resolver noise domains ([e446dd2](https://github.com/robotnikz/sentinel-dns/commit/e446dd2))
+
+## <small>0.4.2 (2026-01-26)</small>
+
+* Merge pull request #36 from robotnikz/fix/top-domains-upstreams ([ec33686](https://github.com/robotnikz/sentinel-dns/commit/ec33686)), closes [#36](https://github.com/robotnikz/sentinel-dns/issues/36)
+* fix(metrics): hide all configured upstream domains ([6b67650](https://github.com/robotnikz/sentinel-dns/commit/6b67650))
+
+## <small>0.4.1 (2026-01-26)</small>
+
+* Merge pull request #35 from robotnikz/fix/docker-dns ([8912574](https://github.com/robotnikz/sentinel-dns/commit/8912574)), closes [#35](https://github.com/robotnikz/sentinel-dns/issues/35)
+* fix(docker): bootstrap outbound DNS on restart loops ([8a503dd](https://github.com/robotnikz/sentinel-dns/commit/8a503dd))
+
+## 0.4.0 (2026-01-26)
+
+* Merge pull request #33 from robotnikz/ui-fixes ([d5eca3b](https://github.com/robotnikz/sentinel-dns/commit/d5eca3b)), closes [#33](https://github.com/robotnikz/sentinel-dns/issues/33)
+* test(server): cover ignore retention and upstream filtering ([41c4f0d](https://github.com/robotnikz/sentinel-dns/commit/41c4f0d))
+* fix(web): improve modal UX ([3f5c4d7](https://github.com/robotnikz/sentinel-dns/commit/3f5c4d7))
+* feat(server): increase metrics granularity ([b97ac58](https://github.com/robotnikz/sentinel-dns/commit/b97ac58))
+* feat(server): persist ignored suspicious signatures ([72be73c](https://github.com/robotnikz/sentinel-dns/commit/72be73c))
+* feat(web): persist suspicious ignores ([a928fbe](https://github.com/robotnikz/sentinel-dns/commit/a928fbe))
+
 ## <small>0.3.5 (2026-01-26)</small>
 
 * Merge pull request #32 from robotnikz/fix/misc-fixes-2 ([480631b](https://github.com/robotnikz/sentinel-dns/commit/480631b)), closes [#32](https://github.com/robotnikz/sentinel-dns/issues/32)

@@ -454,8 +454,8 @@ const App: React.FC = () => {
       switch(activePage) {
           case 'dashboard': return 'Network Overview';
           case 'logs': return 'Query Inspector';
-          case 'clients': return 'Client Inventory';
-          case 'topology': return 'Network Topology';
+          case 'clients': return 'Client Policies';
+        case 'topology': return 'Clients';
           case 'blocking': return 'Filter Rules';
           case 'dns': return 'DNS Configuration';
           case 'settings': return 'System Settings';
@@ -474,8 +474,8 @@ const App: React.FC = () => {
   }> = [
     { id: 'dashboard', label: 'Dashboard', hint: 'Network Overview', keywords: ['overview', 'stats', 'world map'], page: 'dashboard' },
     { id: 'logs', label: 'Query Logs', hint: 'Query Inspector', keywords: ['dns logs', 'queries', 'nxdomain', 'blocked', 'permitted'], page: 'logs' },
-    { id: 'clients', label: 'Clients', hint: 'Client Inventory', keywords: ['devices', 'hosts'], page: 'clients' },
-    { id: 'topology', label: 'Network Map', hint: 'Network Topology', keywords: ['topology', 'map'], page: 'topology' },
+    { id: 'clients', label: 'Client Policies', hint: 'Per-client filtering & schedules', keywords: ['clients', 'devices', 'policies', 'schedules'], page: 'clients' },
+    { id: 'topology', label: 'Clients', hint: 'DNS Activity', keywords: ['clients', 'activity', 'topology', 'map'], page: 'topology' },
     { id: 'blocking', label: 'Blocking Rules', hint: 'Filter Rules', keywords: ['rules', 'allowlist', 'blocklist', 'filters'], page: 'blocking' },
     { id: 'dns', label: 'DNS Settings', hint: 'DNS Configuration', keywords: ['rewrites', 'upstream', 'resolver', 'unbound'], page: 'dns' },
 
@@ -485,7 +485,8 @@ const App: React.FC = () => {
     { id: 'settings.general', label: 'Settings: AI Keys', page: 'settings', settingsTabPreset: 'general', keywords: ['ai', 'gemini', 'openai', 'api key'] },
     { id: 'settings.geoip', label: 'Settings: GeoIP / World Map', page: 'settings', settingsTabPreset: 'geoip', keywords: ['geoip', 'maxmind', 'geolite', 'city', 'country', 'world map'] },
     { id: 'settings.remote', label: 'Settings: Tailscale / VPN', page: 'settings', settingsTabPreset: 'remote', keywords: ['tailscale', 'vpn', 'remote access', 'tailnet', 'exit node', 'routes', 'subnet router'] },
-    { id: 'settings.notifications', label: 'Settings: Notifications', page: 'settings', settingsTabPreset: 'notifications', keywords: ['discord', 'webhook', 'alerts', 'events', 'bell'] }
+    { id: 'settings.notifications', label: 'Settings: Notifications', page: 'settings', settingsTabPreset: 'notifications', keywords: ['discord', 'webhook', 'alerts', 'events', 'bell'] },
+    { id: 'settings.maintenance', label: 'Settings: Maintenance', page: 'settings', settingsTabPreset: 'maintenance', keywords: ['maintenance', 'clear logs', 'flush logs', 'query logs'] }
   ];
 
   const filteredTargets = (() => {

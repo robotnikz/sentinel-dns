@@ -19,12 +19,25 @@ const schema = z.object({
   UPSTREAM_DNS: z.string().optional().default('127.0.0.1:5335'),
   ENABLE_DNS: z.coerce.boolean().optional().default(true),
 
+  // DNS forwarding timeouts (ms). Tune when upstream networks are slow/filtered.
+  DNS_FORWARD_UDP_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(2000),
+  DNS_FORWARD_TCP_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(4000),
+  DNS_FORWARD_DOT_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(4000),
+  DNS_FORWARD_DOH_TIMEOUT_MS: z.coerce.number().int().min(250).optional().default(15000),
+
+  // Prefer IPv4 when connecting to DoH endpoints (useful when IPv6 routing is slow/flaky).
+  DNS_FORWARD_DOH_PREFER_IPV4: z.coerce.boolean().optional().default(true),
+
   // Optional: when a query is BLOCKED (we return NXDOMAIN), also resolve it upstream
   // only for analytics/logging so the World Map can show blocked destinations.
   // This will contact the upstream resolver for blocked domains.
   SHADOW_RESOLVE_BLOCKED: z.coerce.boolean().optional().default(true),
 
   FRONTEND_ORIGIN: z.string().optional().default('http://localhost:3000'),
+
+  // If Sentinel is behind a reverse proxy (nginx/traefik/caddy), enable this so Fastify derives
+  // protocol/host from X-Forwarded-* headers. Keep enabled by default for backward compatibility.
+  TRUST_PROXY: z.coerce.boolean().optional().default(true),
 
   ADMIN_TOKEN: z.string().optional().default(''),
 
@@ -43,7 +56,17 @@ const schema = z.object({
 
   // Optional file path whose contents override cluster role: 'leader' or 'follower'.
   // Intended for keepalived/VRRP notify scripts to provide automatic role switching with a VIP.
-  CLUSTER_ROLE_FILE: z.string().optional().default('')
+  CLUSTER_ROLE_FILE: z.string().optional().default(''),
+
+  // Performance/operations: keep query_logs bounded.
+  // Set to 0 to disable retention.
+  QUERY_LOGS_RETENTION_DAYS: z.coerce.number().int().min(0).optional().default(30),
+
+  // Background maintenance frequency (cleanup queries, etc.).
+  MAINTENANCE_INTERVAL_MINUTES: z.coerce.number().int().min(1).optional().default(60),
+
+  // Short TTL cache for heavy metrics endpoints (server-side). Set to 0 to disable.
+  METRICS_CACHE_TTL_MS: z.coerce.number().int().min(0).optional().default(2000)
 });
 
 export type AppConfig = z.infer<typeof schema>;

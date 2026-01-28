@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { ClientProfile, Schedule, ScheduleModeType } from '../types';
-import { getAuthHeaders } from '../services/apiClient';
+import { apiFetch, getAuthHeaders } from '../services/apiClient';
 
 interface ClientsContextType {
   clients: ClientProfile[];
@@ -76,7 +76,7 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const persistClient = async (input: RequestInfo, init: RequestInit): Promise<boolean> => {
     try {
-      const res = await fetch(input, { ...init, credentials: 'include' });
+      const res = await apiFetch(input, init);
       return res.ok;
     } catch {
       return false;
@@ -85,8 +85,9 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
-    fetch('/api/clients')
+    apiFetch('/api/clients', { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -106,13 +107,15 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, []);
 
   const addClient = async (client: ClientProfile): Promise<boolean> => {
-    setClients(prev => (prev.some(c => c.id === client.id) ? prev : [...prev, client]));
+    const prev = clients;
+    setClients((cur) => (cur.some((c) => c.id === client.id) ? cur : [...cur, client]));
 
-    return persistClient(`/api/clients/${encodeURIComponent(client.id)}`,
+    const ok = await persistClient(`/api/clients/${encodeURIComponent(client.id)}`,
       {
         method: 'PUT',
         headers: {
@@ -122,12 +125,16 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
         body: JSON.stringify(client)
       }
     );
+
+    if (!ok) setClients(prev);
+    return ok;
   };
 
   const updateClient = async (updatedClient: ClientProfile): Promise<boolean> => {
-    setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+    const prev = clients;
+    setClients((cur) => cur.map((c) => (c.id === updatedClient.id ? updatedClient : c)));
 
-    return persistClient(`/api/clients/${encodeURIComponent(updatedClient.id)}`,
+    const ok = await persistClient(`/api/clients/${encodeURIComponent(updatedClient.id)}`,
       {
         method: 'PUT',
         headers: {
@@ -137,12 +144,16 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
         body: JSON.stringify(updatedClient)
       }
     );
+
+    if (!ok) setClients(prev);
+    return ok;
   };
 
   const removeClient = async (id: string): Promise<boolean> => {
-    setClients(prev => prev.filter(c => c.id !== id));
+    const prev = clients;
+    setClients((cur) => cur.filter((c) => c.id !== id));
 
-    return persistClient(`/api/clients/${encodeURIComponent(id)}`,
+    const ok = await persistClient(`/api/clients/${encodeURIComponent(id)}`,
       {
         method: 'DELETE',
         headers: {
@@ -150,6 +161,9 @@ export const ClientsProvider: React.FC<{ children: ReactNode }> = ({ children })
         }
       }
     );
+
+    if (!ok) setClients(prev);
+    return ok;
   };
 
   const getClientByIp = (ip: string) => {

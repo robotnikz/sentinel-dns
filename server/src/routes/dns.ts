@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { requireAdmin } from '../auth.js';
+import { dnsRuntimeStats, dnsUpstreamDebug } from '../dns/dnsServer.js';
 import 'fastify-rate-limit';
 
 export type DnsSettings = {
@@ -54,6 +55,29 @@ function normalize(input: any): DnsSettings {
 }
 
 export async function registerDnsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
+  app.get(
+    '/api/dns/status',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      return {
+        ok: true,
+        dns: {
+          enabled: config.ENABLE_DNS,
+          host: config.DNS_HOST,
+          port: config.DNS_PORT
+        },
+        stats: dnsRuntimeStats,
+        upstream: dnsUpstreamDebug
+      };
+    }
+  );
+
   app.get(
     '/api/dns/settings',
     {

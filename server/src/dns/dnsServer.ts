@@ -3,12 +3,74 @@ import net from 'node:net';
 import tls from 'node:tls';
 import crypto from 'node:crypto';
 import http2 from 'node:http2';
+import * as dns from 'node:dns';
 import dnsPacket from 'dns-packet';
 import ipaddr from 'ipaddr.js';
+import { Agent, request } from 'undici';
 
 import type { AppConfig } from '../config.js';
 import type { Db } from '../db.js';
 import { refreshBlocklist } from '../blocklists/refresh.js';
+
+export type DnsRuntimeStats = {
+  startedAt: string | null;
+  lastQueryAt: string | null;
+  lastClientIp: string | null;
+  lastTransport: 'udp' | 'tcp' | null;
+  totalQueries: number;
+  tailscaleQueries: number;
+  tailscaleV4Queries: number;
+  tailscaleV6Queries: number;
+};
+
+export const dnsRuntimeStats: DnsRuntimeStats = {
+  startedAt: null,
+  lastQueryAt: null,
+  lastClientIp: null,
+  lastTransport: null,
+  totalQueries: 0,
+  tailscaleQueries: 0,
+  tailscaleV4Queries: 0,
+  tailscaleV6Queries: 0
+};
+
+const TS_V4_CIDR = ipaddr.parseCIDR('100.64.0.0/10') as [ipaddr.IPv4, number];
+const TS_V6_CIDR = ipaddr.parseCIDR('fd7a:115c:a1e0::/48') as [ipaddr.IPv6, number];
+
+function normalizeClientIp(ipRaw: string): string {
+  const raw = String(ipRaw ?? '').trim();
+  if (!raw) return '0.0.0.0';
+  // Drop zone id (e.g. fe80::1%eth0). Not expected for Tailscale, but harmless.
+  const noZone = raw.includes('%') ? raw.slice(0, raw.indexOf('%')) : raw;
+  // Normalize IPv4-mapped IPv6.
+  return noZone.startsWith('::ffff:') ? noZone.slice('::ffff:'.length) : noZone;
+}
+
+function isTailscaleClientIp(ip: string): { isTailscale: boolean; version: 'v4' | 'v6' | null } {
+  try {
+    const addr = ipaddr.parse(ip);
+    if (addr.kind() === 'ipv4') {
+      return { isTailscale: (addr as ipaddr.IPv4).match(TS_V4_CIDR), version: 'v4' };
+    }
+    return { isTailscale: (addr as ipaddr.IPv6).match(TS_V6_CIDR), version: 'v6' };
+  } catch {
+    return { isTailscale: false, version: null };
+  }
+}
+
+function recordDnsQuerySeen(clientIp: string, transport: 'udp' | 'tcp'): void {
+  dnsRuntimeStats.totalQueries += 1;
+  dnsRuntimeStats.lastQueryAt = new Date().toISOString();
+  dnsRuntimeStats.lastClientIp = clientIp;
+  dnsRuntimeStats.lastTransport = transport;
+
+  const ts = isTailscaleClientIp(clientIp);
+  if (ts.isTailscale) {
+    dnsRuntimeStats.tailscaleQueries += 1;
+    if (ts.version === 'v4') dnsRuntimeStats.tailscaleV4Queries += 1;
+    if (ts.version === 'v6') dnsRuntimeStats.tailscaleV6Queries += 1;
+  }
+}
 
 type RuleMatchDecision = {
   decision: 'ALLOWED' | 'BLOCKED' | 'SHADOW_BLOCKED' | 'NONE';
@@ -16,8 +78,14 @@ type RuleMatchDecision = {
 };
 
 type RulesIndex = {
-  manualAllowed: Set<string>;
-  manualBlocked: Set<string>;
+  globalManualAllowed: Set<string>;
+  globalManualBlocked: Set<string>;
+
+  manualAllowedByClientId: Map<string, Set<string>>;
+  manualBlockedByClientId: Map<string, Set<string>>;
+
+  manualAllowedBySubnetId: Map<string, Set<string>>;
+  manualBlockedBySubnetId: Map<string, Set<string>>;
   // Domain -> blocklist id(s) that contain it.
   blockedByDomain: Map<string, string | string[]>;
 };
@@ -45,12 +113,31 @@ type ContentCategory =
   | 'gambling'
   | 'social'
   | 'piracy'
-  | 'dating'
   | 'crypto'
   | 'shopping'
   | 'news'
   | 'game'
   | 'video';
+
+const CONTENT_CATEGORIES: ContentCategory[] = [
+  'adult',
+  'gambling',
+  'social',
+  'piracy',
+  'crypto',
+  'shopping',
+  'news',
+  'game',
+  'video'
+];
+
+function isContentCategory(v: string): v is ContentCategory {
+  return (CONTENT_CATEGORIES as string[]).includes(v);
+}
+
+function isAppService(v: string): v is AppService {
+  return Object.prototype.hasOwnProperty.call(APP_DOMAIN_SUFFIXES, v);
+}
 
 type AppService =
   | '9gag'
@@ -170,6 +257,52 @@ type UpstreamCache = {
     | { transport: 'doh'; dohUrl: string };
 };
 
+export type DnsUpstreamConfigured =
+  | { upstreamMode: 'unbound' }
+  | {
+      upstreamMode: 'forward';
+      forward: {
+        transport: 'udp' | 'tcp' | 'dot' | 'doh';
+        host?: string;
+        port?: number;
+        dohUrl?: string;
+      };
+    };
+
+export type DnsUpstreamDebug = {
+  refreshedAt: string | null;
+  refreshedAtMs: number;
+  refreshIntervalMs: number;
+  configured: DnsUpstreamConfigured | null;
+  effective: UpstreamCache['upstream'] | null;
+  lastForwardOkAt: string | null;
+  lastForwardOkAtMs: number;
+  lastForwardError:
+    | {
+        at: string;
+        atMs: number;
+        transport: UpstreamCache['upstream']['transport'];
+        target: string;
+        name?: string;
+        code?: string;
+        message: string;
+      }
+    | null;
+};
+
+const DNS_CACHE_REFRESH_INTERVAL_MS = 5000;
+
+export const dnsUpstreamDebug: DnsUpstreamDebug = {
+  refreshedAt: null,
+  refreshedAtMs: 0,
+  refreshIntervalMs: DNS_CACHE_REFRESH_INTERVAL_MS,
+  configured: null,
+  effective: null,
+  lastForwardOkAt: null,
+  lastForwardOkAtMs: 0,
+  lastForwardError: null
+};
+
 type ProtectionPauseState =
   | { mode: 'OFF' }
   | { mode: 'FOREVER' }
@@ -194,18 +327,18 @@ function isProtectionPaused(state: ProtectionPauseState): boolean {
 }
 
 function parseGlobalBlockedAppsSetting(value: any): AppService[] {
-  if (Array.isArray(value)) return value.map((x: any) => String(x)).filter(Boolean) as any;
+  if (Array.isArray(value)) return value.map((x: any) => String(x)).filter(isAppService);
   if (!value || typeof value !== 'object') return [];
   const raw = (value as any).blockedApps;
   if (!Array.isArray(raw)) return [];
-  return raw.map((x: any) => String(x)).filter(Boolean) as any;
+  return raw.map((x: any) => String(x)).filter(isAppService);
 }
 
 function parseGlobalShadowAppsSetting(value: any): AppService[] {
   if (!value || typeof value !== 'object') return [];
   const raw = (value as any).shadowApps;
   if (!Array.isArray(raw)) return [];
-  return raw.map((x: any) => String(x)).filter(Boolean) as any;
+  return raw.map((x: any) => String(x)).filter(isAppService);
 }
 
 function parseHostPort(value: string): { host: string; port: number } {
@@ -256,6 +389,37 @@ function buildCandidateDomains(queryName: string): string[] {
   return out;
 }
 
+function decideManualRule(
+  candidates: string[],
+  allowed: Set<string> | undefined,
+  blocked: Set<string> | undefined
+): 'ALLOWED' | 'BLOCKED' | 'NONE' {
+  if (!candidates.length) return 'NONE';
+  const a = allowed ?? EMPTY_STRING_SET;
+  const b = blocked ?? EMPTY_STRING_SET;
+
+  // Allow should win over block.
+  for (const c of candidates) {
+    if (a.has(c)) return 'ALLOWED';
+  }
+  for (const c of candidates) {
+    if (b.has(c)) return 'BLOCKED';
+  }
+  return 'NONE';
+}
+
+const EMPTY_STRING_SET = new Set<string>();
+
+function getOrCreateSet(map: Map<string, Set<string>>, key: string): Set<string> {
+  const k = String(key ?? '').trim();
+  if (!k) return EMPTY_STRING_SET;
+  const cur = map.get(k);
+  if (cur) return cur;
+  const next = new Set<string>();
+  map.set(k, next);
+  return next;
+}
+
 function decideRuleIndexed(
   index: RulesIndex,
   queryName: string,
@@ -265,14 +429,7 @@ function decideRuleIndexed(
   const candidates = buildCandidateDomains(queryName);
   if (!candidates.length) return { decision: 'NONE' };
 
-  // Allow should win over block.
   for (const c of candidates) {
-    if (index.manualAllowed.has(c)) return { decision: 'ALLOWED' };
-  }
-
-  for (const c of candidates) {
-    if (index.manualBlocked.has(c)) return { decision: 'BLOCKED' };
-
     const hit = index.blockedByDomain.get(c);
     if (!hit) continue;
 
@@ -303,7 +460,6 @@ const CATEGORY_BLOCKLIST_URLS: Record<ContentCategory, string[]> = {
   gambling: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/gambling.txt'],
   social: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/social.txt'],
   piracy: ['https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/anti.piracy.txt'],
-  dating: ['https://raw.githubusercontent.com/nextdns/services/main/services/tinder'],
   crypto: [],
   shopping: [],
   news: [],
@@ -453,6 +609,17 @@ function isAppBlockedByPolicy(queryName: string, apps: AppService[]): AppService
 }
 
 function findClient(clients: ClientProfile[], clientIp: string): ClientProfile | null {
+  return findExactClient(clients, clientIp) ?? findBestCidrClient(clients, clientIp);
+}
+
+function findExactClient(clients: ClientProfile[], clientIp: string): ClientProfile | null {
+  for (const c of clients) {
+    if (c.ip && c.ip === clientIp) return c;
+  }
+  return null;
+}
+
+function findBestCidrClient(clients: ClientProfile[], clientIp: string): ClientProfile | null {
   let addr: ipaddr.IPv4 | ipaddr.IPv6 | null = null;
   try {
     addr = ipaddr.parse(clientIp);
@@ -460,17 +627,12 @@ function findClient(clients: ClientProfile[], clientIp: string): ClientProfile |
     addr = null;
   }
 
-  // Prefer an exact IP match over any CIDR match.
-  for (const c of clients) {
-    if (c.ip && c.ip === clientIp) return c;
-  }
+  if (!addr) return null;
 
-  // If no exact match exists, use the most-specific CIDR match.
   let best: ClientProfile | null = null;
   let bestPrefixLen = -1;
 
   for (const c of clients) {
-    if (!addr) continue;
     if (!c.cidr) continue;
     try {
       const [range, prefixLen] = ipaddr.parseCIDR(c.cidr);
@@ -499,29 +661,77 @@ function normalizeRuleDomain(value: any): string {
 }
 
 async function loadRulesIndex(db: Db, neededBlocklistIds: number[]): Promise<RulesIndex> {
-  const manualAllowed = new Set<string>();
-  const manualBlocked = new Set<string>();
+  const globalManualAllowed = new Set<string>();
+  const globalManualBlocked = new Set<string>();
+
+  const manualAllowedByClientId = new Map<string, Set<string>>();
+  const manualBlockedByClientId = new Map<string, Set<string>>();
+  const manualAllowedBySubnetId = new Map<string, Set<string>>();
+  const manualBlockedBySubnetId = new Map<string, Set<string>>();
 
   // Manual rules (Allow/Block tab) are not tied to a blocklist selection.
   const manualRes = await db.pool.query(
     `
-    SELECT domain, type
+    SELECT domain, type, category
     FROM rules
     WHERE category NOT LIKE 'Blocklist:%'
     `
   );
 
+  const parseScope = (raw: unknown): { scope: 'global' } | { scope: 'client' | 'subnet'; id: string } => {
+    const c = typeof raw === 'string' ? raw.trim() : '';
+    if (!c) return { scope: 'global' };
+
+    const parseId = (prefix: string): string | null => {
+      if (!c.startsWith(prefix)) return null;
+      const rest = c.slice(prefix.length);
+      const id = (rest.includes(':') ? rest.slice(0, rest.indexOf(':')) : rest).trim();
+      return id ? id : null;
+    };
+
+    const clientId = parseId('Client:');
+    if (clientId) return { scope: 'client', id: clientId };
+
+    const subnetId = parseId('Subnet:');
+    if (subnetId) return { scope: 'subnet', id: subnetId };
+
+    return { scope: 'global' };
+  };
+
   for (const r of manualRes.rows) {
     const domain = normalizeRuleDomain(r?.domain);
     if (!domain) continue;
     const type = r?.type === 'ALLOWED' ? 'ALLOWED' : 'BLOCKED';
-    if (type === 'ALLOWED') manualAllowed.add(domain);
-    else manualBlocked.add(domain);
+
+    const scope = parseScope(r?.category);
+    if (scope.scope === 'global') {
+      if (type === 'ALLOWED') globalManualAllowed.add(domain);
+      else globalManualBlocked.add(domain);
+      continue;
+    }
+
+    if (scope.scope === 'client') {
+      if (type === 'ALLOWED') getOrCreateSet(manualAllowedByClientId, scope.id).add(domain);
+      else getOrCreateSet(manualBlockedByClientId, scope.id).add(domain);
+      continue;
+    }
+
+    if (type === 'ALLOWED') getOrCreateSet(manualAllowedBySubnetId, scope.id).add(domain);
+    else getOrCreateSet(manualBlockedBySubnetId, scope.id).add(domain);
   }
 
   const blockedByDomain = new Map<string, string | string[]>();
   const ids = neededBlocklistIds.filter((n) => Number.isFinite(n));
-  if (!ids.length) return { manualAllowed, manualBlocked, blockedByDomain };
+  if (!ids.length)
+    return {
+      globalManualAllowed,
+      globalManualBlocked,
+      manualAllowedByClientId,
+      manualBlockedByClientId,
+      manualAllowedBySubnetId,
+      manualBlockedBySubnetId,
+      blockedByDomain
+    };
 
   const blocklistRes = await db.pool.query(
     `
@@ -553,7 +763,15 @@ async function loadRulesIndex(db: Db, neededBlocklistIds: number[]): Promise<Rul
     if (!cur.includes(id)) cur.push(id);
   }
 
-  return { manualAllowed, manualBlocked, blockedByDomain };
+  return {
+    globalManualAllowed,
+    globalManualBlocked,
+    manualAllowedByClientId,
+    manualBlockedByClientId,
+    manualAllowedBySubnetId,
+    manualBlockedBySubnetId,
+    blockedByDomain
+  };
 }
 
 async function loadClients(db: Db): Promise<ClientProfile[]> {
@@ -576,9 +794,9 @@ async function loadClients(db: Db): Promise<ClientProfile[]> {
         : [],
       isInternetPaused: p.isInternetPaused === true,
       blockedCategories: Array.isArray(p.blockedCategories)
-        ? p.blockedCategories.map((x: any) => String(x)).filter(Boolean)
+        ? p.blockedCategories.map((x: any) => String(x)).filter(isContentCategory)
         : [],
-      blockedApps: Array.isArray(p.blockedApps) ? p.blockedApps.map((x: any) => String(x)).filter(Boolean) : [],
+      blockedApps: Array.isArray(p.blockedApps) ? p.blockedApps.map((x: any) => String(x)).filter(isAppService) : [],
       schedules: Array.isArray(p.schedules)
         ? p.schedules
             .filter((s: any) => s && typeof s === 'object')
@@ -592,9 +810,9 @@ async function loadClients(db: Db): Promise<ClientProfile[]> {
                 active: s.active === true,
                 mode: normalizeScheduleMode(s.mode),
                 blockedCategories: Array.isArray(s.blockedCategories)
-                  ? s.blockedCategories.map((x: any) => String(x)).filter(Boolean)
+                  ? s.blockedCategories.map((x: any) => String(x)).filter(isContentCategory)
                   : [],
-                blockedApps: Array.isArray(s.blockedApps) ? s.blockedApps.map((x: any) => String(x)).filter(Boolean) : [],
+                blockedApps: Array.isArray(s.blockedApps) ? s.blockedApps.map((x: any) => String(x)).filter(isAppService) : [],
                 blockAll: s.blockAll === true
               })
             )
@@ -602,6 +820,324 @@ async function loadClients(db: Db): Promise<ClientProfile[]> {
         : []
     }))
     .filter((c) => c.id && c.name);
+}
+
+export type DomainPolicyCheckDecision = 'ALLOWED' | 'BLOCKED' | 'SHADOW_BLOCKED' | 'NONE';
+
+export type DomainPolicyCheckResponse = {
+  domain: string;
+  decision: DomainPolicyCheckDecision;
+  reason: string | null;
+  blocklist?: { id: string; name: string; mode: 'ACTIVE' | 'SHADOW' } | null;
+};
+
+export async function domainPolicyCheck(
+  db: Db,
+  inputDomain: string,
+  opts?: { clientIp?: string }
+): Promise<DomainPolicyCheckResponse> {
+  const domain = normalizeName(inputDomain);
+  const clientIp = normalizeClientIp(opts?.clientIp ?? '0.0.0.0');
+
+  if (!domain) return { domain, decision: 'NONE', reason: null, blocklist: null };
+
+  const [clients, blocklistsById, categoryBlocklistsByCategory, appBlocklistsByApp, globalBlockedAppsRes] =
+    await Promise.all([
+      loadClients(db),
+      loadBlocklists(db),
+      loadCategoryBlocklists(db),
+      loadAppBlocklists(db),
+      db.pool.query('SELECT value FROM settings WHERE key = $1', ['global_blocked_apps'])
+    ]);
+
+  const exactClient = findExactClient(clients, clientIp);
+  const subnetClient = exactClient ? null : findBestCidrClient(clients, clientIp);
+  const effectiveClient = exactClient ?? subnetClient;
+
+  const policyPrefix = (scope: 'client' | 'subnet' | 'global'): string =>
+    scope === 'client' ? 'ClientPolicy' : scope === 'subnet' ? 'SubnetPolicy' : 'GlobalPolicy';
+
+  if (exactClient?.isInternetPaused || subnetClient?.isInternetPaused) {
+    return {
+      domain,
+      decision: 'BLOCKED',
+      reason: exactClient?.isInternetPaused ? 'ClientPolicy:InternetPaused' : 'SubnetPolicy:InternetPaused',
+      blocklist: null
+    };
+  }
+
+  const globalAppsValue = globalBlockedAppsRes.rows?.[0]?.value;
+  const globalActiveApps = parseGlobalBlockedAppsSetting(globalAppsValue);
+  const globalShadowApps = parseGlobalShadowAppsSetting(globalAppsValue).filter((a) => !globalActiveApps.includes(a));
+
+  // Precompute category/app id sets so we can exclude them from normal blocklist selection.
+  const categoryIds = new Set<string>();
+  for (const ids of categoryBlocklistsByCategory.values()) for (const id of ids) categoryIds.add(String(id));
+  const appIds = new Set<string>();
+  for (const ids of appBlocklistsByApp.values()) for (const id of ids) appIds.add(String(id));
+
+  // Compute effective policy (base + schedules) for this client/subnet/global.
+  const now = new Date();
+  const effectiveBlockedCategories = new Set<ContentCategory>();
+
+  const shouldUseGlobalCategories =
+    exactClient?.useGlobalCategories === false ? false : subnetClient?.useGlobalCategories === false ? false : true;
+  const shouldUseGlobalApps =
+    exactClient?.useGlobalApps === false ? false : subnetClient?.useGlobalApps === false ? false : true;
+
+  if (!shouldUseGlobalCategories) {
+    const base = exactClient?.useGlobalCategories === false ? exactClient : subnetClient;
+    for (const c of base?.blockedCategories ?? []) effectiveBlockedCategories.add(c);
+  }
+
+  const effectiveActiveApps = new Set<AppService>(shouldUseGlobalApps ? globalActiveApps : []);
+  const effectiveShadowApps = new Set<AppService>(shouldUseGlobalApps ? globalShadowApps : []);
+
+  if (!shouldUseGlobalApps) {
+    const base = exactClient?.useGlobalApps === false ? exactClient : subnetClient;
+    for (const a of base?.blockedApps ?? []) effectiveActiveApps.add(a);
+  }
+
+  for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
+
+  let blockAll = false;
+  const activeSubnetSchedules = (subnetClient?.schedules ?? []).filter((s) => isScheduleActiveNow(s, now));
+  const activeClientSchedules = (exactClient?.schedules ?? []).filter((s) => isScheduleActiveNow(s, now));
+
+  for (const s of [...activeSubnetSchedules, ...activeClientSchedules]) {
+    if (s.blockAll) blockAll = true;
+    for (const c of s.blockedCategories ?? []) effectiveBlockedCategories.add(c);
+    for (const a of s.blockedApps ?? []) effectiveActiveApps.add(a);
+  }
+
+  for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
+
+  // Manual rules (Allow/Block) + per-client/subnet rules.
+  // We load only the rules for the actually-selected blocklists below.
+
+  if (blockAll) {
+    const scope: 'client' | 'subnet' | 'global' = activeClientSchedules.some((s) => s.blockAll)
+      ? 'client'
+      : activeSubnetSchedules.some((s) => s.blockAll)
+        ? 'subnet'
+        : 'global';
+    return { domain, decision: 'BLOCKED', reason: `${policyPrefix(scope)}:BlockAll`, blocklist: null };
+  }
+
+  // Fast app suffix blocking has highest priority inside the policy phase.
+  const clientScheduleApps = activeClientSchedules.flatMap((s) => s.blockedApps ?? []);
+  const subnetScheduleApps = activeSubnetSchedules.flatMap((s) => s.blockedApps ?? []);
+  const clientBaseApps = exactClient?.useGlobalApps === false ? (exactClient?.blockedApps ?? []) : [];
+  const subnetBaseApps = subnetClient?.useGlobalApps === false ? (subnetClient?.blockedApps ?? []) : [];
+  const globalBaseApps = shouldUseGlobalApps ? globalActiveApps : [];
+
+  const findBlockedAppWithScope = (): { app: AppService; scope: 'client' | 'subnet' | 'global' } | null => {
+    const clientScheduleHit = isAppBlockedByPolicy(domain, clientScheduleApps);
+    if (clientScheduleHit) return { app: clientScheduleHit, scope: 'client' };
+
+    const clientBaseHit = isAppBlockedByPolicy(domain, clientBaseApps);
+    if (clientBaseHit) return { app: clientBaseHit, scope: 'client' };
+
+    const subnetScheduleHit = isAppBlockedByPolicy(domain, subnetScheduleApps);
+    if (subnetScheduleHit) return { app: subnetScheduleHit, scope: 'subnet' };
+
+    const subnetBaseHit = isAppBlockedByPolicy(domain, subnetBaseApps);
+    if (subnetBaseHit) return { app: subnetBaseHit, scope: 'subnet' };
+
+    const globalHit = isAppBlockedByPolicy(domain, globalBaseApps);
+    if (globalHit) return { app: globalHit, scope: 'global' };
+
+    return null;
+  };
+
+  const blockedAppHit = findBlockedAppWithScope();
+  if (blockedAppHit) {
+    return {
+      domain,
+      decision: 'BLOCKED',
+      reason: `${policyPrefix(blockedAppHit.scope)}:App:${blockedAppHit.app}`,
+      blocklist: null
+    };
+  }
+
+  // Determine selected blocklists for this client.
+  const selectedBlocklists = new Set<string>();
+  const shouldUseGlobalBlocklists =
+    exactClient?.useGlobalSettings === false ? false : subnetClient?.useGlobalSettings === false ? false : true;
+
+  if (!shouldUseGlobalBlocklists) {
+    const base = exactClient?.useGlobalSettings === false ? exactClient : subnetClient;
+    for (const id of base?.assignedBlocklists ?? []) {
+      const sid = String(id).trim();
+      if (!sid) continue;
+      if (categoryIds.has(sid) || appIds.has(sid)) continue;
+      selectedBlocklists.add(sid);
+    }
+  } else {
+    for (const [id, st] of blocklistsById.entries()) {
+      if (categoryIds.has(id) || appIds.has(id)) continue;
+      if (st.enabled) selectedBlocklists.add(id);
+    }
+  }
+
+  if (shouldUseGlobalCategories) {
+    for (const id of categoryIds) {
+      const st = blocklistsById.get(id);
+      if (st?.enabled) selectedBlocklists.add(id);
+    }
+  }
+
+  for (const cat of effectiveBlockedCategories) {
+    const ids = categoryBlocklistsByCategory.get(cat) ?? [];
+    for (const id of ids) selectedBlocklists.add(String(id));
+  }
+
+  // App blocklists are evaluated independently.
+  const selectedActiveAppBlocklists = new Set<string>();
+  const selectedShadowAppBlocklists = new Set<string>();
+  const blocklistIdToApp = new Map<string, AppService>();
+
+  for (const app of effectiveActiveApps) {
+    const ids = appBlocklistsByApp.get(app) ?? [];
+    for (const id of ids) {
+      const sid = String(id);
+      selectedActiveAppBlocklists.add(sid);
+      if (!blocklistIdToApp.has(sid)) blocklistIdToApp.set(sid, app);
+    }
+  }
+
+  for (const app of effectiveShadowApps) {
+    const ids = appBlocklistsByApp.get(app) ?? [];
+    for (const id of ids) {
+      const sid = String(id);
+      selectedShadowAppBlocklists.add(sid);
+      if (!blocklistIdToApp.has(sid)) blocklistIdToApp.set(sid, app);
+    }
+  }
+
+  // Load only the rule index required for this check.
+  const neededIds: number[] = [];
+  for (const id of new Set<string>([...selectedBlocklists, ...selectedActiveAppBlocklists, ...selectedShadowAppBlocklists])) {
+    const n = Number(id);
+    if (Number.isFinite(n)) neededIds.push(n);
+  }
+
+  const index = await loadRulesIndex(db, neededIds);
+  const candidates = buildCandidateDomains(domain);
+
+  // Per-client / subnet manual allow/block rules.
+  if (exactClient) {
+    const clientManual = decideManualRule(
+      candidates,
+      index.manualAllowedByClientId.get(exactClient.id),
+      index.manualBlockedByClientId.get(exactClient.id)
+    );
+    if (clientManual === 'BLOCKED') return { domain, decision: 'BLOCKED', reason: `ClientRule:${exactClient.id}`, blocklist: null };
+    if (clientManual === 'ALLOWED') return { domain, decision: 'ALLOWED', reason: `ClientRule:${exactClient.id}`, blocklist: null };
+  }
+
+  if (subnetClient) {
+    const subnetManual = decideManualRule(
+      candidates,
+      index.manualAllowedBySubnetId.get(subnetClient.id),
+      index.manualBlockedBySubnetId.get(subnetClient.id)
+    );
+    if (subnetManual === 'BLOCKED') return { domain, decision: 'BLOCKED', reason: `SubnetRule:${subnetClient.id}`, blocklist: null };
+    if (subnetManual === 'ALLOWED') return { domain, decision: 'ALLOWED', reason: `SubnetRule:${subnetClient.id}`, blocklist: null };
+  }
+
+  const globalManual = decideManualRule(candidates, index.globalManualAllowed, index.globalManualBlocked);
+  if (globalManual === 'BLOCKED') return { domain, decision: 'BLOCKED', reason: 'Manual', blocklist: null };
+  if (globalManual === 'ALLOWED') return { domain, decision: 'ALLOWED', reason: 'Manual', blocklist: null };
+
+  let shadowHit: string | null = null;
+
+  // Evaluate app blocklists (active, then shadow).
+  const globalShadowAppsList = shouldUseGlobalApps ? globalShadowApps : [];
+  let appShadowHit: string | undefined;
+  const shadowApp = isAppBlockedByPolicy(domain, globalShadowAppsList);
+  if (shadowApp) appShadowHit = `${policyPrefix('global')}:AppShadow:${shadowApp}`;
+
+  const appScopeByApp = new Map<AppService, 'client' | 'subnet' | 'global'>();
+  for (const a of globalBaseApps) appScopeByApp.set(a, 'global');
+  for (const a of globalShadowAppsList) appScopeByApp.set(a, 'global');
+  for (const a of subnetBaseApps) appScopeByApp.set(a, 'subnet');
+  for (const a of subnetScheduleApps) appScopeByApp.set(a, 'subnet');
+  for (const a of clientBaseApps) appScopeByApp.set(a, 'client');
+  for (const a of clientScheduleApps) appScopeByApp.set(a, 'client');
+
+  if (selectedActiveAppBlocklists.size) {
+    const appDecision = decideRuleIndexed(index, domain, blocklistsById, selectedActiveAppBlocklists);
+    if (appDecision.decision === 'BLOCKED') {
+      const id = appDecision.blocklistId ?? '';
+      const app = id ? blocklistIdToApp.get(id) : undefined;
+      const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
+      return {
+        domain,
+        decision: 'BLOCKED',
+        reason: app ? `${policyPrefix(scope)}:AppList:${app}` : id ? formatBlocklistCategory(id, blocklistsById.get(id)?.name) : null,
+        blocklist: id ? { id, name: blocklistsById.get(id)?.name ?? 'Blocklist', mode: blocklistsById.get(id)?.mode ?? 'ACTIVE' } : null
+      };
+    }
+    if (appDecision.decision === 'SHADOW_BLOCKED' && !appShadowHit) {
+      const id = appDecision.blocklistId ?? '';
+      const app = id ? blocklistIdToApp.get(id) : undefined;
+      const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
+      appShadowHit = app
+        ? `${policyPrefix(scope)}:AppListShadow:${app}`
+        : id
+          ? formatBlocklistCategory(id, blocklistsById.get(id)?.name)
+          : undefined;
+    }
+  }
+
+  if (selectedShadowAppBlocklists.size) {
+    const shadowDecision = decideRuleIndexed(index, domain, blocklistsById, selectedShadowAppBlocklists);
+    if ((shadowDecision.decision === 'BLOCKED' || shadowDecision.decision === 'SHADOW_BLOCKED') && !appShadowHit) {
+      const id = shadowDecision.blocklistId ?? '';
+      const app = id ? blocklistIdToApp.get(id) : undefined;
+      const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
+      appShadowHit = app
+        ? `${policyPrefix(scope)}:AppListShadow:${app}`
+        : id
+          ? formatBlocklistCategory(id, blocklistsById.get(id)?.name)
+          : undefined;
+    }
+  }
+
+  // Evaluate normal blocklists.
+  const { decision, blocklistId } = decideRuleIndexed(index, domain, blocklistsById, selectedBlocklists);
+  if (decision === 'BLOCKED') {
+    const id = blocklistId ?? '';
+    const st = id ? blocklistsById.get(id) : undefined;
+    return {
+      domain,
+      decision: 'BLOCKED',
+      reason: id ? formatBlocklistCategory(id, st?.name) : null,
+      blocklist: id ? { id, name: st?.name ?? 'Blocklist', mode: st?.mode ?? 'ACTIVE' } : null
+    };
+  }
+
+  if (decision === 'SHADOW_BLOCKED' && blocklistId) {
+    const st = blocklistsById.get(blocklistId);
+    shadowHit = formatBlocklistCategory(blocklistId, st?.name);
+  }
+
+  if (appShadowHit) shadowHit = appShadowHit;
+
+  if (shadowHit) {
+    const id = extractBlocklistId(shadowHit) ?? null;
+    const st = id ? blocklistsById.get(id) : undefined;
+    return {
+      domain,
+      decision: 'SHADOW_BLOCKED',
+      reason: shadowHit,
+      blocklist: id && st ? { id, name: st.name, mode: 'SHADOW' } : null
+    };
+  }
+
+  void effectiveClient;
+  return { domain, decision: 'NONE', reason: null, blocklist: null };
 }
 
 async function loadCategoryBlocklists(db: Db): Promise<Map<ContentCategory, string[]>> {
@@ -802,7 +1338,7 @@ function extractAnswerIpsFromDnsResponse(resp: Buffer): string[] {
   }
 }
 
-async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer): Promise<Buffer> {
+async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   return await new Promise<Buffer>((resolve, reject) => {
     const socket = dgram.createSocket('udp4');
     const timer = setTimeout(() => {
@@ -812,7 +1348,7 @@ async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer)
         // ignore
       }
       reject(new Error('UPSTREAM_TIMEOUT'));
-    }, 2000);
+    }, timeoutMs);
 
     socket.once('message', (data) => {
       clearTimeout(timer);
@@ -838,12 +1374,12 @@ async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer)
   });
 }
 
-async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer): Promise<Buffer> {
+async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   return await new Promise<Buffer>((resolve, reject) => {
     const socket = net.createConnection({ host: upstream.host, port: upstream.port });
     const timer = setTimeout(() => {
       socket.destroy(new Error('UPSTREAM_TIMEOUT'));
-    }, 4000);
+    }, timeoutMs);
 
     let chunks: Buffer[] = [];
     let expected: number | null = null;
@@ -875,18 +1411,18 @@ async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer)
   });
 }
 
-async function forwardDot(upstream: { host: string; port: number }, msg: Buffer): Promise<Buffer> {
+async function forwardDot(upstream: { host: string; port: number }, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   return await new Promise<Buffer>((resolve, reject) => {
     const socket = tls.connect({
       host: upstream.host,
       port: upstream.port,
       servername: upstream.host,
-      timeout: 4000
+      timeout: timeoutMs
     });
 
     const timer = setTimeout(() => {
       socket.destroy(new Error('UPSTREAM_TIMEOUT'));
-    }, 4000);
+    }, timeoutMs);
 
     let chunks: Buffer[] = [];
     let expected: number | null = null;
@@ -918,29 +1454,122 @@ async function forwardDot(upstream: { host: string; port: number }, msg: Buffer)
   });
 }
 
-async function forwardDohHttp1(dohUrl: string, msg: Buffer): Promise<Buffer> {
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 4000);
+async function forwardDohHttp1(dohUrl: string, msg: Buffer, timeoutMs: number): Promise<Buffer> {
+  return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4: false });
+}
+
+type DohHttp1Options = {
+  preferIpv4: boolean;
+};
+
+const dohHttpAgentDefault = new Agent({
+  connections: 32,
+  pipelining: 1,
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000
+});
+
+const dohHttpAgentPreferIpv4 = new Agent({
+  connections: 32,
+  pipelining: 1,
+  keepAliveTimeout: 30_000,
+  keepAliveMaxTimeout: 60_000,
+  connect: {
+    lookup: (hostname: string, options: any, callback: any) => {
+      const requestedFamily = typeof options?.family === 'number' ? options.family : 0;
+      if (requestedFamily === 4 || requestedFamily === 6) {
+        dns.lookup(hostname, { ...options, family: requestedFamily }, callback);
+        return;
+      }
+
+      const wantsAll = Boolean(options?.all);
+
+      dns.lookup(hostname, { ...options, all: true }, (err, addresses) => {
+        if (err) {
+          callback(err);
+          return;
+        }
+
+        const list = Array.isArray(addresses) ? addresses : [];
+        const v4 = list.filter((a: any) => a && a.family === 4);
+        const v6 = list.filter((a: any) => a && a.family === 6);
+        const reordered = [...v4, ...v6];
+
+        if (wantsAll) {
+          callback(null, reordered);
+          return;
+        }
+
+        const chosen = reordered[0];
+        if (!chosen?.address || !chosen?.family) {
+          callback(new Error('DNS_LOOKUP_FAILED'));
+          return;
+        }
+        callback(null, chosen.address, chosen.family);
+      });
+    }
+  }
+});
+
+async function forwardDohHttp1WithOptions(
+  dohUrl: string,
+  msg: Buffer,
+  timeoutMs: number,
+  options: DohHttp1Options
+): Promise<Buffer> {
+  const started = Date.now();
+  const attempt = async (dispatcher: Agent, budgetMs: number): Promise<Buffer> => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), budgetMs);
+    try {
+      try {
+        const res = await request(dohUrl, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/dns-message',
+            accept: 'application/dns-message',
+            'user-agent': 'sentinel-dns/0.1'
+          },
+          body: msg,
+          dispatcher,
+          signal: ac.signal
+        });
+
+        if (res.statusCode !== 200) {
+          try {
+            await res.body.text();
+          } catch {
+            // ignore
+          }
+          throw new Error(`HTTP_${res.statusCode}`);
+        }
+
+        return Buffer.from(await res.body.arrayBuffer());
+      } catch (e: any) {
+        if (ac.signal.aborted) throw new Error('UPSTREAM_TIMEOUT');
+        throw e;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   try {
-    const res = await fetch(dohUrl, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/dns-message',
-        accept: 'application/dns-message',
-        'user-agent': 'sentinel-dns/0.1'
-      },
-      body: msg,
-      signal: ac.signal
-    });
-    if (!res.ok) throw new Error(`HTTP_${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    return buf;
-  } finally {
-    clearTimeout(timer);
+    return await attempt(options.preferIpv4 ? dohHttpAgentPreferIpv4 : dohHttpAgentDefault, timeoutMs);
+  } catch (e: any) {
+    // If IPv4 is preferred but fails (e.g. v4 route blackhole) allow a single retry
+    // with the default agent to let IPv6 succeed within the remaining time budget.
+    const msgText = e instanceof Error ? e.message : String(e);
+    if (!options.preferIpv4) throw e;
+    if (msgText.startsWith('HTTP_')) throw e;
+    if (msgText === 'UPSTREAM_TIMEOUT') throw e;
+
+    const remaining = Math.max(250, timeoutMs - (Date.now() - started));
+    return await attempt(dohHttpAgentDefault, remaining);
   }
 }
 
-async function forwardDohHttp2(dohUrl: string, msg: Buffer): Promise<Buffer> {
+async function forwardDohHttp2(dohUrl: string, msg: Buffer, timeoutMs: number): Promise<Buffer> {
   const url = new URL(dohUrl);
   const origin = `${url.protocol}//${url.host}`;
   const path = `${url.pathname}${url.search}` || '/';
@@ -951,7 +1580,7 @@ async function forwardDohHttp2(dohUrl: string, msg: Buffer): Promise<Buffer> {
     });
     const timer = setTimeout(() => {
       client.destroy(new Error('UPSTREAM_TIMEOUT'));
-    }, 4000);
+    }, timeoutMs);
 
     client.on('error', (err) => {
       clearTimeout(timer);
@@ -998,16 +1627,14 @@ async function forwardDohHttp2(dohUrl: string, msg: Buffer): Promise<Buffer> {
   });
 }
 
-async function forwardDoh(dohUrl: string, msg: Buffer): Promise<Buffer> {
+async function forwardDoh(dohUrl: string, msg: Buffer, timeoutMs: number, preferIpv4: boolean): Promise<Buffer> {
   if (dohUrl.startsWith('https://')) {
-    try {
-      return await forwardDohHttp2(dohUrl, msg);
-    } catch {
-      return await forwardDohHttp1(dohUrl, msg);
-    }
+    // Prefer HTTP/1.1: it's generally more compatible on constrained networks.
+    // (HTTP/2 can stall due to middleboxes, IPv6 routing issues, or ALPN handling.)
+    return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4 });
   }
 
-  return await forwardDohHttp1(dohUrl, msg);
+  return await forwardDohHttp1WithOptions(dohUrl, msg, timeoutMs, { preferIpv4 });
 }
 
 function buildNxDomainResponse(query: any): Buffer {
@@ -1048,6 +1675,15 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     return { close: async () => {} };
   }
 
+  dnsRuntimeStats.startedAt = new Date().toISOString();
+  dnsRuntimeStats.lastQueryAt = null;
+  dnsRuntimeStats.lastClientIp = null;
+  dnsRuntimeStats.lastTransport = null;
+  dnsRuntimeStats.totalQueries = 0;
+  dnsRuntimeStats.tailscaleQueries = 0;
+  dnsRuntimeStats.tailscaleV4Queries = 0;
+  dnsRuntimeStats.tailscaleV6Queries = 0;
+
   function logRulesIndexReload(stats: {
     selectedBlocklistCount: number;
     maxId: number;
@@ -1060,7 +1696,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         `[dns] rules-index reloaded at=${loadedAtIso} maxId=${stats.maxId} ` +
           `selectedBlocklists=${stats.selectedBlocklistCount} ` +
           `domains=${stats.index.blockedByDomain.size} ` +
-          `manualAllowed=${stats.index.manualAllowed.size} manualBlocked=${stats.index.manualBlocked.size} ` +
+          `globalManualAllowed=${stats.index.globalManualAllowed.size} globalManualBlocked=${stats.index.globalManualBlocked.size} ` +
+          `clientScoped=${stats.index.manualBlockedByClientId.size + stats.index.manualAllowedByClientId.size} ` +
+          `subnetScoped=${stats.index.manualBlockedBySubnetId.size + stats.index.manualAllowedBySubnetId.size} ` +
           `durationMs=${stats.durationMs}`
       );
     } catch {
@@ -1077,7 +1715,15 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     loadedAt: 0,
     maxId: 0,
     includedIdsKey: '',
-    index: { manualAllowed: new Set(), manualBlocked: new Set(), blockedByDomain: new Map() }
+    index: {
+      globalManualAllowed: new Set(),
+      globalManualBlocked: new Set(),
+      manualAllowedByClientId: new Map(),
+      manualBlockedByClientId: new Map(),
+      manualAllowedBySubnetId: new Map(),
+      manualBlockedBySubnetId: new Map(),
+      blockedByDomain: new Map()
+    }
   };
   const clientsCache: ClientsCache = { loadedAt: 0, clients: [] };
   const rewritesCache: RewritesCache = { loadedAt: 0, byDomain: new Map(), wildcards: [] };
@@ -1343,6 +1989,8 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       const value = dnsSettings.rows?.[0]?.value;
       const mode = value?.upstreamMode === 'forward' ? 'forward' : 'unbound';
+
+      let configured: DnsUpstreamConfigured = mode === 'forward' ? { upstreamMode: 'forward', forward: { transport: 'udp' } } : { upstreamMode: 'unbound' };
       if (mode === 'forward') {
         const transport =
           value?.forward?.transport === 'tcp'
@@ -1353,15 +2001,20 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
                 ? 'doh'
                 : 'udp';
 
+        configured = { upstreamMode: 'forward', forward: { transport } };
+
         if (transport === 'doh') {
           const dohUrl = typeof value?.forward?.dohUrl === 'string' ? String(value.forward.dohUrl) : '';
           if (dohUrl) {
+            configured.forward.dohUrl = dohUrl;
             upstreamCache.upstream = { transport: 'doh', dohUrl };
           }
         } else {
           const host = typeof value?.forward?.host === 'string' ? String(value.forward.host) : '';
           const port = Number(value?.forward?.port);
           if (host && Number.isFinite(port) && port > 0) {
+            configured.forward.host = host;
+            configured.forward.port = Math.min(65535, Math.floor(port));
             upstreamCache.upstream = { host, port: Math.min(65535, Math.floor(port)), transport };
           }
         }
@@ -1371,6 +2024,11 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       upstreamCache.loadedAt = Date.now();
+
+      dnsUpstreamDebug.refreshedAtMs = upstreamCache.loadedAt;
+      dnsUpstreamDebug.refreshedAt = new Date(upstreamCache.loadedAt).toISOString();
+      dnsUpstreamDebug.configured = configured;
+      dnsUpstreamDebug.effective = upstreamCache.upstream;
     } catch {
       // keep last good caches
     }
@@ -1378,10 +2036,42 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
   await refreshCaches();
   await refreshProtectionPause();
-  const refreshTimer = setInterval(refreshCaches, 5000);
+  const refreshTimer = setInterval(refreshCaches, DNS_CACHE_REFRESH_INTERVAL_MS);
   const pauseTimer = setInterval(refreshProtectionPause, 1000);
 
-  const udp = dgram.createSocket('udp4');
+  const resolveDnsBindHosts = (
+    hostRaw: string
+  ):
+    | { mode: 'v4'; udpHosts: string[]; tcpHosts: string[] }
+    | { mode: 'v6'; udpHosts: string[]; tcpHosts: string[] }
+    | { mode: 'dual'; udpHosts: { v4: string; v6: string }; tcpHosts: { v4: string; v6: string } } => {
+    const host = String(hostRaw ?? '').trim();
+
+    // Explicit IPv6 bind.
+    if (host && host.includes(':') && host !== '0.0.0.0') {
+      return { mode: 'v6', udpHosts: [host], tcpHosts: [host] };
+    }
+
+    // Explicit IPv4 bind.
+    if (host && host !== '0.0.0.0') {
+      return { mode: 'v4', udpHosts: [host], tcpHosts: [host] };
+    }
+
+    // Default: bind both stacks. (Important for Tailscale clients that use IPv6 tailnet IPs.)
+    return { mode: 'dual', udpHosts: { v4: '0.0.0.0', v6: '::' }, tcpHosts: { v4: '0.0.0.0', v6: '::' } };
+  };
+
+  const bindCfg = resolveDnsBindHosts(config.DNS_HOST);
+
+  const udpSockets: dgram.Socket[] = [];
+  if (bindCfg.mode === 'dual') {
+    udpSockets.push(dgram.createSocket('udp4'));
+    udpSockets.push(dgram.createSocket({ type: 'udp6', ipv6Only: true }));
+  } else if (bindCfg.mode === 'v6') {
+    udpSockets.push(dgram.createSocket({ type: 'udp6', ipv6Only: true }));
+  } else {
+    udpSockets.push(dgram.createSocket('udp4'));
+  }
 
   async function handleQuery(msg: Buffer, clientIp: string): Promise<Buffer> {
     const start = Date.now();
@@ -1391,6 +2081,75 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const q = query.questions?.[0];
       const name = q?.name ? String(q.name) : '';
       const qtype = q?.type ? String(q.type) : 'A';
+
+      const forwardUpstream = async (upstream: UpstreamCache['upstream']): Promise<Buffer> => {
+        const getTimeoutMs = (): number => {
+          const defaults = {
+            udp: 2000,
+            tcp: 4000,
+            dot: 4000,
+            doh: 15000
+          } as const;
+
+          const raw =
+            upstream.transport === 'udp'
+              ? (config as any).DNS_FORWARD_UDP_TIMEOUT_MS
+              : upstream.transport === 'tcp'
+                ? (config as any).DNS_FORWARD_TCP_TIMEOUT_MS
+                : upstream.transport === 'dot'
+                  ? (config as any).DNS_FORWARD_DOT_TIMEOUT_MS
+                  : (config as any).DNS_FORWARD_DOH_TIMEOUT_MS;
+
+          const fallback = defaults[upstream.transport];
+          const n = Number(raw);
+          if (!Number.isFinite(n)) return fallback;
+          return Math.max(250, Math.floor(n));
+        };
+
+        const timeoutMs = getTimeoutMs();
+
+        const preferIpv4 = Boolean((config as any).DNS_FORWARD_DOH_PREFER_IPV4);
+
+        return upstream.transport === 'tcp'
+          ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg, timeoutMs)
+          : upstream.transport === 'dot'
+            ? await forwardDot({ host: upstream.host, port: upstream.port }, msg, timeoutMs)
+            : upstream.transport === 'doh'
+              ? await forwardDoh(upstream.dohUrl, msg, timeoutMs, preferIpv4)
+              : await forwardUdp({ host: upstream.host, port: upstream.port }, msg, timeoutMs);
+      };
+
+      const forwardActiveUpstreamWithTelemetry = async (): Promise<Buffer> => {
+        const upstream = upstreamCache.upstream;
+        try {
+          const resp = await forwardUpstream(upstream);
+          const now = Date.now();
+          dnsUpstreamDebug.lastForwardOkAtMs = now;
+          dnsUpstreamDebug.lastForwardOkAt = new Date(now).toISOString();
+          dnsUpstreamDebug.lastForwardError = null;
+          return resp;
+        } catch (e: any) {
+          const now = Date.now();
+          const err = e instanceof Error ? e : new Error(typeof e === 'string' ? e : 'UPSTREAM_ERROR');
+          const code = typeof e?.code === 'string' ? String(e.code) : undefined;
+          const target =
+            upstream.transport === 'doh' ? upstream.dohUrl : `${upstream.host}:${String(upstream.port ?? '')}`;
+          dnsUpstreamDebug.lastForwardError = {
+            at: new Date(now).toISOString(),
+            atMs: now,
+            transport: upstream.transport,
+            target,
+            name: err.name || undefined,
+            code,
+            message: err.message || String(err)
+          };
+          throw e;
+        }
+      };
+
+      const forwardActiveUpstreamNoTelemetry = async (): Promise<Buffer> => {
+        return await forwardUpstream(upstreamCache.upstream);
+      };
 
       // Local rewrites (exact + wildcard) handled before block/allow evaluation.
       const normalizedName = normalizeName(name);
@@ -1408,8 +2167,10 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       if (rewrite) {
         const localResp = buildLocalAnswerResponse(query, name, qtype, rewrite.target);
         if (localResp) {
-          const client = findClient(clientsCache.clients, clientIp);
-          const clientName = client?.name ?? 'Unknown';
+          const exactClient = findExactClient(clientsCache.clients, clientIp);
+          const subnetClient = findBestCidrClient(clientsCache.clients, clientIp);
+          const effectiveClient = exactClient ?? subnetClient;
+          const clientName = effectiveClient?.name ?? 'Unknown';
           const answerIps = extractAnswerIpsFromDnsResponse(localResp);
           await insertQueryLog(db, {
             id: crypto.randomUUID(),
@@ -1426,11 +2187,13 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         }
       }
 
-      const client = findClient(clientsCache.clients, clientIp);
+      const exactClient = findExactClient(clientsCache.clients, clientIp);
+      const subnetClient = findBestCidrClient(clientsCache.clients, clientIp);
+      const client = exactClient ?? subnetClient;
       const clientName = client?.name ?? 'Unknown';
 
       // Client kill-switch: blocks *all* DNS for this client/subnet.
-      if (client?.isInternetPaused) {
+      if (exactClient?.isInternetPaused || subnetClient?.isInternetPaused) {
         const resp = buildNxDomainResponse(query);
         await insertQueryLog(db, {
           id: crypto.randomUUID(),
@@ -1441,7 +2204,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           status: 'BLOCKED',
           type: qtype,
           durationMs: Date.now() - start,
-          blocklistId: 'ClientPolicy:InternetPaused'
+          blocklistId: exactClient?.isInternetPaused ? 'ClientPolicy:InternetPaused' : 'SubnetPolicy:InternetPaused'
         });
         return resp;
       }
@@ -1449,15 +2212,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       // Global protection pause: bypass all filtering and allow queries through.
       // (Rewrites are still handled above; internet-paused remains a hard kill-switch.)
       if (isProtectionPaused(protectionPause)) {
-        const upstream = upstreamCache.upstream;
-        const upstreamResp =
-          upstream.transport === 'tcp'
-            ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-            : upstream.transport === 'dot'
-              ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-              : upstream.transport === 'doh'
-                ? await forwardDoh(upstream.dohUrl, msg)
-                : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+        const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
         const answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
         await insertQueryLog(db, {
@@ -1476,24 +2231,158 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         return upstreamResp;
       }
 
+      // Manual allow/block rules with precedence: Client > Subnet > Global.
+      // (These are applied after protection pause, but before app/blocklist evaluation.)
+      const candidates = buildCandidateDomains(name);
+      const idx = rulesCache.index;
+
+      const clientManual = exactClient
+        ? decideManualRule(
+            candidates,
+            idx.manualAllowedByClientId.get(exactClient.id),
+            idx.manualBlockedByClientId.get(exactClient.id)
+          )
+        : 'NONE';
+
+      if (clientManual === 'BLOCKED') {
+        const resp = buildNxDomainResponse(query);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: `ClientRule:${exactClient?.id ?? ''}`
+        });
+        return resp;
+      }
+
+      if (clientManual === 'ALLOWED') {
+        const upstreamResp = await forwardActiveUpstreamWithTelemetry();
+
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps: extractAnswerIpsFromDnsResponse(upstreamResp)
+        });
+        return upstreamResp;
+      }
+
+      const subnetManual = subnetClient
+        ? decideManualRule(
+            candidates,
+            idx.manualAllowedBySubnetId.get(subnetClient.id),
+            idx.manualBlockedBySubnetId.get(subnetClient.id)
+          )
+        : 'NONE';
+
+      if (subnetManual === 'BLOCKED') {
+        const resp = buildNxDomainResponse(query);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: `SubnetRule:${subnetClient?.id ?? ''}`
+        });
+        return resp;
+      }
+
+      if (subnetManual === 'ALLOWED') {
+        const upstreamResp = await forwardActiveUpstreamWithTelemetry();
+
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps: extractAnswerIpsFromDnsResponse(upstreamResp)
+        });
+        return upstreamResp;
+      }
+
+      const globalManual = decideManualRule(candidates, idx.globalManualAllowed, idx.globalManualBlocked);
+
+      if (globalManual === 'BLOCKED') {
+        const resp = buildNxDomainResponse(query);
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'BLOCKED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          blocklistId: 'Manual'
+        });
+        return resp;
+      }
+
+      if (globalManual === 'ALLOWED') {
+        const upstreamResp = await forwardActiveUpstreamWithTelemetry();
+
+        await insertQueryLog(db, {
+          id: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps: extractAnswerIpsFromDnsResponse(upstreamResp)
+        });
+        return upstreamResp;
+      }
+
       // Compute effective policy (base + schedules).
       const now = new Date();
-      const effectiveBlockedCategories = new Set<ContentCategory>(
-        client?.useGlobalCategories === false ? (client?.blockedCategories ?? []) : []
-      );
-      const effectiveActiveApps = new Set<AppService>(client?.useGlobalApps === false ? [] : globalAppsCache.activeApps);
-      const effectiveShadowApps = new Set<AppService>(client?.useGlobalApps === false ? [] : globalAppsCache.shadowApps);
+      const policyPrefix = (scope: 'client' | 'subnet' | 'global'): string =>
+        scope === 'client' ? 'ClientPolicy' : scope === 'subnet' ? 'SubnetPolicy' : 'GlobalPolicy';
 
-      if (client?.useGlobalApps === false) {
-        for (const a of client?.blockedApps ?? []) effectiveActiveApps.add(a);
+      const effectiveBlockedCategories = new Set<ContentCategory>();
+      const shouldUseGlobalCategories = exactClient?.useGlobalCategories === false ? false : subnetClient?.useGlobalCategories === false ? false : true;
+      const shouldUseGlobalApps = exactClient?.useGlobalApps === false ? false : subnetClient?.useGlobalApps === false ? false : true;
+
+      if (!shouldUseGlobalCategories) {
+        const base = exactClient?.useGlobalCategories === false ? exactClient : subnetClient;
+        for (const c of base?.blockedCategories ?? []) effectiveBlockedCategories.add(c);
+      }
+
+      const effectiveActiveApps = new Set<AppService>(shouldUseGlobalApps ? globalAppsCache.activeApps : []);
+      const effectiveShadowApps = new Set<AppService>(shouldUseGlobalApps ? globalAppsCache.shadowApps : []);
+
+      if (!shouldUseGlobalApps) {
+        const base = exactClient?.useGlobalApps === false ? exactClient : subnetClient;
+        for (const a of base?.blockedApps ?? []) effectiveActiveApps.add(a);
       }
 
       // Ensure active always wins if both are present.
       for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
       let blockAll = false;
 
-      for (const s of client?.schedules ?? []) {
-        if (!isScheduleActiveNow(s, now)) continue;
+      const activeSubnetSchedules = (subnetClient?.schedules ?? []).filter((s) => isScheduleActiveNow(s, now));
+      const activeClientSchedules = (exactClient?.schedules ?? []).filter((s) => isScheduleActiveNow(s, now));
+
+      for (const s of [...activeSubnetSchedules, ...activeClientSchedules]) {
         if (s.blockAll) blockAll = true;
         for (const c of s.blockedCategories ?? []) effectiveBlockedCategories.add(c);
         for (const a of s.blockedApps ?? []) effectiveActiveApps.add(a);
@@ -1502,6 +2391,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       for (const a of effectiveActiveApps) effectiveShadowApps.delete(a);
 
       if (blockAll) {
+        const blockAllScope: 'client' | 'subnet' = activeClientSchedules.some((s) => s.blockAll) ? 'client' : 'subnet';
         const resp = buildNxDomainResponse(query);
         await insertQueryLog(db, {
           id: crypto.randomUUID(),
@@ -1512,13 +2402,39 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           status: 'BLOCKED',
           type: qtype,
           durationMs: Date.now() - start,
-          blocklistId: 'ClientPolicy:BlockAll'
+          blocklistId: `${policyPrefix(blockAllScope)}:BlockAll`
         });
         return resp;
       }
 
-      const blockedApp = isAppBlockedByPolicy(name, Array.from(effectiveActiveApps));
-      if (blockedApp) {
+      const clientScheduleApps = activeClientSchedules.flatMap((s) => s.blockedApps ?? []);
+      const subnetScheduleApps = activeSubnetSchedules.flatMap((s) => s.blockedApps ?? []);
+      const clientBaseApps = exactClient?.useGlobalApps === false ? (exactClient?.blockedApps ?? []) : [];
+      const subnetBaseApps = subnetClient?.useGlobalApps === false ? (subnetClient?.blockedApps ?? []) : [];
+      const globalBaseApps = shouldUseGlobalApps ? globalAppsCache.activeApps : [];
+      const globalShadowApps = shouldUseGlobalApps ? globalAppsCache.shadowApps : [];
+
+      const findBlockedAppWithScope = (): { app: AppService; scope: 'client' | 'subnet' | 'global' } | null => {
+        const clientScheduleHit = isAppBlockedByPolicy(name, clientScheduleApps);
+        if (clientScheduleHit) return { app: clientScheduleHit, scope: 'client' };
+
+        const clientBaseHit = isAppBlockedByPolicy(name, clientBaseApps);
+        if (clientBaseHit) return { app: clientBaseHit, scope: 'client' };
+
+        const subnetScheduleHit = isAppBlockedByPolicy(name, subnetScheduleApps);
+        if (subnetScheduleHit) return { app: subnetScheduleHit, scope: 'subnet' };
+
+        const subnetBaseHit = isAppBlockedByPolicy(name, subnetBaseApps);
+        if (subnetBaseHit) return { app: subnetBaseHit, scope: 'subnet' };
+
+        const globalHit = isAppBlockedByPolicy(name, globalBaseApps);
+        if (globalHit) return { app: globalHit, scope: 'global' };
+
+        return null;
+      };
+
+      const blockedAppHit = findBlockedAppWithScope();
+      if (blockedAppHit) {
         const resp = buildNxDomainResponse(query);
         await insertQueryLog(db, {
           id: crypto.randomUUID(),
@@ -1529,16 +2445,14 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           status: 'BLOCKED',
           type: qtype,
           durationMs: Date.now() - start,
-          blocklistId: `ClientPolicy:App:${blockedApp}`
+          blocklistId: `${policyPrefix(blockedAppHit.scope)}:App:${blockedAppHit.app}`
         });
         return resp;
       }
 
       let appShadowHit: string | undefined;
-      const shadowApp = isAppBlockedByPolicy(name, Array.from(effectiveShadowApps));
-      if (shadowApp) {
-        appShadowHit = `ClientPolicy:AppShadow:${shadowApp}`;
-      }
+      const shadowApp = isAppBlockedByPolicy(name, globalShadowApps);
+      if (shadowApp) appShadowHit = `${policyPrefix('global')}:AppShadow:${shadowApp}`;
 
       // Determine which blocklists are active for this client.
       const selectedBlocklists = new Set<string>();
@@ -1546,9 +2460,12 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const categoryIds = categoryBlocklistIdsCache.ids;
       const appIds = appBlocklistIdsCache.ids;
 
-      if (client && client.useGlobalSettings === false) {
-        for (const id of client.assignedBlocklists ?? []) {
-          // Per-client overrides should work even when globally disabled.
+      const shouldUseGlobalBlocklists = exactClient?.useGlobalSettings === false ? false : subnetClient?.useGlobalSettings === false ? false : true;
+
+      if (!shouldUseGlobalBlocklists) {
+        const base = exactClient?.useGlobalSettings === false ? exactClient : subnetClient;
+        for (const id of base?.assignedBlocklists ?? []) {
+          // Per-client/subnet overrides should work even when globally disabled.
           const sid = String(id);
           // Category/App lists are managed separately.
           if (categoryIds.has(sid) || appIds.has(sid)) continue;
@@ -1563,7 +2480,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       // Global categories: include enabled category lists only when allowed for this client.
-      if (client?.useGlobalCategories !== false) {
+      if (shouldUseGlobalCategories) {
         for (const id of categoryIds) {
           const st = blocklistsCache.byId.get(id);
           if (st?.enabled) selectedBlocklists.add(id);
@@ -1579,6 +2496,14 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       // App-blocklists are evaluated independently from normal blocklists.
       if (effectiveActiveApps.size || effectiveShadowApps.size) {
+        const appScopeByApp = new Map<AppService, 'client' | 'subnet' | 'global'>();
+        for (const a of globalBaseApps) appScopeByApp.set(a, 'global');
+        for (const a of globalShadowApps) appScopeByApp.set(a, 'global');
+        for (const a of subnetBaseApps) appScopeByApp.set(a, 'subnet');
+        for (const a of subnetScheduleApps) appScopeByApp.set(a, 'subnet');
+        for (const a of clientBaseApps) appScopeByApp.set(a, 'client');
+        for (const a of clientScheduleApps) appScopeByApp.set(a, 'client');
+
         const selectedActiveAppBlocklists = new Set<string>();
         const selectedShadowAppBlocklists = new Set<string>();
         const blocklistIdToApp = new Map<string, AppService>();
@@ -1607,6 +2532,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
             const resp = buildNxDomainResponse(query);
             const id = appDecision.blocklistId ?? '';
             const app = id ? blocklistIdToApp.get(id) : undefined;
+            const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
             await insertQueryLog(db, {
               id: crypto.randomUUID(),
               timestamp: new Date().toISOString(),
@@ -1617,7 +2543,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
               type: qtype,
               durationMs: Date.now() - start,
               blocklistId: app
-                ? `ClientPolicy:AppList:${app}`
+                ? `${policyPrefix(scope)}:AppList:${app}`
                 : id
                   ? formatBlocklistCategory(id, blocklistsCache.byId.get(id)?.name)
                   : undefined
@@ -1628,8 +2554,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           if (appDecision.decision === 'SHADOW_BLOCKED' && !appShadowHit) {
             const id = appDecision.blocklistId ?? '';
             const app = id ? blocklistIdToApp.get(id) : undefined;
+            const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
             appShadowHit = app
-              ? `ClientPolicy:AppListShadow:${app}`
+              ? `${policyPrefix(scope)}:AppListShadow:${app}`
               : id
                 ? formatBlocklistCategory(id, blocklistsCache.byId.get(id)?.name)
                 : undefined;
@@ -1641,8 +2568,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
           if ((shadowDecision.decision === 'BLOCKED' || shadowDecision.decision === 'SHADOW_BLOCKED') && !appShadowHit) {
             const id = shadowDecision.blocklistId ?? '';
             const app = id ? blocklistIdToApp.get(id) : undefined;
+            const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
             appShadowHit = app
-              ? `ClientPolicy:AppListShadow:${app}`
+              ? `${policyPrefix(scope)}:AppListShadow:${app}`
               : id
                 ? formatBlocklistCategory(id, blocklistsCache.byId.get(id)?.name)
                 : undefined;
@@ -1658,15 +2586,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         let answerIps: string[] | undefined;
         if (config.SHADOW_RESOLVE_BLOCKED) {
           try {
-            const upstream = upstreamCache.upstream;
-            const upstreamResp =
-              upstream.transport === 'tcp'
-                ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-                : upstream.transport === 'dot'
-                  ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-                  : upstream.transport === 'doh'
-                    ? await forwardDoh(upstream.dohUrl, msg)
-                    : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+            const upstreamResp = await forwardActiveUpstreamNoTelemetry();
             answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
           } catch {
             // ignore: blocked response should still be fast/reliable
@@ -1688,15 +2608,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         return resp;
       }
 
-      const upstream = upstreamCache.upstream;
-      const upstreamResp =
-        upstream.transport === 'tcp'
-          ? await forwardTcp({ host: upstream.host, port: upstream.port }, msg)
-          : upstream.transport === 'dot'
-            ? await forwardDot({ host: upstream.host, port: upstream.port }, msg)
-            : upstream.transport === 'doh'
-              ? await forwardDoh(upstream.dohUrl, msg)
-              : await forwardUdp({ host: upstream.host, port: upstream.port }, msg);
+      const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
       const finalStatus: 'SHADOW_BLOCKED' | 'PERMITTED' =
         decision === 'SHADOW_BLOCKED' || !!appShadowHit ? 'SHADOW_BLOCKED' : 'PERMITTED';
@@ -1728,84 +2640,122 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     }
   }
 
-  udp.on('message', async (msg, rinfo) => {
-    try {
-      const resp = await handleQuery(msg, rinfo.address);
-      udp.send(resp, rinfo.port, rinfo.address);
-    } catch {
-      // ignore
-    }
-  });
-
-  const tcp = net.createServer((socket) => {
-    socket.setTimeout(5000);
-    socket.setNoDelay(true);
-
-    let buf = Buffer.alloc(0);
-
-    socket.on('data', async (data) => {
-      buf = Buffer.concat([buf, data]);
-      while (buf.length >= 2) {
-        const len = buf.readUInt16BE(0);
-        if (buf.length < 2 + len) return;
-        const msg = buf.subarray(2, 2 + len);
-        buf = buf.subarray(2 + len);
-
-        try {
-          const ipRaw = socket.remoteAddress ?? '0.0.0.0';
-          const ip = ipRaw.startsWith('::ffff:') ? ipRaw.slice('::ffff:'.length) : ipRaw;
-          const resp = await handleQuery(msg, ip);
-          const outLen = Buffer.alloc(2);
-          outLen.writeUInt16BE(resp.length, 0);
-          socket.write(Buffer.concat([outLen, resp]));
-        } catch {
-          // ignore
-        }
-      }
-    });
-
-    socket.on('timeout', () => {
+  for (const udp of udpSockets) {
+    udp.on('message', async (msg, rinfo) => {
       try {
-        socket.end();
+        const clientIp = normalizeClientIp(rinfo.address);
+        recordDnsQuerySeen(clientIp, 'udp');
+        const resp = await handleQuery(msg, clientIp);
+        udp.send(resp, rinfo.port, rinfo.address);
       } catch {
         // ignore
       }
     });
-  });
+  }
 
-  await new Promise<void>((resolve, reject) => {
-    udp.once('error', reject);
-    udp.bind(config.DNS_PORT, config.DNS_HOST, () => {
-      udp.off('error', reject);
-      resolve();
-    });
-  });
+  const createTcpServer = (): net.Server =>
+    net.createServer((socket) => {
+      socket.setTimeout(5000);
+      socket.setNoDelay(true);
 
-  await new Promise<void>((resolve, reject) => {
-    tcp.once('error', reject);
-    tcp.listen(config.DNS_PORT, config.DNS_HOST, () => {
-      tcp.off('error', reject);
-      resolve();
+      let buf = Buffer.alloc(0);
+
+      socket.on('data', async (data) => {
+        buf = Buffer.concat([buf, data]);
+        while (buf.length >= 2) {
+          const len = buf.readUInt16BE(0);
+          if (buf.length < 2 + len) return;
+          const msg = buf.subarray(2, 2 + len);
+          buf = buf.subarray(2 + len);
+
+          try {
+            const ipRaw = socket.remoteAddress ?? '0.0.0.0';
+            const ip = normalizeClientIp(ipRaw);
+            recordDnsQuerySeen(ip, 'tcp');
+            const resp = await handleQuery(msg, ip);
+            const outLen = Buffer.alloc(2);
+            outLen.writeUInt16BE(resp.length, 0);
+            socket.write(Buffer.concat([outLen, resp]));
+          } catch {
+            // ignore
+          }
+        }
+      });
+
+      socket.on('timeout', () => {
+        try {
+          socket.end();
+        } catch {
+          // ignore
+        }
+      });
     });
-  });
+
+  const tcpServers: net.Server[] = [];
+  if (bindCfg.mode === 'dual') {
+    tcpServers.push(createTcpServer());
+    tcpServers.push(createTcpServer());
+  } else {
+    tcpServers.push(createTcpServer());
+  }
+
+  const bindUdp = (udp: dgram.Socket, host: string): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      udp.once('error', reject);
+      udp.bind(config.DNS_PORT, host, () => {
+        udp.off('error', reject);
+        resolve();
+      });
+    });
+
+  const listenTcp = (tcp: net.Server, host: string, opts?: { ipv6Only?: boolean }): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      tcp.once('error', reject);
+      tcp.listen({ port: config.DNS_PORT, host, ipv6Only: opts?.ipv6Only }, () => {
+        tcp.off('error', reject);
+        resolve();
+      });
+    });
+
+  if (bindCfg.mode === 'dual') {
+    // UDP
+    await bindUdp(udpSockets[0], bindCfg.udpHosts.v4);
+    await bindUdp(udpSockets[1], bindCfg.udpHosts.v6);
+
+    // TCP (separate v4/v6 servers to avoid dual-stack quirks)
+    await listenTcp(tcpServers[0], bindCfg.tcpHosts.v4);
+    await listenTcp(tcpServers[1], bindCfg.tcpHosts.v6, { ipv6Only: true });
+  } else {
+    const host = bindCfg.udpHosts[0] ?? config.DNS_HOST;
+    await bindUdp(udpSockets[0], host);
+
+    const tcpHost = bindCfg.tcpHosts[0] ?? config.DNS_HOST;
+    await listenTcp(tcpServers[0], tcpHost, { ipv6Only: bindCfg.mode === 'v6' ? true : undefined });
+  }
 
   async function close(): Promise<void> {
     clearInterval(refreshTimer);
     clearInterval(pauseTimer);
-    await new Promise<void>((resolve) => {
-      try {
-        udp.close(() => resolve());
-      } catch {
-        resolve();
-      }
-    });
-    await new Promise<void>((resolve) => {
-      try {
-        tcp.close(() => resolve());
-      } catch {
-        resolve();
-      }
-    });
+
+    for (const udp of udpSockets) {
+      await new Promise<void>((resolve) => {
+        try {
+          udp.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      });
+    }
+
+    for (const tcp of tcpServers) {
+      await new Promise<void>((resolve) => {
+        try {
+          tcp.close(() => resolve());
+        } catch {
+          resolve();
+        }
+      });
+    }
   }
 
   return { close };

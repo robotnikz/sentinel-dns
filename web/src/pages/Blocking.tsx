@@ -687,56 +687,68 @@ const Blocking: React.FC = () => {
 
       (async () => {
           try {
+              const canon = canonicalizeDomainInput(auditDomain);
+              if (!canon) {
+                  if (!cancelled) setAuditResult({ total: 0, affectedClients: [], frequency: 'Unknown', gravityMatches: [] });
+                  return;
+              }
+
               const res = await fetch('/api/query-logs?limit=1000');
               if (!res.ok) throw new Error(`HTTP ${res.status}`);
               const data = await res.json();
               const items = Array.isArray(data?.items) ? data.items : [];
 
-              const matches = items.filter((q: any) => typeof q?.domain === 'string' && matchesDomain(auditDomain, q.domain));
+              const matches = items.filter((q: any) => typeof q?.domain === 'string' && matchesDomain(canon, q.domain));
               const clients = Array.from(new Set(matches.map((q: any) => String(q?.client ?? 'Unknown'))));
 
-              // Allow rules override blocks.
-              const allowRules = rules.filter((r: any) => r?.type === 'ALLOWED' && typeof r?.domain === 'string' && matchesDomain(r.domain, auditDomain));
               let gravityMatches: Blocklist[] = [];
 
-              if (allowRules.length === 0) {
-                  const blockingRules = rules.filter(
-                      (r: any) => r?.type === 'BLOCKED' && typeof r?.domain === 'string' && matchesDomain(r.domain, auditDomain)
-                  );
+              // Server-side policy evaluation (includes categories, apps, allow/block).
+              const checkRes = await fetch('/api/policy/domaincheck', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                  credentials: 'include',
+                  body: JSON.stringify({ domain: canon })
+              });
 
-                  const categories = Array.from(
-                      new Set<string>(
-                          blockingRules.map((r: any) => (typeof r?.category === 'string' ? r.category : 'Manual'))
-                      )
-                  );
+              if (checkRes.ok) {
+                  const check = await checkRes.json();
+                  const decision = String(check?.decision ?? 'NONE');
+                  const reason = typeof check?.reason === 'string' ? check.reason : '';
+                  const blocklist = check?.blocklist;
 
-                  gravityMatches = categories.map((cat) => {
-                      if (cat.startsWith('Blocklist:')) {
-                          const parts = cat.split(':');
-                          const listId = parts.length >= 2 ? parts[1] : cat;
-                          const existing = blocklists.find((b) => b.id === listId);
-                          if (existing) return existing;
-                          return {
-                              id: listId,
-                              name: parts.length >= 3 ? parts.slice(2).join(':') : 'Blocklist',
-                              url: '',
-                              ruleCount: 0,
-                              mode: 'ACTIVE',
-                              lastUpdated: '—',
-                              lastUpdatedAt: null
-                          };
+                  if (decision === 'BLOCKED' || decision === 'SHADOW_BLOCKED') {
+                      if (blocklist && typeof blocklist?.id === 'string') {
+                          const existing = blocklists.find((b) => b.id === String(blocklist.id));
+                          if (existing) {
+                              gravityMatches = [{ ...existing, mode: decision === 'SHADOW_BLOCKED' ? 'SHADOW' : existing.mode }];
+                          } else {
+                              gravityMatches = [
+                                  {
+                                      id: String(blocklist.id),
+                                      name: String(blocklist.name ?? 'Blocklist'),
+                                      url: '',
+                                      ruleCount: 0,
+                                      mode: decision === 'SHADOW_BLOCKED' ? 'SHADOW' : 'ACTIVE',
+                                      lastUpdated: '—',
+                                      lastUpdatedAt: null
+                                  }
+                              ];
+                          }
+                      } else {
+                          gravityMatches = [
+                              {
+                                  id: `policy:${reason || decision}`,
+                                  name: reason || (decision === 'SHADOW_BLOCKED' ? 'Shadow policy match' : 'Policy match'),
+                                  url: '',
+                                  ruleCount: 0,
+                                  mode: decision === 'SHADOW_BLOCKED' ? 'SHADOW' : 'ACTIVE',
+                                  lastUpdated: '—',
+                                  lastUpdatedAt: null
+                              }
+                          ];
                       }
-
-                      return {
-                          id: `manual:${cat}`,
-                          name: cat || 'Manual',
-                          url: '',
-                          ruleCount: 0,
-                          mode: 'ACTIVE',
-                          lastUpdated: '—',
-                          lastUpdatedAt: null
-                      };
-                  });
+                  }
               }
 
               if (cancelled) return;

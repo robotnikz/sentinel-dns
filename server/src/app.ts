@@ -22,6 +22,7 @@ import { registerVersionRoutes } from './routes/version.js';
 import { registerNotificationRoutes } from './routes/notifications.js';
 import { registerClientsRoutes } from './routes/clients.js';
 import { registerQueryLogsRoutes } from './routes/queryLogs.js';
+import { registerPolicyRoutes } from './routes/policy.js';
 import { registerSecretsRoutes } from './routes/secrets.js';
 import { registerDnsRoutes } from './routes/dns.js';
 import { registerAuthRoutes } from './routes/auth.js';
@@ -33,10 +34,12 @@ import { registerGeoIpRoutes } from './routes/geoip.js';
 import { registerProtectionRoutes } from './routes/protection.js';
 import { registerDiscoveryRoutes } from './routes/discovery.js';
 import { registerOpenApiRoutes } from './routes/openapi.js';
+import { registerMaintenanceRoutes } from './routes/maintenance.js';
 import { startDnsServer } from './dns/dnsServer.js';
 import { requireAdmin } from './auth.js';
 import { startFollowerSyncLoop } from './cluster/sync.js';
 import { registerFollowerReadOnlyGuard } from './cluster/guard.js';
+import { startMaintenanceJobs } from './maintenance.js';
 
 export type BuildAppOptions = {
   enableStatic?: boolean;
@@ -57,7 +60,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
             level: config.NODE_ENV === 'production' ? 'info' : 'debug'
           },
     // Needed so Fastify derives protocol from X-Forwarded-* when behind a reverse proxy.
-    trustProxy: true
+    trustProxy: config.TRUST_PROXY
   });
 
   // IMPORTANT:
@@ -81,6 +84,8 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
 
   const db = createDb(config);
   await db.init();
+
+  const maintenance = startMaintenanceJobs(config, db);
 
   // If clustering is enabled and this node is a follower, reject mutation requests.
   registerFollowerReadOnlyGuard(app, config, db);
@@ -201,6 +206,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   await registerNotificationRoutes(app, config, db);
   await registerClientsRoutes(app, config, db);
   await registerQueryLogsRoutes(app, config, db);
+  await registerPolicyRoutes(app, config, db);
   await registerSecretsRoutes(app, config, db);
   await registerDnsRoutes(app, config, db);
   await registerRewritesRoutes(app, config, db);
@@ -209,6 +215,7 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   await registerGeoRoutes(app, config, db);
   await registerGeoIpRoutes(app, config, db);
   await registerProtectionRoutes(app, config, db);
+  await registerMaintenanceRoutes(app, config, db);
   await registerOpenApiRoutes(app, config, db);
   await registerClusterRoutes(app, config, db);
   await registerTailscaleRoutes(app, config, db);
@@ -225,6 +232,11 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
     if (refreshInterval) clearInterval(refreshInterval);
     try {
       clusterLoop.stop();
+    } catch {
+      // ignore
+    }
+    try {
+      await maintenance.close();
     } catch {
       // ignore
     }

@@ -11,7 +11,101 @@ type QueryLogsGetQuerystring = {
   limit?: string;
 };
 
+type IgnoredAnomaliesPutBody = {
+  signature: string;
+};
+
+type IgnoredAnomaliesDeleteQuerystring = {
+  signature?: string;
+};
+
 export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
+  const purgeExpiredIgnored = async () => {
+    // Best-effort retention cleanup. Called on access so we don't need a cron.
+    await db.pool.query("DELETE FROM ignored_anomalies WHERE ignored_at < NOW() - interval '30 days'");
+  };
+
+  app.get(
+    '/api/suspicious/ignored',
+    {
+      config: {
+        rateLimit: { max: 120, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request) => {
+      await requireAdmin(db, request);
+      await purgeExpiredIgnored();
+
+      const res = await db.pool.query(
+        'SELECT signature, ignored_at FROM ignored_anomalies ORDER BY ignored_at DESC'
+      );
+
+      return {
+        items: res.rows.map((r) => ({
+          signature: String(r.signature ?? ''),
+          ignoredAt: r.ignored_at ? new Date(r.ignored_at).toISOString() : null
+        }))
+      };
+    }
+  );
+
+  app.put(
+    '/api/suspicious/ignored',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit(),
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['signature'],
+          properties: {
+            signature: { type: 'string', minLength: 1, maxLength: 500 }
+          }
+        }
+      }
+    },
+    async (request: FastifyRequest<{ Body: IgnoredAnomaliesPutBody }>) => {
+      await requireAdmin(db, request);
+      await purgeExpiredIgnored();
+
+      const signature = String(request.body.signature || '').trim();
+      if (!signature) return { error: 'INVALID_SIGNATURE' };
+
+      await db.pool.query(
+        'INSERT INTO ignored_anomalies(signature, ignored_at) VALUES ($1, NOW()) ON CONFLICT (signature) DO UPDATE SET ignored_at = NOW()',
+        [signature]
+      );
+
+      return { ok: true };
+    }
+  );
+
+  app.delete(
+    '/api/suspicious/ignored',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (request: FastifyRequest<{ Querystring: IgnoredAnomaliesDeleteQuerystring }>, reply: FastifyReply) => {
+      await requireAdmin(db, request);
+      const signature = String(request.query.signature || '').trim();
+      if (!signature) {
+        reply.code(400);
+        return { error: 'INVALID_SIGNATURE' };
+      }
+
+      await db.pool.query('DELETE FROM ignored_anomalies WHERE signature = $1', [signature]);
+      reply.code(204);
+      return null;
+    }
+  );
+
   app.get(
     '/api/query-logs',
     {
@@ -40,12 +134,34 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
   );
 
   app.post(
+    '/api/query-logs/flush',
+    {
+      config: {
+        rateLimit: { max: 10, timeWindow: '1 minute' }
+      },
+      preHandler: app.rateLimit()
+    },
+    async (_request: FastifyRequest, reply: FastifyReply) => {
+      await requireAdmin(db, _request);
+
+      const res = await db.pool.query('DELETE FROM query_logs');
+      return {
+        ok: true,
+        deleted: typeof res.rowCount === 'number' ? res.rowCount : 0
+      };
+    }
+  );
+
+  app.post(
     '/api/query-logs/ingest',
     {
         config: {
           rateLimit: { max: 30, timeWindow: '1 minute' }
         },
         preHandler: app.rateLimit(),
+      // Defense-in-depth: avoid excessively large JSON bodies.
+      // Needs to be high enough for normal ingest bursts.
+      bodyLimit: 5 * 1024 * 1024,
       schema: {
         body: {
           type: 'object',
@@ -79,22 +195,19 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
         return { error: 'NO_ITEMS', message: 'Provide body.items[] or body.item.' };
       }
 
-      const client = await db.pool.connect();
-      try {
-        await client.query('BEGIN');
-        for (const entry of entries) {
-          await client.query('INSERT INTO query_logs(entry) VALUES ($1)', [entry]);
-        }
-        await client.query('COMMIT');
-      } catch (e) {
-        await client.query('ROLLBACK');
-        throw e;
-      } finally {
-        client.release();
-      }
+      // Batch insert for performance: avoid N roundtrips for large ingest payloads.
+      // We pass a JSON array and let Postgres expand it server-side.
+      await db.pool.query(
+        `INSERT INTO query_logs(entry)
+         SELECT value
+         FROM jsonb_array_elements($1::jsonb) AS value`,
+        [JSON.stringify(entries)]
+      );
 
       reply.code(202);
       return { ok: true, ingested: entries.length };
     }
   );
+
+  void config;
 }
