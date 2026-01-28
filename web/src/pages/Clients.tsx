@@ -27,6 +27,7 @@ const Clients: React.FC = () => {
     const [editingClient, setEditingClient] = useState<ClientProfile | null>(null);
         const [clientToDelete, setClientToDelete] = useState<ClientProfile | null>(null);
                 const [scheduleToDelete, setScheduleToDelete] = useState<Schedule | null>(null);
+        const [addNodeError, setAddNodeError] = useState<string | null>(null);
 
     // Discovered clients (best-effort from DNS logs + optional reverse DNS)
     const [discovered, setDiscovered] = useState<Array<{ ip: string; hostname: string | null; lastSeen?: string | null }>>([]);
@@ -424,6 +425,7 @@ const Clients: React.FC = () => {
   const openCreateModal = () => {
       setEditingClient(null);
       setAddMode('manual');
+      setAddNodeError(null);
       resetNewNodeData();
       setShowAddModal(true);
   };
@@ -432,6 +434,7 @@ const Clients: React.FC = () => {
       const isSubnet = client.isSubnet || client.type === 'subnet';
       setEditingClient(client);
       setAddMode('manual');
+      setAddNodeError(null);
       setActiveView(isSubnet ? 'networks' : 'devices');
       setNewNodeData({
           name: client.name || '',
@@ -447,15 +450,29 @@ const Clients: React.FC = () => {
       setShowAddModal(false);
       setEditingClient(null);
       setAddMode('manual');
+      setAddNodeError(null);
       resetNewNodeData();
   };
 
-    const handleAddNode = () => {
+    const handleAddNode = async () => {
       if(!newNodeData.name) return;
+      setAddNodeError(null);
 
       const isNetworkCreation = editingClient
           ? editingClient.isSubnet || editingClient.type === 'subnet'
           : activeView === 'networks';
+
+      const cidr = String(newNodeData.cidr ?? '').trim();
+      if (isNetworkCreation) {
+          if (!cidr) {
+              setAddNodeError('CIDR is required for network segments.');
+              return;
+          }
+          if (!cidr.includes('/')) {
+              setAddNodeError('CIDR must include a prefix length (e.g. 192.168.20.0/24).');
+              return;
+          }
+      }
 
       if (editingClient) {
           const updatedProfile: ClientProfile = {
@@ -463,22 +480,31 @@ const Clients: React.FC = () => {
               name: newNodeData.name,
               type: isNetworkCreation ? 'subnet' : (newNodeData.deviceIcon as any),
               isSubnet: isNetworkCreation,
-              cidr: isNetworkCreation ? newNodeData.cidr : undefined,
+              cidr: isNetworkCreation ? cidr : undefined,
               mac: !isNetworkCreation ? newNodeData.mac : undefined,
               ip: !isNetworkCreation ? newNodeData.ip : undefined
           };
-          void updateClient(updatedProfile);
+
+          const ok = await updateClient(updatedProfile);
+          if (!ok) {
+              setAddNodeError('Save failed. Please check your inputs (CIDR format) and permissions.');
+              return;
+          }
+
           closeAddModal();
           return;
       }
 
+      const idPrefix = isNetworkCreation ? 's-' : 'c-';
+      const id = `${idPrefix}${Date.now()}`;
+
       const newProfile: ClientProfile = {
-          id: Date.now().toString(),
+          id,
           name: newNodeData.name,
           type: isNetworkCreation ? 'subnet' : newNodeData.deviceIcon as any,
           isSubnet: isNetworkCreation,
           // Network Fields
-          cidr: isNetworkCreation ? newNodeData.cidr : undefined,
+          cidr: isNetworkCreation ? cidr : undefined,
           // Device Fields
           mac: !isNetworkCreation ? newNodeData.mac : undefined,
           ip: !isNetworkCreation ? newNodeData.ip : undefined,
@@ -497,7 +523,12 @@ const Clients: React.FC = () => {
       };
 
       // Best-effort persist; show feedback in the modal when editing, not on creation.
-      void addClient(newProfile);
+      const ok = await addClient(newProfile);
+      if (!ok) {
+          setAddNodeError('Create failed. Please check your inputs (CIDR format) and permissions.');
+          return;
+      }
+
       closeAddModal();
   };
 
@@ -1020,6 +1051,12 @@ const Clients: React.FC = () => {
                                             <button onClick={closeAddModal} className="text-zinc-500 hover:text-white"><X className="w-5 h-5" /></button>
                   </div>
                   <div className="p-6 space-y-4">
+
+                      {addNodeError && (
+                          <div className="text-xs text-rose-300 bg-rose-950/20 border border-rose-800/30 rounded px-3 py-2">
+                              {addNodeError}
+                          </div>
+                      )}
                       
                       {/* Name Field (Common) */}
                       <div>
@@ -1187,7 +1224,7 @@ const Clients: React.FC = () => {
                   <div className="p-5 border-t border-[#27272a] bg-[#121214] flex justify-end gap-3">
                       <button onClick={closeAddModal} className="px-4 py-2 rounded text-xs font-bold text-zinc-400 hover:text-white">CANCEL</button>
                       <button 
-                        onClick={handleAddNode}
+                        onClick={() => void handleAddNode()}
                                                 disabled={!newNodeData.name || (activeView === 'networks' && !newNodeData.cidr.trim())}
                         className="btn-primary px-6 py-2 rounded text-xs flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
@@ -1197,25 +1234,19 @@ const Clients: React.FC = () => {
               </div>
       </Modal>
 
-            {/* CLIENT DETAILS SIDEBAR (slides in from the right; hidden by default) */}
-            {selectedClient ? (
-                <div
-                    className="fixed inset-0 z-[1099] bg-black/70 backdrop-blur-sm xl:hidden"
-                    onMouseDown={() => setSelectedClient(null)}
-                />
-            ) : null}
-
-            <div
-                className={`fixed top-0 right-0 z-[1100] h-full w-full max-w-[520px] transition-transform duration-300 ease-out ${
-                    selectedClient ? 'translate-x-0' : 'translate-x-full'
-                }`}
+            {/* CLIENT/NETWORK DETAILS POPUP (center modal) */}
+            <Modal
+                open={!!selectedClient}
+                onClose={() => setSelectedClient(null)}
+                zIndex={1100}
             >
                 {selectedClient ? (
                     <div
-                        className={`h-full flex flex-col overflow-hidden shadow-2xl bg-[#09090b] border-l ${
+                        className={`w-full max-w-5xl max-h-[90vh] rounded-xl overflow-hidden shadow-2xl bg-[#09090b] border ${
                             selectedClient.isInternetPaused ? 'border-rose-900' : 'border-[#27272a]'
                         }`}
                     >
+                    <div className="h-full max-h-[90vh] flex flex-col overflow-hidden">
                     {/* Header */}
                     <div className="p-5 border-b border-[#27272a] bg-[#121214] flex items-start justify-between gap-6">
                         <div className="flex items-start gap-4 min-w-0">
@@ -1647,9 +1678,10 @@ const Clients: React.FC = () => {
                              </div>
                          )}
                     </div>
+                    </div>
                 </div>
                 ) : null}
-            </div>
+            </Modal>
 
       {/* DELETE CONFIRMATION MODAL */}
       {clientToDelete && (
