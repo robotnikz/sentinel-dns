@@ -301,6 +301,23 @@ describe('integration: cluster/HA + sync (MVP)', () => {
     expect(ready.json()).toMatchObject({ ok: true, role: 'follower' });
   });
 
+  it('follower sync removes clients deleted on leader', async () => {
+    if (!dockerOk) return;
+    if (!leader || !follower) throw new Error('apps not initialized');
+
+    // Ensure follower has the leader client first.
+    await runFollowerSyncOnce(follower.config, follower.db);
+    const before = await follower.db.pool.query('SELECT id FROM clients');
+    expect(before.rowCount).toBeGreaterThan(0);
+
+    // Delete all clients on the leader, then sync again.
+    await leader.db.pool.query('DELETE FROM clients');
+    await runFollowerSyncOnce(follower.config, follower.db);
+
+    const after = await follower.db.pool.query('SELECT id FROM clients');
+    expect(after.rowCount).toBe(0);
+  });
+
   it('follower rejects mutations with FOLLOWER_READONLY', async () => {
     if (!dockerOk) return;
     if (!follower) throw new Error('follower not initialized');

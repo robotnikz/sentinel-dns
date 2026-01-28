@@ -201,7 +201,21 @@ export async function applySnapshot(config: AppConfig, db: Db, snapshot: Cluster
     }
 
     // Clients
-    for (const c of snapshot.clients || []) {
+    {
+      const incomingClients = Array.isArray(snapshot.clients) ? snapshot.clients : [];
+      const incomingIds = incomingClients
+        .map((c: any) => String(c?.id || '').trim())
+        .filter(Boolean);
+
+      // Snapshot sync should converge follower state to leader state, including deletions.
+      // If the leader deletes a client/subnet profile, it must disappear from the follower.
+      if (incomingIds.length === 0) {
+        await client.query('DELETE FROM clients');
+      } else {
+        await client.query('DELETE FROM clients WHERE NOT (id = ANY($1::text[]))', [incomingIds]);
+      }
+
+      for (const c of incomingClients) {
       const id = String((c as any).id || '');
       if (!id) continue;
       const profile = (c as any).profile;
@@ -210,6 +224,7 @@ export async function applySnapshot(config: AppConfig, db: Db, snapshot: Cluster
         'INSERT INTO clients(id, profile, updated_at) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET profile = EXCLUDED.profile, updated_at = EXCLUDED.updated_at',
         [id, profile, updatedAt]
       );
+      }
     }
 
     // Manual rules (non-blocklist)

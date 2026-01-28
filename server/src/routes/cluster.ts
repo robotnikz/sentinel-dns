@@ -12,6 +12,22 @@ import type { ClusterExportSnapshot } from '../cluster/types.js';
 import { effectiveRole, readRoleOverride } from '../cluster/role.js';
 import 'fastify-rate-limit';
 
+async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<{ ok: true; data: any } | { ok: false; error: string }> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: controller.signal } as any);
+    if (!res.ok) return { ok: false, error: `HTTP_${res.status}` };
+    const data = await res.json().catch(() => null);
+    return { ok: true, data };
+  } catch (e: any) {
+    const msg = String(e?.name === 'AbortError' ? 'TIMEOUT' : e?.message || 'FETCH_FAILED');
+    return { ok: false, error: msg };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 function unauthorized(): Error {
   const err = new Error('Unauthorized');
   // @ts-expect-error Fastify maps this
@@ -260,6 +276,67 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
     const last = status.lastSync ? Date.parse(status.lastSync) : 0;
     const ok = last > 0 && Date.now() - last < 20_000;
     return { ok, role, configuredRole, lastSync: status.lastSync ?? null };
+  });
+
+  // No-auth endpoint used by the UI to render a compact HA status indicator.
+  // Returns local readiness and best-effort peer readiness by probing HA unicast peers.
+  app.get('/api/cluster/peer-status', async () => {
+    const status = await getClusterStatus(db);
+
+    // Mirror the readiness semantics from /api/cluster/ready.
+    const clusterEnabled = Boolean(status.config.enabled);
+    const configuredRole = status.config.role;
+    const role = clusterEnabled ? effectiveRole(config, configuredRole) : ('standalone' as any);
+
+    let localOk = true;
+    let localLastSync: string | null | undefined = undefined;
+    if (clusterEnabled && configuredRole === 'follower') {
+      const last = status.lastSync ? Date.parse(status.lastSync) : 0;
+      localOk = last > 0 && Date.now() - last < 20_000;
+      localLastSync = status.lastSync ?? null;
+    }
+
+    // Load HA config to find unicast peers (best signal of the other node's IP).
+    let peers: string[] = [];
+    try {
+      const HA_CONFIG_KEY = 'cluster_ha_config';
+      const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', [HA_CONFIG_KEY]);
+      const value = res.rows?.[0]?.value;
+      const cfg = value && typeof value === 'object' ? (value as any) : null;
+      const enabled = Boolean(cfg?.enabled);
+      const mode = String(cfg?.mode || 'multicast');
+      const list = Array.isArray(cfg?.unicastPeers) ? cfg.unicastPeers : [];
+      if (enabled && mode === 'unicast') {
+        peers = list.map((p: any) => String(p || '').trim()).filter(Boolean);
+      }
+    } catch {
+      peers = [];
+    }
+
+    const port = Number(config.PORT ?? 8080);
+    const peerResults: Array<{ ip: string; reachable: boolean; ready?: any; error?: string }> = [];
+    for (const ip of peers) {
+      const url = `http://${ip}:${port}/api/cluster/ready`;
+      const r = await fetchJsonWithTimeout(url, 1200);
+      if (r.ok) peerResults.push({ ip, reachable: true, ready: r.data });
+      else peerResults.push({ ip, reachable: false, error: r.error });
+    }
+
+    return {
+      ok: true,
+      clusterEnabled,
+      local: {
+        reachable: true,
+        nodeId: status.nodeId,
+        ready: {
+          ok: localOk,
+          role,
+          configuredRole: clusterEnabled ? configuredRole : 'standalone',
+          lastSync: localLastSync
+        }
+      },
+      peers: peerResults
+    };
   });
 
   // Enable leader mode and ensure a cluster PSK exists.
