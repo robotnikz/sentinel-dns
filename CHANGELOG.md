@@ -1,3 +1,9 @@
+## [0.7.3](https://github.com/robotnikz/sentinel-dns/compare/v0.7.2...v0.7.3) (2026-01-28)
+
+### fix
+
+* **ui:** simplify HA setup wizard ([](https://github.com/robotnikz/sentinel-dns/commit/6f412f202d448f1690301ebb8107d75708f5dc13))
+
 ## [0.7.2](https://github.com/robotnikz/sentinel-dns/compare/v0.7.1...v0.7.2) (2026-01-28)
 
 * Merge pull request #51 from robotnikz/fix/ha-autodetect-joincode ([](https://github.com/robotnikz/sentinel-dns/commit/b689c2ada09eb5e47c30d014964e53c61ff1c3f7)), closes [#51](https://github.com/robotnikz/sentinel-dns/issues/51)
