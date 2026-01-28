@@ -25,6 +25,25 @@ type ClusterStatus = {
   roleOverride?: ClusterRole | null;
 };
 
+function vipIpOnly(input: string): string {
+  const s = String(input || '').trim();
+  if (!s) return '';
+  // allow users to paste CIDR; keep only the IP part.
+  return s.split('/')[0].trim();
+}
+
+function buildVipLeaderUrl(opts: { vip: string; fallbackOrigin: string }): string {
+  const vip = vipIpOnly(opts.vip);
+  if (!vip) return '';
+  try {
+    const u = new URL(opts.fallbackOrigin);
+    const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+    return `${u.protocol}//${vip}:${port}`;
+  } catch {
+    return `http://${vip}:8080`;
+  }
+}
+
 function formatBytes(bytes?: number): string {
   if (!Number.isFinite(bytes as any) || (bytes as number) < 0) return '—';
   const b = bytes as number;
@@ -99,6 +118,15 @@ const Cluster: React.FC = () => {
   const [msg, setMsg] = useState<string>('');
   const [msgKind, setMsgKind] = useState<'success' | 'error'>('success');
 
+  const [haVip, setHaVip] = useState<string>('192.168.1.53');
+  const [haInterface, setHaInterface] = useState<string>('');
+  const [haPriority, setHaPriority] = useState<string>('110');
+  const [haMode, setHaMode] = useState<'multicast' | 'unicast'>('multicast');
+  const [haPeers, setHaPeers] = useState<string>('');
+  const [haAuthPass, setHaAuthPass] = useState<string>('');
+  const [haEnabled, setHaEnabled] = useState<boolean>(false);
+  const [haHasStoredPass, setHaHasStoredPass] = useState<boolean>(false);
+
   const [leaderUrl, setLeaderUrl] = useState<string>(() => {
     try {
       return window.location.origin;
@@ -115,19 +143,16 @@ const Cluster: React.FC = () => {
     }
   }, []);
 
+  const vipLeaderUrlSuggestion = useMemo(() => {
+    return buildVipLeaderUrl({ vip: haVip, fallbackOrigin: uiOrigin || 'http://localhost:8080' });
+  }, [haVip, uiOrigin]);
+
   const [joinCode, setJoinCode] = useState<string>('');
   const [joinCodeBusy, setJoinCodeBusy] = useState(false);
 
   const [followerJoinCode, setFollowerJoinCode] = useState<string>('');
 
-  const [haVip, setHaVip] = useState<string>('192.168.1.53');
-  const [haInterface, setHaInterface] = useState<string>('');
-  const [haPriority, setHaPriority] = useState<string>('110');
-  const [haMode, setHaMode] = useState<'multicast' | 'unicast'>('multicast');
-  const [haPeers, setHaPeers] = useState<string>('');
-  const [haAuthPass, setHaAuthPass] = useState<string>('');
-  const [haEnabled, setHaEnabled] = useState<boolean>(false);
-  const [haHasStoredPass, setHaHasStoredPass] = useState<boolean>(false);
+  const [failoverTestDomain, setFailoverTestDomain] = useState<string>('example.com');
 
   const msgTimer = useRef<number | null>(null);
 
@@ -285,6 +310,19 @@ const Cluster: React.FC = () => {
   const canShowJoinCode = status?.config.enabled && effectiveRole === 'leader' && !!status?.config.leaderUrl;
   const warningOverride = status?.roleOverride ? `Role override active: ${status.roleOverride}` : '';
 
+  const leaderUrlMismatchWarning = useMemo(() => {
+    if (!haEnabled) return '';
+    const vip = vipIpOnly(haVip);
+    if (!vip) return '';
+    const cur = leaderUrl.trim();
+    if (!cur) return '';
+    // If leaderUrl doesn't point at the VIP, failover will break follower sync.
+    if (!cur.includes(vip)) {
+      return `Recommended: set Leader URL to the VIP (${vip}) so followers keep syncing after failover.`;
+    }
+    return '';
+  }, [haEnabled, haVip, leaderUrl]);
+
   const saveHaConfig = async () => {
     setBusy(true);
     try {
@@ -415,6 +453,25 @@ const Cluster: React.FC = () => {
     return steps;
   }, [effectiveRole, haBlockingErrors, haDisabledReason, haEnabled, status?.config.enabled]);
 
+  const failoverCommands = useMemo(() => {
+    const vip = vipIpOnly(haVip);
+    const domain = String(failoverTestDomain || 'example.com').trim() || 'example.com';
+    if (!vip) return { vip: '', domain, cmds: [] as string[] };
+
+    const cmds: string[] = [];
+    // Cross-platform friendly commands users can run on any LAN client.
+    cmds.push(`# Linux/macOS (dig)`);
+    cmds.push(`dig @${vip} ${domain} A`);
+    cmds.push('');
+    cmds.push(`# Windows (PowerShell)`);
+    cmds.push(`Resolve-DnsName -Server ${vip} -Name ${domain} -Type A`);
+    cmds.push('');
+    cmds.push(`# Windows (classic)`);
+    cmds.push(`nslookup ${domain} ${vip}`);
+
+    return { vip, domain, cmds };
+  }, [failoverTestDomain, haVip]);
+
   return (
     <div className="p-8 text-zinc-200">
       <div className="flex items-start justify-between gap-4 mb-6">
@@ -469,10 +526,13 @@ const Cluster: React.FC = () => {
                 Step 1: On <span className="text-zinc-200">both</span> nodes, configure <span className="text-zinc-200">VIP / Keepalived</span>.
               </li>
               <li>
-                Step 2: On the node that should own the VIP, enable Leader and generate a Join Code.
+                Step 2: On the node that currently owns the VIP, enable Leader. Use the <span className="font-mono">VIP URL</span> as Leader URL.
               </li>
               <li>
                 Step 3: On the other node, paste the Join Code and configure it as Follower.
+              </li>
+              <li>
+                Set your router/DHCP DNS to the VIP only (one IP). This is what keeps the home network DNS alive during failover.
               </li>
             </ol>
 
@@ -669,7 +729,14 @@ const Cluster: React.FC = () => {
               <h3 className="font-semibold">Step 2 — Leader Setup</h3>
             </div>
             <p className="text-sm text-zinc-400 mb-4">
-              Set the Leader URL to the address that followers can reach. For this demo, use your current UI URL
+              Set the Leader URL to the address that followers can reach.
+              <span className="text-zinc-300"> For real VIP HA, this should be the VIP URL</span>
+              {vipLeaderUrlSuggestion ? (
+                <>
+                  : <span className="font-mono">{vipLeaderUrlSuggestion}</span>
+                </>
+              ) : null}
+              . For a single-node demo, you can use your current UI URL
               {uiOrigin ? (
                 <>
                   : <span className="font-mono">{uiOrigin}</span>
@@ -679,6 +746,13 @@ const Cluster: React.FC = () => {
               (If you publish the UI to a different host port, use that host port — e.g. smoke demo uses <span className="font-mono">18080</span>.)
             </p>
 
+            {leaderUrlMismatchWarning ? (
+              <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5" />
+                <span className="text-sm">{leaderUrlMismatchWarning}</span>
+              </div>
+            ) : null}
+
             <div className="flex flex-col md:flex-row gap-3">
               <input
                 value={leaderUrl}
@@ -686,6 +760,16 @@ const Cluster: React.FC = () => {
                 placeholder={uiOrigin || 'http://<host>:8080'}
                 className="flex-1 px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
               />
+              {haEnabled && vipLeaderUrlSuggestion ? (
+                <button
+                  onClick={() => setLeaderUrl(vipLeaderUrlSuggestion)}
+                  disabled={busy}
+                  className="px-4 py-2 rounded-md border border-[#27272a] bg-[#121214] hover:bg-[#18181b] disabled:opacity-50 text-zinc-200 text-sm font-medium"
+                  title="Recommended for VIP HA"
+                >
+                  Use VIP
+                </button>
+              ) : null}
               <button
                 onClick={() => void enableLeader()}
                 disabled={busy}
@@ -753,6 +837,116 @@ const Cluster: React.FC = () => {
               >
                 Configure as Follower
               </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Shield className="w-4 h-4 text-zinc-400" />
+              <h3 className="font-semibold">Step 4 — Failover Test (DNS)</h3>
+            </div>
+
+            <p className="text-sm text-zinc-400 mb-4">
+              This is a practical check you can run after setup. The goal is: your home network always uses one DNS IP (the VIP), and DNS keeps working when a node goes down.
+            </p>
+
+            {!haEnabled ? (
+              <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5" />
+                <span className="text-sm">VIP failover is currently disabled. Enable Step 1 on both nodes before running the failover test.</span>
+              </div>
+            ) : null}
+
+            {haEnabled && !vipIpOnly(haVip) ? (
+              <div className="mb-4 rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-rose-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5" />
+                <span className="text-sm">Set a VIP first (example: 192.168.1.53).</span>
+              </div>
+            ) : null}
+
+            <ol className="text-sm text-zinc-300 space-y-2 list-decimal pl-5">
+              <li>
+                Set your router/DHCP DNS to the VIP only (example: <span className="font-mono">{vipIpOnly(haVip) || '192.168.1.53'}</span>).
+              </li>
+              <li>
+                Confirm current role: this page should show one node as <span className="text-zinc-200">Leader (VIP owner)</span> and the other as <span className="text-zinc-200">Standby (Follower)</span>.
+              </li>
+              <li>
+                From any client in your LAN, run a DNS query against the VIP (examples below). You should get a normal answer (NOERROR) for allowed domains.
+              </li>
+              <li>
+                Trigger failover: stop/reboot the current VIP owner (or stop the Sentinel service on it).
+              </li>
+              <li>
+                Wait ~5–15 seconds. The other node should become <span className="text-zinc-200">Leader</span>, and DNS queries against the VIP should still succeed.
+              </li>
+            </ol>
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs text-zinc-500 mb-1">Test domain</div>
+                <input
+                  value={failoverTestDomain}
+                  onChange={(e) => setFailoverTestDomain(e.target.value)}
+                  placeholder="example.com"
+                  className="w-full px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                />
+              </div>
+
+              <div className="rounded-md border border-[#27272a] bg-[#121214] px-3 py-3">
+                <div className="text-xs text-zinc-500">Expected</div>
+                <div className="text-sm text-zinc-200 mt-1">
+                  {haEnabled && ready
+                    ? ready.ok
+                      ? 'VIP owner should be Ready=OK; follower should stay Ready=OK (recent sync).'
+                      : 'If Ready=NOT READY on follower for >20s, keepalived should avoid assigning it the VIP.'
+                    : 'Leader should be OK; follower should be syncing.'}
+                </div>
+              </div>
+            </div>
+
+            {haEnabled && ready && !ready.ok ? (
+              <div className="mt-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5" />
+                <div className="text-sm">
+                  <div className="font-medium">Why "NOT READY" is expected sometimes</div>
+                  <div className="text-amber-100/90 mt-1">
+                    Keepalived can poll <span className="font-mono">/api/cluster/ready</span>.
+                    If a follower has not synced recently, it reports <span className="font-mono">NOT READY</span> so the VIP
+                    should <span className="text-zinc-50">not</span> fail over onto a stale node.
+                    Fix follower sync (Leader URL should be the VIP URL, network reachable) and Ready should turn OK.
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-4">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div>
+                  <div className="text-sm font-medium">DNS test commands</div>
+                  <div className="text-xs text-zinc-500">Run on any LAN client. Replace VIP if needed.</div>
+                </div>
+                <button
+                  onClick={async () => {
+                    const text = failoverCommands.cmds.join('\n');
+                    const ok = await copyToClipboard(text);
+                    showMsg(ok ? 'success' : 'error', ok ? 'Copied DNS test commands.' : 'Failed to copy.');
+                  }}
+                  disabled={!failoverCommands.vip}
+                  className="px-3 py-2 rounded-md border border-[#27272a] bg-[#121214] text-sm hover:bg-[#18181b] disabled:opacity-50 inline-flex items-center gap-2"
+                  title={!failoverCommands.vip ? 'Set a VIP in Step 1 first' : undefined}
+                >
+                  <Copy className="w-4 h-4" />
+                  Copy
+                </button>
+              </div>
+              <pre className="w-full whitespace-pre-wrap break-words px-3 py-2 rounded-md bg-[#09090b] border border-[#27272a] text-zinc-200 font-mono text-xs">
+                {failoverCommands.vip ? failoverCommands.cmds.join('\n') : 'Set a VIP in Step 1 to generate commands.'}
+              </pre>
+            </div>
+
+            <div className="mt-4 text-xs text-zinc-500">
+              If DNS does not recover after failover: check that the Leader URL is the VIP URL (Step 2), and that port 53 is free on both hosts.
             </div>
           </div>
         </div>
@@ -855,6 +1049,8 @@ const Cluster: React.FC = () => {
             <div className="text-sm font-semibold mb-2">Notes</div>
             <ul className="text-sm text-zinc-400 space-y-2 list-disc pl-5">
               <li>For a two-host homelab, VRRP/VIP gives you one DNS IP in the router.</li>
+              <li>Set router/DHCP DNS to the VIP only (avoid “two DNS IPs” if you expect seamless failover).</li>
+              <li>For VIP HA, Leader URL should point to the VIP so followers always reach the active leader.</li>
               <li>Followers are read-only to avoid conflicting writes.</li>
               <li>Logs sync is not part of this MVP yet (needs batching/retention).</li>
             </ul>
