@@ -397,15 +397,6 @@ const Cluster: React.FC = () => {
       <div className="rounded-xl border border-[#27272a] bg-[#0f0f12] p-5">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="text-sm font-semibold">HA / VIP config</div>
-          {isConfigured && !showWizard ? (
-            <button
-              type="button"
-              onClick={() => setWizardVisible(true)}
-              className="px-3 py-2 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium"
-            >
-              Re-run setup
-            </button>
-          ) : null}
         </div>
 
         <div className="text-sm space-y-2">
@@ -1233,7 +1224,7 @@ const Cluster: React.FC = () => {
           <div className="lg:col-span-1">{StatusCards}</div>
         </div>
       ) : (
-        <div className="max-w-4xl">{StatusCards}</div>
+        <div>{StatusCards}</div>
       )}
     </div>
   );
