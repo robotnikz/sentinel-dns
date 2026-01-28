@@ -9,6 +9,9 @@ import { getAuthHeaders } from '../services/apiClient';
 const Clients: React.FC = () => {
   // Use global client context
     const { clients, addClient, updateClient, removeClient } = useClients();
+
+    // Best-effort cluster role detection (used to disable writes on followers).
+    const [clusterStatus, setClusterStatus] = useState<{ config?: { enabled?: boolean; role?: string } } | null>(null);
   
   const [activeView, setActiveView] = useState<'devices' | 'networks'>('devices');
   const [searchTerm, setSearchTerm] = useState('');
@@ -416,11 +419,35 @@ const Clients: React.FC = () => {
       // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAddModal, activeView, addMode]);
 
+  useEffect(() => {
+      // Best-effort: detect cluster role so we can prevent confusing writes on followers.
+      let cancelled = false;
+      (async () => {
+          try {
+              const res = await fetch('/api/cluster/status', { headers: { ...getAuthHeaders() }, credentials: 'include' });
+              const data = await res.json().catch(() => null);
+              if (!cancelled) setClusterStatus(data as any);
+          } catch {
+              if (!cancelled) setClusterStatus(null);
+          }
+      })();
+      return () => {
+          cancelled = true;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const resetNewNodeData = () => {
       setNewNodeData({ name: '', mac: '', ip: '', cidr: '', deviceIcon: 'smartphone' });
   };
 
+    const isReadOnlyFollower = !!(clusterStatus?.config?.enabled && String(clusterStatus?.config?.role || '') === 'follower');
+
   const openCreateModal = () => {
+      if (isReadOnlyFollower) {
+          setClientSaveMsg('Read-only on follower. Make changes on the leader; they will sync here.');
+          return;
+      }
       setEditingClient(null);
       setAddMode('manual');
       setAddNodeError(null);
@@ -429,6 +456,10 @@ const Clients: React.FC = () => {
   };
 
   const openEditClient = (client: ClientProfile) => {
+      if (isReadOnlyFollower) {
+          setClientSaveMsg('Read-only on follower. Edit devices/subnets on the leader; they will sync here.');
+          return;
+      }
       const isSubnet = client.isSubnet || client.type === 'subnet';
       setEditingClient(client);
       setAddMode('manual');
@@ -453,6 +484,10 @@ const Clients: React.FC = () => {
   };
 
     const handleAddNode = async () => {
+            if (isReadOnlyFollower) {
+                    setAddNodeError('Read-only on follower. Create/edit devices and subnets on the leader; changes sync automatically.');
+                    return;
+            }
       if(!newNodeData.name) return;
       setAddNodeError(null);
 
@@ -531,6 +566,10 @@ const Clients: React.FC = () => {
   };
 
   const handleDeleteClient = (client: ClientProfile) => {
+      if (isReadOnlyFollower) {
+          setClientSaveMsg('Read-only on follower. Delete on the leader; it will sync here.');
+          return;
+      }
       setClientToDelete(client);
   };
 
@@ -878,12 +917,25 @@ const Clients: React.FC = () => {
            {/* Context-Aware Add Button */}
            <button 
                          onClick={openCreateModal}
-             className="btn-primary flex items-center gap-2 px-4 py-2 rounded text-xs shadow-lg transition-transform hover:scale-105"
+                         disabled={isReadOnlyFollower}
+             className={`btn-primary flex items-center gap-2 px-4 py-2 rounded text-xs shadow-lg ${
+                 isReadOnlyFollower ? 'opacity-50 cursor-not-allowed' : 'transition-transform hover:scale-105'
+             }`}
            >
                <Plus className="w-3.5 h-3.5" /> 
                {activeView === 'devices' ? 'ADD DEVICE' : 'ADD NETWORK'}
            </button>
         </div>
+
+        {isReadOnlyFollower ? (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200 flex items-start gap-2">
+                <Lock className="w-4 h-4 mt-0.5" />
+                <div>
+                    <div className="font-medium">Follower is read-only</div>
+                    <div className="text-xs text-zinc-400 mt-1">Add/edit/delete devices & subnets on the leader. This node will sync and serve DNS automatically.</div>
+                </div>
+            </div>
+        ) : null}
         
         <div className="flex flex-col sm:flex-row justify-between gap-4 border-b border-[#27272a]">
             {/* View Tabs (match Filtering-style tab bar) */}
