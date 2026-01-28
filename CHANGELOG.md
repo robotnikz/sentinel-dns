@@ -1,3 +1,25 @@
+## [0.8.0](https://github.com/robotnikz/sentinel-dns/compare/v0.7.8...v0.8.0) (2026-01-28)
+
+### chore
+
+* bump version ([](https://github.com/robotnikz/sentinel-dns/commit/a722a639f81fa26e225e18368e359a9834060070))
+* **screenshots:** seed demo data and optional 2-node cluster ([](https://github.com/robotnikz/sentinel-dns/commit/ab60ca9c209b3c94e8c7670ff6055d91a330da62))
+
+### docs
+
+* refresh screenshots ([](https://github.com/robotnikz/sentinel-dns/commit/ad09bfb26fa5c0276ba68d0cdf8f710b048bc612))
+* update install instructions and docs index ([](https://github.com/robotnikz/sentinel-dns/commit/dc8ccf7c9be2db9261040652c2aa59c025b5a965))
+
+### fix
+
+* **cluster:** make sync convergent and expose peer status ([](https://github.com/robotnikz/sentinel-dns/commit/dbfc8114990a10e9100ea369ce64336653eea14b))
+* **ui:** prevent edits on follower client policies ([](https://github.com/robotnikz/sentinel-dns/commit/627d044eb0b221769c2d582f2a90a839ae52bd65))
+* **ui:** simplify cluster page after setup ([](https://github.com/robotnikz/sentinel-dns/commit/ab0ee91f55f8f56a7f59a496695c177b1f736345))
+
+### feat
+
+* **ui:** show cluster indicator in sidebar ([](https://github.com/robotnikz/sentinel-dns/commit/3d32d4c4eb9de1f8c20f366e757bafbc6a50c133))
+
 ## [0.7.8](https://github.com/robotnikz/sentinel-dns/compare/v0.7.7...v0.7.8) (2026-01-28)
 
 ### fix
