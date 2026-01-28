@@ -32,7 +32,17 @@ vrrp_instance VI_${HA_VRID} {
   virtual_router_id ${HA_VRID}
   priority ${HA_PRIORITY}
   advert_int ${HA_ADVERT_INT}
-  nopreempt
+
+  # Allow failback: when a higher-priority node (usually the leader) comes back,
+  # it should preempt and reclaim the VIP once it is ready.
+  preempt_delay 3
+
+  # Speed up client/router ARP cache updates when VIP moves between nodes.
+  # Without enough GARP, some clients keep sending to the old MAC and DNS appears "stuck".
+  garp_master_delay 1
+  garp_master_repeat 5
+  garp_master_refresh 10
+  garp_master_refresh_repeat 2
 
   authentication {
     auth_type PASS
