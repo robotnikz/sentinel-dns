@@ -51,6 +51,7 @@ If you’re new to DNS blockers: don’t worry — the setup is basically “sta
 ## ⭐ Why people choose Sentinel-DNS (vs. Pi-hole / AdGuard Home)
 
 - **Sync + HA + Failover (2 nodes):** a floating VIP (keepalived/VRRP) + automatic **cluster sync** so DNS keeps working even if one node dies.
+- **Built-in Tailscale integration:** use Sentinel-DNS as your DNS blocker **on-the-go** (remote devices can use the same policies and filtering via Tailscale).
 - **Per-client policies (device + subnet):** client-specific rules + domain/category/app blocklists (kids, guests, TVs, work devices, etc.)
 - **Honest UI:** health/cluster indicators are backed by real checks (not just a green badge).
 
