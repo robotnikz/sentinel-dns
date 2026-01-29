@@ -36,7 +36,7 @@ jobs:
           npm --prefix server audit --json > npm-audit-server.json || true
 
       - name: Upload npm audit reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: npm-audit
           path: |
