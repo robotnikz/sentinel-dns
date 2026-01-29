@@ -146,6 +146,8 @@ jobs:
           file: docker/single/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            SENTINEL_VERSION=${{ steps.rel.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
