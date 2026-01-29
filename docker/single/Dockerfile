@@ -4,6 +4,9 @@
 
 FROM node:22-bookworm
 
+# Version shown in the UI (/api/version). The CI pipeline injects this from the release tag.
+ARG SENTINEL_VERSION=
+
 # Build stage uses dev deps (Vite/TS). Runtime NODE_ENV is set later.
 ENV NODE_ENV=development
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
@@ -87,6 +90,7 @@ ENV NODE_ENV=production \
     DNS_PORT=53 \
     ENABLE_DNS=true \
     UPSTREAM_DNS=127.0.0.1:5335 \
-    FRONTEND_ORIGIN=http://localhost:8080
+  FRONTEND_ORIGIN=http://localhost:8080 \
+  SENTINEL_VERSION=$SENTINEL_VERSION
 
 CMD ["/entrypoint.sh"]
