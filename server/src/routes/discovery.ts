@@ -50,6 +50,9 @@ async function runPtrLookup(
   timeoutMs: number
 ): Promise<{ names: string[]; timedOut: boolean; durationMs: number }> {
   const startedAt = Date.now();
+  const safeTimeoutMs = Number.isFinite(timeoutMs)
+    ? Math.max(50, Math.min(2000, Math.floor(timeoutMs)))
+    : 250;
 
   const doLookup = async () => {
     const r = new Resolver();
@@ -63,13 +66,19 @@ async function runPtrLookup(
     return Array.from(new Set(normalized));
   };
 
+  let timer: NodeJS.Timeout | undefined;
   try {
-    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs));
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('TIMEOUT')), safeTimeoutMs);
+    });
     const names = await Promise.race([doLookup(), timeout]);
     return { names, timedOut: false, durationMs: Date.now() - startedAt };
   } catch (err: any) {
     const timedOut = String(err?.message || '').toUpperCase() === 'TIMEOUT';
     return { names: [], timedOut, durationMs: Date.now() - startedAt };
+  } finally {
+    // Ensure we don't keep stray timers around if the lookup wins the race.
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -77,6 +86,10 @@ async function resolvePtrHostname(ip: string, resolverIp: string, timeoutMs: num
   const now = Date.now();
   const hit = PTR_CACHE.get(ip);
   if (hit && hit.expiresAt > now) return hit.hostname;
+
+  const safeTimeoutMs = Number.isFinite(timeoutMs)
+    ? Math.max(50, Math.min(2000, Math.floor(timeoutMs)))
+    : 250;
 
   const run = async () => {
     const r = new Resolver();
@@ -91,8 +104,12 @@ async function resolvePtrHostname(ip: string, resolverIp: string, timeoutMs: num
     }
   };
 
-  const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs));
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), safeTimeoutMs);
+  });
   const hostname = await Promise.race([run(), timeout]);
+  if (timer) clearTimeout(timer);
 
   // Cache: positives longer than negatives.
   PTR_CACHE.set(ip, {
