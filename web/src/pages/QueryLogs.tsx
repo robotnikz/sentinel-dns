@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Anomaly, DnsQuery, QueryStatus, ClientProfile } from '../types';
-import { Search, Filter, Sparkles, X, Terminal, CheckCircle, XCircle, AlertTriangle, ShieldCheck, ChevronDown, Users, Shield, Eye, UserPlus, Save, Smartphone, Laptop, Tv, Gamepad2, Info, Ban, ShieldOff, Check, AlertOctagon, Zap, EyeOff, Trash2 } from 'lucide-react';
+import { Search, Filter, Sparkles, X, Terminal, CheckCircle, XCircle, AlertTriangle, ShieldCheck, ChevronDown, Users, Shield, Eye, UserPlus, Save, Smartphone, Laptop, Tv, Gamepad2, Info, Ban, ShieldOff, Check, AlertOctagon, Zap, EyeOff } from 'lucide-react';
 import { analyzeDomain } from '../services/geminiService';
 import { detectAnomalies } from '../services/anomalyService';
 import { useRules } from '../contexts/RulesContext';
 import { useClients } from '../contexts/ClientsContext';
 import { apiFetch } from '../services/apiClient';
-import ConfirmModal from '../components/ConfirmModal';
 import Modal from '../components/Modal';
 import { ModalCard, ModalFooter, ModalHeader } from '../components/ModalLayout';
 import { ReadOnlyFollowerBanner } from '../components/ReadOnlyFollowerBanner';
@@ -60,14 +59,26 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const [page, setPage] = useState<number>(1);
   const [liveMode, setLiveMode] = useState(false);
 
-  const [flushConfirmOpen, setFlushConfirmOpen] = useState(false);
-  const [flushBusy, setFlushBusy] = useState(false);
-  const [flushMsg, setFlushMsg] = useState('');
+  const [timeframeHours, setTimeframeHours] = useState<number>(24);
 
   const [rawQueries, setRawQueries] = useState<DnsQuery[]>([]);
   const [discoveredHostnamesByIp, setDiscoveredHostnamesByIp] = useState<Record<string, string>>({});
 
   const [serverQueryFilters, setServerQueryFilters] = useState<{ hours?: number; domain?: string; status?: string }>({});
+
+  const serverFiltersActive = Boolean(serverQueryFilters.domain || serverQueryFilters.status);
+  const serverFiltersLabel = useMemo(() => {
+    if (!serverFiltersActive) return '';
+    const parts: string[] = [];
+    parts.push(`${timeframeHours}h`);
+    if (typeof serverQueryFilters.domain === 'string' && serverQueryFilters.domain.trim()) {
+      parts.push(`domain=${serverQueryFilters.domain.trim()}`);
+    }
+    if (typeof serverQueryFilters.status === 'string' && serverQueryFilters.status.trim()) {
+      parts.push(`status=${serverQueryFilters.status.trim()}`);
+    }
+    return parts.length > 0 ? parts.join(' · ') : 'active';
+  }, [serverFiltersActive, serverQueryFilters.domain, serverQueryFilters.status, timeframeHours]);
 
   const [ignoredAnomalySignatures, setIgnoredAnomalySignatures] = useState<string[]>([]);
   const [showIgnoredAnomalies, setShowIgnoredAnomalies] = useState(false);
@@ -192,28 +203,6 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
       setRawQueries([]);
     }
   }, [serverQueryFilters.domain, serverQueryFilters.hours, serverQueryFilters.status]);
-
-  const flushQueryLogs = useCallback(async () => {
-    setFlushMsg('');
-    setFlushBusy(true);
-    try {
-      const res = await apiFetch('/api/query-logs/flush', { method: 'POST' });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        setFlushMsg(data?.message || data?.error || 'Failed to clear query logs.');
-        return;
-      }
-      const deleted = typeof data?.deleted === 'number' ? data.deleted : Number(data?.deleted || 0);
-      setFlushMsg(Number.isFinite(deleted) && deleted > 0 ? `Cleared ${deleted} log entries.` : 'Query logs cleared.');
-      setFlushConfirmOpen(false);
-      setPage(1);
-      await loadQueryLogs();
-    } catch {
-      setFlushMsg('Backend not reachable.');
-    } finally {
-      setFlushBusy(false);
-    }
-  }, [loadQueryLogs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -403,7 +392,9 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     if (preset.tab === 'suspicious') setActiveTab('suspicious');
     else setActiveTab('queries');
 
-    const nextHours = typeof preset.hours === 'number' && Number.isFinite(preset.hours) && preset.hours > 0 ? preset.hours : undefined;
+    const nextHoursRaw =
+      typeof preset.hours === 'number' && Number.isFinite(preset.hours) && preset.hours > 0 ? preset.hours : undefined;
+    const nextHours = typeof nextHoursRaw === 'number' ? Math.min(168, nextHoursRaw) : undefined;
     const nextDomain = typeof preset.domainExact === 'string' ? preset.domainExact.trim() : '';
     const nextStatusRaw = typeof preset.statusFilter === 'string' ? preset.statusFilter.trim().toUpperCase() : '';
     const nextStatus =
@@ -412,10 +403,12 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
         : undefined;
 
     setServerQueryFilters({
-      hours: nextDomain || nextStatus ? nextHours : undefined,
+      hours: nextHours,
       domain: nextDomain ? nextDomain : undefined,
       status: nextStatus
     });
+
+    if (typeof nextHours === 'number') setTimeframeHours(nextHours);
 
     setPage(1);
     onPresetConsumed?.();
@@ -436,14 +429,13 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
         next.status = undefined;
       }
 
-      if (!next.domain && !next.status) {
-        next.hours = undefined;
-      }
+      // Timeframe filter is independent and should persist.
+      next.hours = Number.isFinite(timeframeHours) && timeframeHours > 0 ? Math.min(168, timeframeHours) : undefined;
 
       const changed = next.domain !== prev.domain || next.status !== prev.status || next.hours !== prev.hours;
       return changed ? next : prev;
     });
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, timeframeHours]);
 
   const anomalies = useMemo(() => {
     const all = detectAnomalies(queries, { limit: 0 });
@@ -724,6 +716,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     setTypeFilter('ALL');
     setClientFilter('ALL');
     setPageSize(100);
+    setServerQueryFilters({});
+    setTimeframeHours(24);
   };
 
   const pageCount = useMemo(() => {
@@ -866,6 +860,19 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
         <div className="flex flex-wrap gap-2 items-center">
           {activeTab === 'queries' ? (
           <>
+            {serverFiltersActive ? (
+              <button
+                type="button"
+                onClick={() => setServerQueryFilters((prev) => ({ ...prev, domain: undefined, status: undefined }))}
+                className="px-3 py-1.5 rounded text-xs font-bold border bg-emerald-950/20 border-emerald-900/50 text-emerald-300 hover:bg-emerald-950/30 inline-flex items-center gap-2"
+                title="Server-side filters are active (click to clear)"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                Server: {serverFiltersLabel}
+                <X className="w-3.5 h-3.5 opacity-70" />
+              </button>
+            ) : null}
+
             {/* Status Filter */}
             <div className="relative">
               <select 
@@ -933,22 +940,24 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
               Clear Filters
             </button>
 
-            <button
-              onClick={() => setFlushConfirmOpen(true)}
-              disabled={flushBusy}
-              className={
-                `px-3 py-1.5 rounded text-xs font-bold border inline-flex items-center gap-2 ` +
-                (flushBusy
-                  ? 'border-zinc-800 bg-zinc-900 text-zinc-600 cursor-not-allowed'
-                  : 'border-rose-900/50 bg-rose-950/30 text-rose-300 hover:bg-rose-950/50')
-              }
-              title="Delete all stored query logs"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Clear Logs
-            </button>
-
-            {flushMsg ? <div className="text-[10px] font-mono text-zinc-500 max-w-[220px] truncate" title={flushMsg}>{flushMsg}</div> : null}
+            <div className="relative">
+              <select
+                value={String(timeframeHours)}
+                onChange={(e) => {
+                  const n = Number(String(e.target.value || '').trim());
+                  setTimeframeHours(Number.isFinite(n) && n > 0 ? Math.min(168, n) : 24);
+                }}
+                className="appearance-none bg-[#18181b] border border-[#27272a] text-zinc-300 pl-3 pr-8 py-1.5 rounded text-xs font-mono focus:outline-none focus:border-zinc-500 cursor-pointer hover:bg-[#27272a]"
+                title="Limit query logs to a timeframe (server-side)"
+                aria-label="Timeframe"
+              >
+                <option value="1">1h</option>
+                <option value="6">6h</option>
+                <option value="24">24h</option>
+                <option value="168">7d</option>
+              </select>
+              <ChevronDown className="w-3 h-3 text-zinc-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
 
             <button
               onClick={() => setLiveMode((v) => !v)}
@@ -1244,22 +1253,6 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
           </div>
         </div>
       )}
-
-      <ConfirmModal
-        open={flushConfirmOpen}
-        title="Clear Query Logs"
-        subtitle="Deletes all stored DNS query log entries."
-        body={
-          'This operation is irreversible. It only clears the UI log history; filtering rules and DNS settings stay unchanged.'
-        }
-        confirmText="CLEAR LOGS"
-        busyText="CLEARING…"
-        variant="danger"
-        busy={flushBusy}
-        onCancel={() => setFlushConfirmOpen(false)}
-        onConfirm={() => void flushQueryLogs()}
-        message={flushMsg || null}
-      />
 
       <Modal open={!!clientToAdd} onClose={() => setClientToAdd(null)}>
         {clientToAdd ? (
