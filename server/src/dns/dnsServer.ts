@@ -1395,7 +1395,8 @@ async function forwardTcp(
     });
 
     socket.on('data', (data) => {
-      chunks.push(data);
+      const dataBuf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+      chunks.push(dataBuf);
       const all = Buffer.concat(chunks);
       if (expected == null) {
         if (all.length < 2) return;
@@ -1445,7 +1446,8 @@ async function forwardDot(
     });
 
     socket.on('data', (data) => {
-      chunks.push(data);
+      const dataBuf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+      chunks.push(dataBuf);
       const all = Buffer.concat(chunks);
       if (expected == null) {
         if (all.length < 2) return;
