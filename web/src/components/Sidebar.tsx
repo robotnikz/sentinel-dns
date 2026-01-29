@@ -261,6 +261,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
         {!isCollapsed ? (
           <button
             type="button"
+            aria-label="System Status"
             onClick={() => {
               window.dispatchEvent(
                 new CustomEvent('sentinel:navigate', {
