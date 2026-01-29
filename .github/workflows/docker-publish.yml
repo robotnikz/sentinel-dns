@@ -6,10 +6,17 @@ on:
     branches: ["main"]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag (e.g. v0.9.4) to build/push images for. Leave empty to run semantic-release.'
+        required: false
+        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.workflow_run.head_sha || github.sha }}
-  cancel-in-progress: true
+  # Avoid cancelling in-progress releases (a cancellation can happen after the git tag is pushed but
+  # before images are built/pushed, leaving an incomplete release).
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -56,6 +63,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+
+          # Manual recovery path: build/push images for an already-existing release tag.
+          REQUESTED_TAG="${{ github.event.inputs.tag }}"
+          if [ -n "$REQUESTED_TAG" ]; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "tag=$REQUESTED_TAG" >> "$GITHUB_OUTPUT"
+            echo "version=${REQUESTED_TAG#v}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           PREV_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
           echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
