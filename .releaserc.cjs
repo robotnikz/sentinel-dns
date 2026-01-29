@@ -21,22 +21,6 @@ module.exports = {
 				}
 			}
 		],
-		['@semantic-release/changelog', { changelogFile: 'CHANGELOG.md' }],
-		[
-			'@semantic-release/exec',
-			{
-				prepareCmd:
-					'npm version ${nextRelease.version} --no-git-tag-version --allow-same-version'
-			}
-		],
-		[
-			'@semantic-release/git',
-			{
-				assets: ['CHANGELOG.md', 'package.json', 'package-lock.json'],
-				message:
-					'chore(release): v${nextRelease.version} [skip ci]\n\n${nextRelease.notes}'
-			}
-		],
 		'@semantic-release/github'
 	]
 }

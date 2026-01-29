@@ -62,14 +62,14 @@ jobs:
 
           npx -y \
             -p semantic-release@25.0.2 \
-            -p @semantic-release/changelog@6.0.3 \
             -p @semantic-release/commit-analyzer@13.0.1 \
-            -p @semantic-release/exec@7.1.0 \
-            -p @semantic-release/git@10.0.1 \
             -p @semantic-release/github@12.0.2 \
             -p @semantic-release/release-notes-generator@14.1.0 \
             -p conventional-changelog-conventionalcommits@8.0.0 \
             semantic-release
+
+          # If semantic-release created a remote tag (e.g. via GitHub API), make sure we can see it.
+          git fetch --tags --force
 
           NEW_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
           if [ -n "$NEW_TAG" ] && [ "$NEW_TAG" != "$PREV_TAG" ]; then
