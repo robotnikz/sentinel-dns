@@ -22,7 +22,13 @@ module.exports = {
 			}
 		],
 		['@semantic-release/changelog', { changelogFile: 'CHANGELOG.md' }],
-		['@semantic-release/npm', { npmPublish: false }],
+		[
+			'@semantic-release/exec',
+			{
+				prepareCmd:
+					'npm version ${nextRelease.version} --no-git-tag-version --allow-same-version'
+			}
+		],
 		[
 			'@semantic-release/git',
 			{
