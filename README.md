@@ -32,10 +32,10 @@
 </p>
 
 <p>
-  <a href="#quickstart">Quickstart</a>
-  · <a href="#screenshots">Screenshots</a>
-  · <a href="#security--hardening">Security</a>
-  · <a href="#troubleshooting">Troubleshooting</a>
+  <a href="#user-content-quickstart">Quickstart</a>
+  · <a href="#user-content-screenshots">Screenshots</a>
+  · <a href="#user-content-security--hardening">Security</a>
+  · <a href="#user-content-troubleshooting">Troubleshooting</a>
 </p>
 </div>
 
