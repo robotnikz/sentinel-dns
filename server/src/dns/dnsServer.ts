@@ -1374,7 +1374,12 @@ async function forwardUdp(upstream: { host: string; port: number }, msg: Buffer,
   });
 }
 
-async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer, timeoutMs: number): Promise<Buffer> {
+async function forwardTcp(
+  upstream: { host: string; port: number },
+  msg: Buffer | Uint8Array | string,
+  timeoutMs: number
+): Promise<Buffer> {
+  const msgBuf = Buffer.isBuffer(msg) ? msg : Buffer.from(msg);
   return await new Promise<Buffer>((resolve, reject) => {
     const socket = net.createConnection({ host: upstream.host, port: upstream.port });
     const timer = setTimeout(() => {
@@ -1405,18 +1410,19 @@ async function forwardTcp(upstream: { host: string; port: number }, msg: Buffer,
 
     socket.on('connect', () => {
       const len = Buffer.alloc(2);
-      len.writeUInt16BE(msg.length, 0);
-      socket.write(Buffer.concat([len, msg]));
+      len.writeUInt16BE(msgBuf.length, 0);
+      socket.write(Buffer.concat([len, msgBuf]));
     });
   });
 }
 
 async function forwardDot(
   upstream: { host: string; port: number },
-  msg: Buffer,
+  msg: Buffer | Uint8Array | string,
   timeoutMs: number,
   lookup?: any
 ): Promise<Buffer> {
+  const msgBuf = Buffer.isBuffer(msg) ? msg : Buffer.from(msg);
   return await new Promise<Buffer>((resolve, reject) => {
     const socket = tls.connect({
       host: upstream.host,
@@ -1454,8 +1460,8 @@ async function forwardDot(
 
     socket.on('secureConnect', () => {
       const len = Buffer.alloc(2);
-      len.writeUInt16BE(msg.length, 0);
-      socket.write(Buffer.concat([len, msg]));
+      len.writeUInt16BE(msgBuf.length, 0);
+      socket.write(Buffer.concat([len, msgBuf]));
     });
   });
 }
@@ -2755,7 +2761,8 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       try {
         const clientIp = normalizeClientIp(rinfo.address);
         recordDnsQuerySeen(clientIp, 'udp');
-        const resp = await handleQuery(msg, clientIp);
+        const msgBuf = Buffer.isBuffer(msg) ? msg : Buffer.from(msg);
+        const resp = await handleQuery(msgBuf, clientIp);
         udp.send(resp, rinfo.port, rinfo.address);
       } catch {
         // ignore
@@ -2771,7 +2778,8 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       let buf = Buffer.alloc(0);
 
       socket.on('data', async (data) => {
-        buf = Buffer.concat([buf, data]);
+        const dataBuf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        buf = Buffer.concat([buf, dataBuf]);
         while (buf.length >= 2) {
           const len = buf.readUInt16BE(0);
           if (buf.length < 2 + len) return;
