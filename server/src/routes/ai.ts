@@ -6,6 +6,31 @@ import { requireAdmin } from '../auth.js';
 import { getSecret } from '../secretsStore.js';
 import 'fastify-rate-limit';
 
+type AiProvider = 'gemini' | 'openai';
+
+async function getActiveProvider(db: Db): Promise<AiProvider | null> {
+  try {
+    const res = await db.pool.query("SELECT value FROM settings WHERE key = 'ai_active_provider' LIMIT 1");
+    const raw = res.rows?.[0]?.value;
+    const provider =
+      typeof raw === 'string'
+        ? raw
+        : raw && typeof raw === 'object' && typeof (raw as any).provider === 'string'
+          ? String((raw as any).provider)
+          : '';
+    return provider === 'gemini' || provider === 'openai' ? provider : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setActiveProvider(db: Db, provider: AiProvider): Promise<void> {
+  await db.pool.query(
+    'INSERT INTO settings(key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()',
+    ['ai_active_provider', { provider }]
+  );
+}
+
 export async function registerAiRoutes(app: FastifyInstance, config: AppConfig, db: Db): Promise<void> {
   app.get(
     '/api/ai/status',
@@ -21,12 +46,68 @@ export async function registerAiRoutes(app: FastifyInstance, config: AppConfig, 
         getSecret(db, config, 'openai_api_key')
       ]);
 
+      const configuredGemini = Boolean(config.GEMINI_API_KEY || geminiSecret);
+      const configuredOpenai = Boolean(openaiSecret);
+
+      const storedActive = await getActiveProvider(db);
+      const activeProvider: AiProvider | null = storedActive
+        ? storedActive
+        : configuredGemini && !configuredOpenai
+          ? 'gemini'
+          : configuredOpenai && !configuredGemini
+            ? 'openai'
+            : null;
+
       return {
         providers: {
-          gemini: Boolean(config.GEMINI_API_KEY || geminiSecret),
-          openai: Boolean(openaiSecret)
-        }
+          gemini: configuredGemini,
+          openai: configuredOpenai
+        },
+        activeProvider
       };
+    }
+  );
+
+  app.post(
+    '/api/ai/active-provider',
+    {
+      config: {
+        rateLimit: { max: 60, timeWindow: '1 minute' }
+      },
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['provider'],
+          properties: {
+            provider: { type: 'string', enum: ['gemini', 'openai'] }
+          }
+        }
+      }
+    },
+    async (request: FastifyRequest<{ Body: { provider: AiProvider } }>) => {
+      await requireAdmin(db, request);
+
+      const provider = request.body.provider;
+
+      const geminiKey = config.GEMINI_API_KEY || (await getSecret(db, config, 'gemini_api_key'));
+      const openaiKey = await getSecret(db, config, 'openai_api_key');
+
+      if (provider === 'gemini' && !geminiKey) {
+        return {
+          error: 'AI_NOT_CONFIGURED',
+          message: 'Gemini API key not configured on the server'
+        };
+      }
+      if (provider === 'openai' && !openaiKey) {
+        return {
+          error: 'AI_NOT_CONFIGURED',
+          message: 'OpenAI API key not configured on the server'
+        };
+      }
+
+      await setActiveProvider(db, provider);
+      return { ok: true, activeProvider: provider };
     }
   );
 
@@ -51,10 +132,15 @@ export async function registerAiRoutes(app: FastifyInstance, config: AppConfig, 
       await requireAdmin(db, request);
 
       const { domain } = request.body;
-      const provider = request.body.provider ?? 'gemini';
 
       const geminiKey = config.GEMINI_API_KEY || (await getSecret(db, config, 'gemini_api_key'));
       const openaiKey = await getSecret(db, config, 'openai_api_key');
+
+      const storedActive = await getActiveProvider(db);
+      const provider: AiProvider =
+        (request.body.provider as AiProvider | undefined) ??
+        storedActive ??
+        (!geminiKey && openaiKey ? 'openai' : 'gemini');
 
       if (provider === 'openai') {
         if (!openaiKey) {

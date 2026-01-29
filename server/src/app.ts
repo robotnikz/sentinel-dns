@@ -39,6 +39,7 @@ import { startDnsServer } from './dns/dnsServer.js';
 import { requireAdmin } from './auth.js';
 import { startFollowerSyncLoop } from './cluster/sync.js';
 import { registerFollowerReadOnlyGuard } from './cluster/guard.js';
+import { startHaNotificationsLoop } from './cluster/haNotifications.js';
 import { startMaintenanceJobs } from './maintenance.js';
 
 export type BuildAppOptions = {
@@ -226,12 +227,18 @@ export async function buildApp(config: AppConfig, options: BuildAppOptions = {})
   await app.ready();
 
   const clusterLoop = startFollowerSyncLoop(config, db);
+  const haNotifications = startHaNotificationsLoop(config, db);
 
   async function close(): Promise<void> {
     if (refreshTimeout) clearTimeout(refreshTimeout);
     if (refreshInterval) clearInterval(refreshInterval);
     try {
       clusterLoop.stop();
+    } catch {
+      // ignore
+    }
+    try {
+      haNotifications.stop();
     } catch {
       // ignore
     }

@@ -9,6 +9,9 @@ type DnsQuery = Record<string, unknown> & { id: string };
 
 type QueryLogsGetQuerystring = {
   limit?: string;
+  hours?: string;
+  domain?: string;
+  status?: string;
 };
 
 type IgnoredAnomaliesPutBody = {
@@ -117,11 +120,47 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
     async (request: FastifyRequest<{ Querystring: QueryLogsGetQuerystring }>) => {
       await requireAdmin(db, request);
       const limitRaw = Number(request.query.limit ?? '250');
-      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, limitRaw)) : 250;
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(5000, limitRaw)) : 250;
+
+      const hoursRaw = Number(request.query.hours ?? '');
+      const hours = Number.isFinite(hoursRaw) ? Math.max(1, Math.min(168, hoursRaw)) : null;
+
+      const domain = String(request.query.domain ?? '').trim();
+      const statusRaw = String(request.query.status ?? '').trim().toUpperCase();
+      const status =
+        statusRaw === 'BLOCKED' ||
+        statusRaw === 'PERMITTED' ||
+        statusRaw === 'SHADOW_BLOCKED' ||
+        statusRaw === 'CACHED'
+          ? statusRaw
+          : null;
+
+      const where: string[] = [];
+      const params: Array<string | number> = [];
+
+      if (hours !== null) {
+        params.push(String(hours));
+        where.push(`ts >= NOW() - ($${params.length}::text || ' hours')::interval`);
+      }
+      if (domain) {
+        params.push(domain);
+        where.push(`LOWER(entry->>'domain') = LOWER($${params.length})`);
+      }
+      if (status) {
+        if (status === 'BLOCKED') {
+          where.push(`entry->>'status' IN ('BLOCKED', 'SHADOW_BLOCKED')`);
+        } else {
+          params.push(status);
+          where.push(`entry->>'status' = $${params.length}`);
+        }
+      }
+
+      params.push(limit);
+      const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
       const res = await db.pool.query(
-        'SELECT id, ts, entry FROM query_logs ORDER BY ts DESC, id DESC LIMIT $1',
-        [limit]
+        `SELECT id, ts, entry FROM query_logs ${whereSql} ORDER BY ts DESC, id DESC LIMIT $${params.length}`,
+        params
       );
 
       return {

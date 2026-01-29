@@ -111,13 +111,24 @@ function mapQueryLogRow(row: any): DnsQuery | null {
   };
 }
 
-function openLogsPreset(preset: { tab?: 'queries' | 'suspicious'; searchTerm?: string; statusFilter?: string; typeFilter?: string; clientFilter?: string; pageSize?: number }) {
+function openLogsPreset(preset: {
+  tab?: 'queries' | 'suspicious';
+  searchTerm?: string;
+  statusFilter?: string;
+  typeFilter?: string;
+  clientFilter?: string;
+  pageSize?: number;
+  hours?: number;
+  domainExact?: string;
+}) {
   window.dispatchEvent(new CustomEvent('sentinel:navigate', { detail: { page: 'logs', logsPreset: preset } }));
 }
 
-function openDomainInLogs(domain: string, opts?: { statusFilter?: string }) {
+function openDomainInLogs(domain: string, opts?: { statusFilter?: string; hours?: number }) {
   openLogsPreset({
     searchTerm: domain,
+    domainExact: domain,
+    hours: typeof opts?.hours === 'number' ? opts.hours : undefined,
     statusFilter: opts?.statusFilter,
     pageSize: 200
   });
@@ -156,8 +167,8 @@ const Dashboard: React.FC = () => {
     setNavFeedback({ domain, kind });
     if (navTimerRef.current) window.clearTimeout(navTimerRef.current);
     navTimerRef.current = window.setTimeout(() => {
-      if (kind === 'blocked') openDomainInLogs(domain, { statusFilter: QueryStatus.BLOCKED });
-      else openDomainInLogs(domain);
+      if (kind === 'blocked') openDomainInLogs(domain, { statusFilter: QueryStatus.BLOCKED, hours: trafficWindowHours });
+      else openDomainInLogs(domain, { hours: trafficWindowHours });
     }, 180);
   };
 

@@ -36,6 +36,8 @@ type QueryLogsPreset = {
   typeFilter?: string;
   clientFilter?: string;
   pageSize?: number;
+  hours?: number;
+  domainExact?: string;
 };
 
 type QueryLogsProps = {
@@ -64,6 +66,8 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
 
   const [rawQueries, setRawQueries] = useState<DnsQuery[]>([]);
   const [discoveredHostnamesByIp, setDiscoveredHostnamesByIp] = useState<Record<string, string>>({});
+
+  const [serverQueryFilters, setServerQueryFilters] = useState<{ hours?: number; domain?: string; status?: string }>({});
 
   const [ignoredAnomalySignatures, setIgnoredAnomalySignatures] = useState<string[]>([]);
   const [showIgnoredAnomalies, setShowIgnoredAnomalies] = useState(false);
@@ -141,7 +145,22 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
       const controller = new AbortController();
       queryLogsAbortRef.current = controller;
 
-      const res = await apiFetch('/api/query-logs?limit=500', { signal: controller.signal });
+      const shouldUseServerFilters = Boolean(serverQueryFilters.domain || serverQueryFilters.status || serverQueryFilters.hours);
+      const limit = shouldUseServerFilters ? 5000 : 500;
+
+      const params = new URLSearchParams();
+      params.set('limit', String(limit));
+      if (typeof serverQueryFilters.hours === 'number' && Number.isFinite(serverQueryFilters.hours) && serverQueryFilters.hours > 0) {
+        params.set('hours', String(serverQueryFilters.hours));
+      }
+      if (typeof serverQueryFilters.domain === 'string' && serverQueryFilters.domain.trim()) {
+        params.set('domain', serverQueryFilters.domain.trim());
+      }
+      if (typeof serverQueryFilters.status === 'string' && serverQueryFilters.status.trim()) {
+        params.set('status', serverQueryFilters.status.trim());
+      }
+
+      const res = await apiFetch(`/api/query-logs?${params.toString()}`, { signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const items = Array.isArray(data?.items) ? data.items : [];
@@ -172,7 +191,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
       // Keep empty state if backend not reachable.
       setRawQueries([]);
     }
-  }, []);
+  }, [serverQueryFilters.domain, serverQueryFilters.hours, serverQueryFilters.status]);
 
   const flushQueryLogs = useCallback(async () => {
     setFlushMsg('');
@@ -383,10 +402,48 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     if (typeof preset.pageSize === 'number' && Number.isFinite(preset.pageSize) && preset.pageSize > 0) setPageSize(preset.pageSize);
     if (preset.tab === 'suspicious') setActiveTab('suspicious');
     else setActiveTab('queries');
+
+    const nextHours = typeof preset.hours === 'number' && Number.isFinite(preset.hours) && preset.hours > 0 ? preset.hours : undefined;
+    const nextDomain = typeof preset.domainExact === 'string' ? preset.domainExact.trim() : '';
+    const nextStatusRaw = typeof preset.statusFilter === 'string' ? preset.statusFilter.trim().toUpperCase() : '';
+    const nextStatus =
+      nextStatusRaw === 'BLOCKED' || nextStatusRaw === 'PERMITTED' || nextStatusRaw === 'SHADOW_BLOCKED' || nextStatusRaw === 'CACHED'
+        ? nextStatusRaw
+        : undefined;
+
+    setServerQueryFilters({
+      hours: nextDomain || nextStatus ? nextHours : undefined,
+      domain: nextDomain ? nextDomain : undefined,
+      status: nextStatus
+    });
+
     setPage(1);
     onPresetConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preset]);
+
+  useEffect(() => {
+    // If the user changes the UI filters away from what the preset requested,
+    // drop the server-side filters so the page behaves as expected.
+    setServerQueryFilters((prev) => {
+      const next: { hours?: number; domain?: string; status?: string } = { ...prev };
+      const needle = searchTerm.trim();
+
+      if (next.domain && needle !== next.domain) {
+        next.domain = undefined;
+      }
+      if (next.status && statusFilter !== next.status) {
+        next.status = undefined;
+      }
+
+      if (!next.domain && !next.status) {
+        next.hours = undefined;
+      }
+
+      const changed = next.domain !== prev.domain || next.status !== prev.status || next.hours !== prev.hours;
+      return changed ? next : prev;
+    });
+  }, [searchTerm, statusFilter]);
 
   const anomalies = useMemo(() => {
     const all = detectAnomalies(queries, { limit: 0 });
@@ -642,7 +699,10 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
         q.client.toLowerCase().includes(needle) ||
         clientIp.toLowerCase().includes(needle);
 
-      const matchesStatus = statusFilter === 'ALL' || q.status === statusFilter;
+      const matchesStatus =
+        statusFilter === 'ALL' ||
+        q.status === statusFilter ||
+        (statusFilter === QueryStatus.BLOCKED && q.status === QueryStatus.SHADOW_BLOCKED);
       const matchesType = typeFilter === 'ALL' || q.type === typeFilter;
 
       const matchesClient =

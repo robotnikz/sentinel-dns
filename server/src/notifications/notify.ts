@@ -7,13 +7,17 @@ export type NotificationEventKey =
   | 'anomalyDetected'
   | 'protectionPause'
   | 'blocklistRefreshFailed'
-  | 'geoIpUpdated';
+  | 'geoIpUpdated'
+  | 'haFailoverActive'
+  | 'haLeaderAvailableAgain';
 
 type NotificationEventsSetting = {
   anomalyDetected?: boolean;
   protectionPause?: boolean;
   blocklistRefreshFailed?: boolean;
   geoIpUpdated?: boolean;
+  haFailoverActive?: boolean;
+  haLeaderAvailableAgain?: boolean;
 };
 
 function normalizeDiscordWebhookUrl(raw: unknown): string {
@@ -36,7 +40,9 @@ async function getNotificationEvents(db: Db): Promise<Required<NotificationEvent
     anomalyDetected: r.anomalyDetected !== false,
     protectionPause: r.protectionPause !== false,
     blocklistRefreshFailed: r.blocklistRefreshFailed !== false,
-    geoIpUpdated: r.geoIpUpdated !== false
+    geoIpUpdated: r.geoIpUpdated !== false,
+    haFailoverActive: r.haFailoverActive !== false,
+    haLeaderAvailableAgain: r.haLeaderAvailableAgain !== false
   };
 }
 
@@ -50,6 +56,10 @@ function isEventEnabled(events: Required<NotificationEventsSetting>, event: Noti
       return events.blocklistRefreshFailed;
     case 'geoIpUpdated':
       return events.geoIpUpdated;
+    case 'haFailoverActive':
+      return events.haFailoverActive;
+    case 'haLeaderAvailableAgain':
+      return events.haLeaderAvailableAgain;
     default:
       return true;
   }

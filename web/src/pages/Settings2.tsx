@@ -63,7 +63,7 @@ type TailscaleAuthUrlResponse =
   | { ok: false; error?: string; message?: string; details?: string };
 
 type SettingsResponse = { items: Array<{ key: string; value: any }> };
-type SecretsStatusResponse = { configured?: { gemini?: boolean; openai?: boolean } };
+type AiStatusResponse = { providers?: { gemini?: boolean; openai?: boolean }; activeProvider?: 'gemini' | 'openai' | null };
 
 function classNames(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ');
@@ -133,6 +133,7 @@ const Settings2: React.FC<{
   const [aiMsg, setAiMsg] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
   const [aiSecretsStatus, setAiSecretsStatus] = useState<{ gemini: boolean; openai: boolean } | null>(null);
+  const [aiActiveProvider, setAiActiveProvider] = useState<'gemini' | 'openai' | null>(null);
 
   // GeoIP
   const [geoIpStatus, setGeoIpStatus] = useState<GeoIpStatus | null>(null);
@@ -157,7 +158,9 @@ const Settings2: React.FC<{
     anomalyDetected: true,
     protectionPause: true,
     blocklistRefreshFailed: true,
-    geoIpUpdated: true
+    geoIpUpdated: true,
+    haFailoverActive: true,
+    haLeaderAvailableAgain: true
   });
   const [notifMsg, setNotifMsg] = useState('');
   const [notifBusy, setNotifBusy] = useState(false);
@@ -335,25 +338,31 @@ const Settings2: React.FC<{
         anomalyDetected: raw.anomalyDetected !== false,
         protectionPause: raw.protectionPause !== false,
         blocklistRefreshFailed: raw.blocklistRefreshFailed !== false,
-        geoIpUpdated: raw.geoIpUpdated !== false
+        geoIpUpdated: raw.geoIpUpdated !== false,
+        haFailoverActive: raw.haFailoverActive !== false,
+        haLeaderAvailableAgain: raw.haLeaderAvailableAgain !== false
       });
     } catch {
       // ignore
     }
   };
 
-  const refreshSecretsStatus = async (): Promise<void> => {
+  const refreshAiStatus = async (): Promise<void> => {
     try {
-      const res = await fetch('/api/secrets/status', { headers: { ...getAuthHeaders() } });
-      const data = (await safeJson(res)) as SecretsStatusResponse | null;
+      const res = await fetch('/api/ai/status', { headers: { ...getAuthHeaders() } });
+      const data = (await safeJson(res)) as AiStatusResponse | null;
       if (!res.ok || !data || typeof data !== 'object') {
         setAiSecretsStatus(null);
+        setAiActiveProvider(null);
         return;
       }
-      const configured = (data as any).configured || {};
-      setAiSecretsStatus({ gemini: !!configured.gemini, openai: !!configured.openai });
+      const providers = (data as any).providers || {};
+      setAiSecretsStatus({ gemini: !!providers.gemini, openai: !!providers.openai });
+      const ap = (data as any).activeProvider;
+      setAiActiveProvider(ap === 'gemini' || ap === 'openai' ? ap : null);
     } catch {
       setAiSecretsStatus(null);
+      setAiActiveProvider(null);
     }
   };
 
@@ -386,7 +395,7 @@ const Settings2: React.FC<{
   useEffect(() => {
     void refreshGeoIpStatus();
     void refreshTailscaleStatus();
-    void refreshSecretsStatus();
+    void refreshAiStatus();
     void loadDiscordWebhook();
     void loadNotificationEvents();
   }, []);
@@ -421,7 +430,46 @@ const Settings2: React.FC<{
       }
 
       setAiMsg('Saved');
-      await refreshSecretsStatus();
+      await refreshAiStatus();
+
+      // If nothing is active yet, auto-select a sensible default.
+      const want = gemini ? 'gemini' : openai ? 'openai' : null;
+      if (want && !aiActiveProvider) {
+        await fetch('/api/ai/active-provider', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ provider: want })
+        }).catch(() => null);
+        await refreshAiStatus();
+      }
+    } catch {
+      setAiMsg('Backend not reachable.');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const setActiveAiProvider = async (provider: 'gemini' | 'openai') => {
+    if (aiBusy) return;
+    if (readOnlyFollower) {
+      setAiMsg('Read-only follower: cannot change settings.');
+      return;
+    }
+    setAiMsg('');
+    setAiBusy(true);
+    try {
+      const res = await fetch('/api/ai/active-provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ provider })
+      });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setAiMsg(data?.message || data?.error || 'Failed to set active provider.');
+        return;
+      }
+      setAiMsg(`Active: ${provider === 'openai' ? 'ChatGPT' : 'Gemini'}`);
+      await refreshAiStatus();
     } catch {
       setAiMsg('Backend not reachable.');
     } finally {
@@ -1154,7 +1202,86 @@ const Settings2: React.FC<{
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <StatusPill {...yesNoPillProps('Gemini', aiSecretsStatus?.gemini)} />
-              <StatusPill {...yesNoPillProps('OpenAI', aiSecretsStatus?.openai)} />
+              <StatusPill {...yesNoPillProps('ChatGPT', aiSecretsStatus?.openai)} />
+              <StatusPill
+                label="Active"
+                value={aiActiveProvider ? (aiActiveProvider === 'openai' ? 'ChatGPT' : 'Gemini') : 'NONE'}
+                tone={aiActiveProvider ? 'ok' : 'neutral'}
+              />
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div
+                className={classNames(
+                  'p-4 rounded border bg-[#09090b] transition-colors',
+                  aiActiveProvider === 'gemini' ? 'border-emerald-900/50 ring-1 ring-emerald-900/40' : 'border-[#27272a]'
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-zinc-200">Gemini</div>
+                    <div className="mt-1 text-[11px] text-zinc-500">Google Gemini models</div>
+                  </div>
+                  {aiActiveProvider === 'gemini' ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-emerald-400">
+                      Active <Check className="w-3.5 h-3.5" />
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <div className="text-[11px] text-zinc-500">
+                    Configured:{' '}
+                    <span className={aiSecretsStatus?.gemini ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                      {aiSecretsStatus?.gemini ? 'YES' : 'NO'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveAiProvider('gemini')}
+                    disabled={aiBusy || readOnlyFollower || !aiSecretsStatus?.gemini || aiActiveProvider === 'gemini'}
+                    className="px-3 py-2 rounded text-xs font-bold bg-[#18181b] border border-[#27272a] text-zinc-300 hover:bg-white hover:text-black hover:border-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#18181b] disabled:hover:text-zinc-300 disabled:hover:border-[#27272a]"
+                    title={!aiSecretsStatus?.gemini ? 'Store a Gemini key first' : 'Activate Gemini'}
+                  >
+                    ACTIVATE
+                  </button>
+                </div>
+              </div>
+
+              <div
+                className={classNames(
+                  'p-4 rounded border bg-[#09090b] transition-colors',
+                  aiActiveProvider === 'openai' ? 'border-emerald-900/50 ring-1 ring-emerald-900/40' : 'border-[#27272a]'
+                )}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-zinc-200">ChatGPT</div>
+                    <div className="mt-1 text-[11px] text-zinc-500">OpenAI chat models</div>
+                  </div>
+                  {aiActiveProvider === 'openai' ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-emerald-400">
+                      Active <Check className="w-3.5 h-3.5" />
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <div className="text-[11px] text-zinc-500">
+                    Configured:{' '}
+                    <span className={aiSecretsStatus?.openai ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                      {aiSecretsStatus?.openai ? 'YES' : 'NO'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveAiProvider('openai')}
+                    disabled={aiBusy || readOnlyFollower || !aiSecretsStatus?.openai || aiActiveProvider === 'openai'}
+                    className="px-3 py-2 rounded text-xs font-bold bg-[#18181b] border border-[#27272a] text-zinc-300 hover:bg-white hover:text-black hover:border-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#18181b] disabled:hover:text-zinc-300 disabled:hover:border-[#27272a]"
+                    title={!aiSecretsStatus?.openai ? 'Store a ChatGPT key first' : 'Activate ChatGPT'}
+                  >
+                    ACTIVATE
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1169,7 +1296,7 @@ const Settings2: React.FC<{
                 />
               </div>
               <div>
-                <label className="text-[10px] uppercase font-bold text-zinc-500">OpenAI API Key</label>
+                <label className="text-[10px] uppercase font-bold text-zinc-500">ChatGPT (OpenAI) API Key</label>
                 <input
                   type="password"
                   value={openAiApiKey}
@@ -1580,6 +1707,22 @@ const Settings2: React.FC<{
                     onChange={(e) => setNotificationEvents((v) => ({ ...v, geoIpUpdated: e.target.checked }))}
                   />
                   GeoIP database updated
+                </label>
+                <label className="flex items-center gap-2 text-xs text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={notificationEvents.haFailoverActive}
+                    onChange={(e) => setNotificationEvents((v) => ({ ...v, haFailoverActive: e.target.checked }))}
+                  />
+                  HA failover active (VIP takeover)
+                </label>
+                <label className="flex items-center gap-2 text-xs text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={notificationEvents.haLeaderAvailableAgain}
+                    onChange={(e) => setNotificationEvents((v) => ({ ...v, haLeaderAvailableAgain: e.target.checked }))}
+                  />
+                  HA leader available again (VIP returned)
                 </label>
               </div>
 
