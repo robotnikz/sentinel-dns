@@ -1,3 +1,9 @@
+## [0.9.3](https://github.com/robotnikz/sentinel-dns/compare/v0.9.2...v0.9.3) (2026-01-29)
+
+### fix
+
+* **dns:** normalize upstream data chunks (#56) ([](https://github.com/robotnikz/sentinel-dns/commit/bc576f87dedd8100507eafece5a8a4752e866e38)), closes [#56](https://github.com/robotnikz/sentinel-dns/issues/56)
+
 ## [0.9.2](https://github.com/robotnikz/sentinel-dns/compare/v0.9.1...v0.9.2) (2026-01-29)
 
 ### fix
