@@ -4,30 +4,109 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    # Stability-first: avoid big-bang toolchain upgrades on the default branch.
+    ignore:
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
     groups:
-      npm:
+      frontend-runtime:
+        dependency-type: "production"
         patterns:
-          - "*"
+          - "@google/genai"
+          - "react"
+          - "react-dom"
+          - "lucide-react"
+          - "recharts"
+          - "d3-*"
+          - "topojson-client"
+          - "world-atlas"
+      frontend-tooling-patch:
+        dependency-type: "development"
+        update-types: ["patch"]
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "vitest"
+          - "@vitest/*"
+          - "typescript"
+          - "tailwindcss"
+          - "postcss"
+          - "autoprefixer"
+          - "@types/node"
 
   - package-ecosystem: "npm"
     directory: "/server"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+    # Stability-first: block major runtime/tooling jumps; prefer small, reviewed steps.
+    ignore:
+      - dependency-name: "fastify"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@fastify/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
     groups:
-      npm:
+      server-runtime:
+        dependency-type: "production"
         patterns:
-          - "*"
+          - "fastify"
+          - "@fastify/*"
+          - "dotenv"
+          - "maxmind"
+          - "zod"
+          - "tar"
+      server-tooling-patch:
+        dependency-type: "development"
+        update-types: ["patch"]
+        patterns:
+          - "typescript"
+          - "@types/node"
+          - "vitest"
+          - "@vitest/*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "06:00"
     open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: "docker"
     directory: "/docker/single"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 10
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 2
+    # Prefer LTS runtime changes to be handled manually with full smoke/e2e testing.
+    ignore:
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
