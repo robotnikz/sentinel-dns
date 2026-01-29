@@ -1,3 +1,9 @@
+## [0.9.2](https://github.com/robotnikz/sentinel-dns/compare/v0.9.1...v0.9.2) (2026-01-29)
+
+### fix
+
+* **dns:** normalize socket buffers (#55) ([](https://github.com/robotnikz/sentinel-dns/commit/0c4c732ce2b242840b876aff3cf80fa172d950eb)), closes [#55](https://github.com/robotnikz/sentinel-dns/issues/55)
+
 ## [0.9.1](https://github.com/robotnikz/sentinel-dns/compare/v0.9.0...v0.9.1) (2026-01-29)
 
 ### chore
