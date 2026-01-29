@@ -259,7 +259,17 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
         </button>
 
         {!isCollapsed ? (
-          <div className="p-3 border border-[#27272a] bg-[#121214] rounded-md select-none cursor-default group hover:border-zinc-600 transition-colors animate-fade-in">
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(
+                new CustomEvent('sentinel:navigate', {
+                  detail: { page: 'settings', settingsTabPreset: 'system' }
+                })
+              );
+            }}
+            className="w-full text-left p-3 border border-[#27272a] bg-[#121214] rounded-md select-none group hover:border-zinc-600 transition-colors animate-fade-in"
+          >
             <div className="flex items-center justify-between mb-3">
               <span className="text-[10px] font-mono text-zinc-500 uppercase group-hover:text-zinc-400 transition-colors">
                 System Status
@@ -398,7 +408,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
                 {systemStatus.error || 'System status unavailable'}
               </div>
             )}
-          </div>
+          </button>
         ) : (
           <div className="flex justify-center py-2 animate-fade-in">
             <div

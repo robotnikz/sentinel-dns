@@ -39,7 +39,7 @@ const App: React.FC = () => {
     }
   };
   const [logsPreset, setLogsPreset] = useState<any>(null);
-  const [settingsTabPreset, setSettingsTabPreset] = useState<'general' | 'geoip' | 'remote' | 'notifications' | null>(null);
+  const [settingsTabPreset, setSettingsTabPreset] = useState<'general' | 'geoip' | 'remote' | 'notifications' | 'maintenance' | 'system' | null>(null);
   const [protectionPause, setProtectionPause] = useState<{
     active: boolean;
     mode: 'OFF' | 'UNTIL' | 'FOREVER';
@@ -517,6 +517,7 @@ const App: React.FC = () => {
     { id: 'settings.geoip', label: 'Settings: GeoIP / World Map', page: 'settings', settingsTabPreset: 'geoip', keywords: ['geoip', 'maxmind', 'geolite', 'city', 'country', 'world map'] },
     { id: 'settings.remote', label: 'Settings: Tailscale / VPN', page: 'settings', settingsTabPreset: 'remote', keywords: ['tailscale', 'vpn', 'remote access', 'tailnet', 'exit node', 'routes', 'subnet router'] },
     { id: 'settings.notifications', label: 'Settings: Notifications', page: 'settings', settingsTabPreset: 'notifications', keywords: ['discord', 'webhook', 'alerts', 'events', 'bell'] },
+    { id: 'settings.system', label: 'Settings: System Status', page: 'settings', settingsTabPreset: 'system', keywords: ['system', 'status', 'cpu', 'memory', 'disk', 'container', 'health'] },
     { id: 'settings.maintenance', label: 'Settings: Maintenance', page: 'settings', settingsTabPreset: 'maintenance', keywords: ['maintenance', 'clear logs', 'flush logs', 'query logs'] }
   ];
 

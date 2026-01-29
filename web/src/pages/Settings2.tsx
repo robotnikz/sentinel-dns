@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Activity,
   Bell,
   Check,
   Copy,
@@ -113,10 +114,10 @@ function splitAdvertiseRoutes(routes: string[]): { exitNodeDefaults: string[]; s
 }
 
 const Settings2: React.FC<{
-  presetTab?: 'general' | 'geoip' | 'remote' | 'notifications' | 'maintenance' | null;
+  presetTab?: 'general' | 'geoip' | 'remote' | 'notifications' | 'maintenance' | 'system' | null;
   onPresetConsumed?: () => void;
 }> = ({ presetTab, onPresetConsumed }) => {
-  const [tab, setTab] = useState<'general' | 'geoip' | 'remote' | 'notifications' | 'maintenance'>('general');
+  const [tab, setTab] = useState<'general' | 'geoip' | 'remote' | 'notifications' | 'maintenance' | 'system'>('general');
 
   const { status: clusterStatus } = useClusterStatus();
   const readOnlyFollower = isReadOnlyFollower(clusterStatus);
@@ -175,6 +176,102 @@ const Settings2: React.FC<{
   const [importPayload, setImportPayload] = useState<any>(null);
   const [importFileName, setImportFileName] = useState('');
   const importFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // System Status
+  type SystemStatusResponse = {
+    ok: true;
+    timestamp: string;
+    dataDir: string;
+    os: {
+      hostname: string;
+      platform: string;
+      arch: string;
+      release: string;
+      uptimeSec: number;
+      loadavg: number[];
+      cpuCount: number | null;
+      totalMemBytes: number;
+      freeMemBytes: number;
+    };
+    process: {
+      pid: number;
+      nodeVersion: string;
+      uptimeSec: number;
+      rssBytes: number;
+      heapUsedBytes: number;
+      heapTotalBytes: number;
+      externalBytes: number;
+    };
+    cgroup?: { memoryLimitBytes: number | null };
+    disk: {
+      path: string;
+      totalBytes: number | null;
+      usedBytes: number | null;
+      freeBytes: number | null;
+      availableBytes: number | null;
+    };
+
+    diskRoot?: {
+      path: string;
+      totalBytes: number | null;
+      usedBytes: number | null;
+      freeBytes: number | null;
+      availableBytes: number | null;
+    };
+  };
+
+  const [systemStatus, setSystemStatus] = useState<SystemStatusResponse | null>(null);
+  const [systemBusy, setSystemBusy] = useState(false);
+  const [systemMsg, setSystemMsg] = useState('');
+  const [systemAutoRefreshSec, setSystemAutoRefreshSec] = useState<0 | 5 | 10 | 30>(0);
+
+  const formatBytes = (n: number | null | undefined): string => {
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return '—';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let v = n;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+      v /= 1024;
+      i++;
+    }
+    const digits = i <= 1 ? 0 : 1;
+    return `${v.toFixed(digits)} ${units[i]}`;
+  };
+
+  const loadSystemStatus = async () => {
+    if (systemBusy) return;
+    setSystemBusy(true);
+    setSystemMsg('');
+    try {
+      const res = await fetch('/api/system/status', { headers: getAuthHeaders() });
+      const data = await safeJson(res);
+      if (!res.ok) {
+        setSystemMsg(data?.message || data?.error || 'Failed to load system status.');
+        setSystemStatus(null);
+        return;
+      }
+      setSystemStatus(data as SystemStatusResponse);
+    } catch {
+      setSystemMsg('Backend not reachable.');
+      setSystemStatus(null);
+    } finally {
+      setSystemBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab !== 'system') return;
+    void loadSystemStatus();
+  }, [tab]);
+
+  useEffect(() => {
+    if (tab !== 'system') return;
+    if (!systemAutoRefreshSec) return;
+    const id = window.setInterval(() => {
+      void loadSystemStatus();
+    }, systemAutoRefreshSec * 1000);
+    return () => window.clearInterval(id);
+  }, [tab, systemAutoRefreshSec]);
 
   const modalBusy = maintBusy || importBusy;
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -1150,6 +1247,7 @@ const Settings2: React.FC<{
     { id: 'geoip' as const, label: 'GeoIP / World Map', icon: Globe },
     { id: 'remote' as const, label: 'Tailscale', icon: Network },
     { id: 'notifications' as const, label: 'Notifications', icon: Bell },
+    { id: 'system' as const, label: 'System Status', icon: Activity },
     { id: 'maintenance' as const, label: 'Maintenance', icon: Trash2 }
   ];
 
@@ -1743,6 +1841,115 @@ const Settings2: React.FC<{
           </div>
         )}
 
+        {tab === 'system' && (
+          <div className="dashboard-card p-6 rounded-lg">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-white font-bold text-lg flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-emerald-500" /> System Status
+                </h2>
+                <p className="text-zinc-500 text-sm mt-1">Container/system snapshot (admin-only).</p>
+                {systemStatus?.timestamp ? (
+                  <div className="mt-1 text-[11px] text-zinc-600 font-mono">Last updated: {new Date(systemStatus.timestamp).toLocaleString()}</div>
+                ) : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-zinc-500 font-mono">Auto-refresh</span>
+                  <select
+                    value={systemAutoRefreshSec}
+                    onChange={(e) => setSystemAutoRefreshSec(clampInt(e.target.value, 0, 30, 0) as any)}
+                    className="bg-[#09090b] border border-[#27272a] text-zinc-200 px-2 py-2 rounded text-xs font-mono focus:outline-none focus:border-zinc-500"
+                  >
+                    <option value={0}>OFF</option>
+                    <option value={5}>5s</option>
+                    <option value={10}>10s</option>
+                    <option value={30}>30s</option>
+                  </select>
+                </div>
+
+                <button
+                  onClick={loadSystemStatus}
+                  disabled={systemBusy}
+                  className={classNames(
+                    'px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2',
+                    systemBusy ? 'opacity-50 cursor-not-allowed' : ''
+                  )}
+                >
+                  <RefreshCw className={classNames('w-3.5 h-3.5', systemBusy ? 'animate-spin' : '')} />
+                  REFRESH
+                </button>
+              </div>
+            </div>
+
+            {systemMsg && <div className="mt-3 text-xs text-zinc-400">{systemMsg}</div>}
+
+            {!systemStatus ? (
+              <div className="mt-4 text-xs text-zinc-500">No data loaded.</div>
+            ) : (
+              <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="p-4 rounded border border-[#27272a] bg-[#09090b]">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">Host</div>
+                  <div className="mt-3 space-y-2 text-xs">
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Hostname</span><span className="text-zinc-200 font-mono">{systemStatus.os.hostname}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Platform</span><span className="text-zinc-200 font-mono">{systemStatus.os.platform}/{systemStatus.os.arch}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Release</span><span className="text-zinc-200 font-mono">{systemStatus.os.release}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Uptime</span><span className="text-zinc-200 font-mono">{systemStatus.os.uptimeSec.toLocaleString()}s</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">CPU</span><span className="text-zinc-200 font-mono">{systemStatus.os.cpuCount ?? '—'} cores</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Load</span><span className="text-zinc-200 font-mono">{(systemStatus.os.loadavg || []).slice(0, 3).map((n) => (Number.isFinite(n) ? n.toFixed(2) : '—')).join(' / ')}</span></div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded border border-[#27272a] bg-[#09090b]">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">Memory</div>
+                  <div className="mt-3 space-y-2 text-xs">
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Host Total</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.os.totalMemBytes)}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Host Free</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.os.freeMemBytes)}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Process RSS</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.process.rssBytes)}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Heap Used</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.process.heapUsedBytes)}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Heap Total</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.process.heapTotalBytes)}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">cgroup Limit</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.cgroup?.memoryLimitBytes ?? null)}</span></div>
+                  </div>
+                </div>
+
+                <div className="p-4 rounded border border-[#27272a] bg-[#09090b]">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">Disk</div>
+                  <div className="mt-3 space-y-2 text-xs">
+                    <div className="text-[10px] uppercase font-bold text-zinc-600">DATA_DIR</div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Path</span><span className="text-zinc-200 font-mono">{systemStatus.disk.path}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Total</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.disk.totalBytes)}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Used</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.disk.usedBytes)}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Free</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.disk.freeBytes)}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Available</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.disk.availableBytes)}</span></div>
+
+                    {systemStatus.diskRoot ? (
+                      <>
+                        <div className="mt-3 text-[10px] uppercase font-bold text-zinc-600">ROOT (/)</div>
+                        <div className="flex justify-between gap-3"><span className="text-zinc-500">Path</span><span className="text-zinc-200 font-mono">{systemStatus.diskRoot.path}</span></div>
+                        <div className="flex justify-between gap-3"><span className="text-zinc-500">Total</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.diskRoot.totalBytes)}</span></div>
+                        <div className="flex justify-between gap-3"><span className="text-zinc-500">Used</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.diskRoot.usedBytes)}</span></div>
+                        <div className="flex justify-between gap-3"><span className="text-zinc-500">Free</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.diskRoot.freeBytes)}</span></div>
+                        <div className="flex justify-between gap-3"><span className="text-zinc-500">Available</span><span className="text-zinc-200 font-mono">{formatBytes(systemStatus.diskRoot.availableBytes)}</span></div>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="p-4 rounded border border-[#27272a] bg-[#09090b]">
+                  <div className="text-[10px] uppercase font-bold text-zinc-500">Process</div>
+                  <div className="mt-3 space-y-2 text-xs">
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">PID</span><span className="text-zinc-200 font-mono">{systemStatus.process.pid}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Node</span><span className="text-zinc-200 font-mono">{systemStatus.process.nodeVersion}</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Uptime</span><span className="text-zinc-200 font-mono">{systemStatus.process.uptimeSec.toLocaleString()}s</span></div>
+                    <div className="flex justify-between gap-3"><span className="text-zinc-500">Updated</span><span className="text-zinc-200 font-mono">{new Date(systemStatus.timestamp).toLocaleString()}</span></div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === 'maintenance' && (
           <div className="dashboard-card p-6 rounded-lg">
             <h2 className="text-white font-bold text-lg flex items-center gap-2">
@@ -1759,44 +1966,50 @@ const Settings2: React.FC<{
                     <div className="text-xs text-zinc-300 font-bold">Query Logs</div>
                     <div className="text-[11px] text-zinc-500 mt-1">Purge old entries or clear everything.</div>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <input
-                        value={purgeDays}
-                        onChange={(e) => setPurgeDays(e.target.value)}
-                        placeholder="Days"
-                        className="w-24 bg-[#09090b] border border-[#27272a] text-zinc-200 px-3 py-2 rounded text-xs font-mono focus:outline-none focus:border-zinc-500"
-                      />
-                      <button
-                        onClick={purgeOldQueryLogs}
-                        disabled={maintBusy}
-                        className={classNames(
-                          'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
-                          maintBusy ? 'opacity-50 cursor-not-allowed' : ''
-                        )}
-                      >
-                        PURGE OLDER THAN (DAYS)
-                      </button>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={purgeDays}
+                          onChange={(e) => setPurgeDays(e.target.value)}
+                          placeholder="Days"
+                          className="w-24 bg-[#09090b] border border-[#27272a] text-zinc-200 px-3 py-2 rounded text-xs font-mono focus:outline-none focus:border-zinc-500"
+                        />
+                        <span className="text-[11px] text-zinc-600 font-mono">days</span>
+                      </div>
 
-                      <button
-                        onClick={flushQueryLogs}
-                        disabled={maintBusy}
-                        className={classNames(
-                          'px-3 py-2 rounded text-xs font-bold border flex items-center gap-2',
-                          maintBusy
-                            ? 'opacity-50 cursor-not-allowed bg-[#18181b] border-[#27272a] text-zinc-400'
-                            : 'bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50'
-                        )}
-                      >
-                        {maintBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                        CLEAR ALL
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2 ml-auto">
+                        <button
+                          onClick={purgeOldQueryLogs}
+                          disabled={maintBusy}
+                          className={classNames(
+                            'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
+                            maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                          )}
+                        >
+                          PURGE
+                        </button>
+
+                        <button
+                          onClick={flushQueryLogs}
+                          disabled={maintBusy}
+                          className={classNames(
+                            'px-3 py-2 rounded text-xs font-bold border flex items-center gap-2',
+                            maintBusy
+                              ? 'opacity-50 cursor-not-allowed bg-[#18181b] border-[#27272a] text-zinc-400'
+                              : 'bg-rose-950/30 border-rose-900/50 text-rose-300 hover:bg-rose-950/50'
+                          )}
+                        >
+                          {maintBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                          CLEAR ALL
+                        </button>
+                      </div>
                     </div>
                   </div>
 
                   <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
                     <div className="text-xs text-zinc-300 font-bold">Notifications</div>
                     <div className="text-[11px] text-zinc-500 mt-1">Clean up the bell feed storage.</div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                       <button
                         onClick={() => clearNotifications('read')}
                         disabled={maintBusy}
@@ -1823,7 +2036,7 @@ const Settings2: React.FC<{
                   <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
                     <div className="text-xs text-zinc-300 font-bold">Ignored Suspicious Activity</div>
                     <div className="text-[11px] text-zinc-500 mt-1">Remove stored ignore signatures.</div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                       <button
                         onClick={() => clearIgnoredAnomalies('expired')}
                         disabled={maintBusy}
@@ -1859,7 +2072,7 @@ const Settings2: React.FC<{
                     <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
                       <div className="text-xs text-zinc-300 font-bold">Blocklists</div>
                       <div className="text-[11px] text-zinc-500 mt-1">Manually refresh enabled blocklists now.</div>
-                      <div className="mt-3">
+                      <div className="mt-3 flex items-center justify-end">
                         <button
                           onClick={refreshEnabledBlocklistsNow}
                           disabled={maintBusy || readOnlyFollower}
@@ -1877,7 +2090,7 @@ const Settings2: React.FC<{
                     <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
                       <div className="text-xs text-zinc-300 font-bold">Resolver (Unbound)</div>
                       <div className="text-[11px] text-zinc-500 mt-1">In single-container mode this uses Supervisor to control Unbound.</div>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                         <button
                           onClick={() => restartResolver('reload')}
                           disabled={maintBusy || readOnlyFollower}
@@ -1910,7 +2123,7 @@ const Settings2: React.FC<{
                     <div className="p-3 rounded border border-[#27272a] bg-[#0b0b0e]">
                       <div className="text-xs text-zinc-300 font-bold">Export</div>
                       <div className="text-[11px] text-zinc-500 mt-1">Downloads settings, rules, clients and blocklists (no secrets).</div>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                         <button
                           onClick={() =>
                             downloadJson(
@@ -1963,41 +2176,43 @@ const Settings2: React.FC<{
                           className="hidden"
                         />
 
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={() => importFileInputRef.current?.click()}
-                            disabled={importBusy || maintBusy || readOnlyFollower}
-                            className={classNames(
-                              'px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2',
-                              importBusy || maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
-                            )}
-                          >
-                            <Upload className="w-3.5 h-3.5" /> CHOOSE FILE
-                          </button>
-
-                          <div className="text-xs font-mono text-zinc-500 truncate max-w-[340px]">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs font-mono text-zinc-500 truncate max-w-[380px]">
                             {importFileName ? `Selected: ${importFileName}` : 'No file selected.'}
                           </div>
 
-                          {importFileName ? (
+                          <div className="flex flex-wrap items-center gap-2 ml-auto">
                             <button
-                              onClick={() => {
-                                if (importBusy || maintBusy) return;
-                                setImportMsg('');
-                                setImportSummary(null);
-                                setImportPayload(null);
-                                setImportFileName('');
-                                if (importFileInputRef.current) importFileInputRef.current.value = '';
-                              }}
-                              disabled={importBusy || maintBusy}
+                              onClick={() => importFileInputRef.current?.click()}
+                              disabled={importBusy || maintBusy || readOnlyFollower}
                               className={classNames(
-                                'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
-                                importBusy || maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                                'px-4 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a] flex items-center gap-2',
+                                importBusy || maintBusy || readOnlyFollower ? 'opacity-50 cursor-not-allowed' : ''
                               )}
                             >
-                              CLEAR
+                              <Upload className="w-3.5 h-3.5" /> CHOOSE FILE
                             </button>
-                          ) : null}
+
+                            {importFileName ? (
+                              <button
+                                onClick={() => {
+                                  if (importBusy || maintBusy) return;
+                                  setImportMsg('');
+                                  setImportSummary(null);
+                                  setImportPayload(null);
+                                  setImportFileName('');
+                                  if (importFileInputRef.current) importFileInputRef.current.value = '';
+                                }}
+                                disabled={importBusy || maintBusy}
+                                className={classNames(
+                                  'px-3 py-2 rounded text-xs font-bold border bg-[#18181b] border-[#27272a] text-zinc-300 hover:bg-[#27272a]',
+                                  importBusy || maintBusy ? 'opacity-50 cursor-not-allowed' : ''
+                                )}
+                              >
+                                CLEAR
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
 
