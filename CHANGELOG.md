@@ -1,3 +1,19 @@
+## [0.9.1](https://github.com/robotnikz/sentinel-dns/compare/v0.9.0...v0.9.1) (2026-01-29)
+
+### chore
+
+* **deps:** bump actions/cache from 4 to 5 (#25) ([](https://github.com/robotnikz/sentinel-dns/commit/4265ae31e3778d453ebe38a4be522b2aa87cc274)), closes [#25](https://github.com/robotnikz/sentinel-dns/issues/25)
+* **deps:** bump actions/checkout from 4 to 6 (#3) ([](https://github.com/robotnikz/sentinel-dns/commit/d644d716c5974eebf5d4d27aaf10522362a9c44a)), closes [#3](https://github.com/robotnikz/sentinel-dns/issues/3)
+* **deps:** bump actions/setup-node from 4 to 6 (#5) ([](https://github.com/robotnikz/sentinel-dns/commit/0c4a938e0ac46b64cf8687d11f5351d8415b47a8)), closes [#5](https://github.com/robotnikz/sentinel-dns/issues/5)
+* **deps:** bump actions/upload-artifact from 4 to 6 (#22) ([](https://github.com/robotnikz/sentinel-dns/commit/c5f97d9759b9e9504d2c5de62ad2c99414bad066)), closes [#22](https://github.com/robotnikz/sentinel-dns/issues/22)
+* **deps:** bump aquasecurity/trivy-action from 0.28.0 to 0.33.1 (#23) ([](https://github.com/robotnikz/sentinel-dns/commit/1e6b2e78a5d8d7647c039ee913f0561b1244195c)), closes [#23](https://github.com/robotnikz/sentinel-dns/issues/23)
+* **deps:** bump github/codeql-action from 3 to 4 (#24) ([](https://github.com/robotnikz/sentinel-dns/commit/527f48ded4b2c2c0c22f47d46052ee7e9edbb25d)), closes [#24](https://github.com/robotnikz/sentinel-dns/issues/24)
+* **deps:** bump tar from 7.5.6 to 7.5.7 in /server (#52) ([](https://github.com/robotnikz/sentinel-dns/commit/e246c5ef26a1df4577c224e35b93e57b1d28306c)), closes [#52](https://github.com/robotnikz/sentinel-dns/issues/52)
+
+### fix
+
+* **readme:** repair quick links [skip ci] ([](https://github.com/robotnikz/sentinel-dns/commit/85705f86b6bd2a804f33f85ff38ee3a19ee6a781))
+
 ## [0.9.0](https://github.com/robotnikz/sentinel-dns/compare/v0.8.9...v0.9.0) (2026-01-29)
 
 ### feat
