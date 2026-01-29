@@ -1,3 +1,9 @@
+## [0.9.0](https://github.com/robotnikz/sentinel-dns/compare/v0.8.9...v0.9.0) (2026-01-29)
+
+### feat
+
+* improve logs, AI providers, and HA notifications ([](https://github.com/robotnikz/sentinel-dns/commit/3c0a2774b76540eaea5129dfb648b30fcce2084f))
+
 ## [0.8.9](https://github.com/robotnikz/sentinel-dns/compare/v0.8.8...v0.8.9) (2026-01-28)
 
 ### fix
