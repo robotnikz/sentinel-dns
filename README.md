@@ -109,20 +109,28 @@ Not sure which Compose file to use? See [deploy/compose/README.md](deploy/compos
 > [!TIP]
 > For production, pin a version tag (instead of `latest`) so upgrades/rollbacks are explicit.
 
-Pick one:
+Pick your setup:
 
-#### A) Single-node (default)
-
-Use: `deploy/compose/docker-compose.yml`
+#### Single-node (default)
 
 ```bash
 # Linux/macOS
-curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.yml
-docker compose up -d
+curl -fsSLO https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.yml
+docker compose -f docker-compose.yml up -d
+```
+
+#### HA (Linux only: VIP/VRRP failover via keepalived)
+
+```bash
+# Linux/macOS
+curl -fsSLO https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.ha.yml
+docker compose -f docker-compose.ha.yml up -d
 ```
 
 <details>
-<summary>Show full <code>docker-compose.yml</code></summary>
+<summary>Show full compose files (YAML)</summary>
+
+<p><strong>docker-compose.yml</strong></p>
 
 ```yaml
 services:
@@ -167,20 +175,7 @@ volumes:
   sentinel-data:
 ```
 
-</details>
-
-#### B) HA (VIP/VRRP failover via keepalived)
-
-Use: `deploy/compose/docker-compose.ha.yml` (Linux hosts only)
-
-```bash
-# Linux/macOS
-curl -fsSL -o docker-compose.ha.yml https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.ha.yml
-docker compose -f docker-compose.ha.yml up -d
-```
-
-<details>
-<summary>Show full <code>docker-compose.ha.yml</code></summary>
+<p><strong>docker-compose.ha.yml</strong></p>
 
 ```yaml
 # HA compose: Sentinel + VIP/VRRP failover via keepalived.
