@@ -40,6 +40,11 @@ export function createDb(config: AppConfig): Db {
         'CREATE UNIQUE INDEX IF NOT EXISTS rules_domain_type_category_uidx ON rules (domain, type, category)'
       );
 
+      // Performance: blocklist refresh and DNS rule indexing filter by category (and sometimes prefix).
+      // The unique index above is not helpful for `WHERE category = ...` or `LIKE 'Blocklist:<id>:%'`.
+      await client.query('CREATE INDEX IF NOT EXISTS rules_category_idx ON rules (category)');
+      await client.query('CREATE INDEX IF NOT EXISTS rules_category_type_idx ON rules (category text_pattern_ops, type)');
+
       await client.query(`
         CREATE TABLE IF NOT EXISTS clients (
           id TEXT PRIMARY KEY,

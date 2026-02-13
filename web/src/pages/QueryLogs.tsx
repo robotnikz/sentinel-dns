@@ -437,8 +437,10 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     });
   }, [searchTerm, statusFilter, timeframeHours]);
 
+  const allAnomalies = useMemo(() => detectAnomalies(queries, { limit: 0 }), [queries]);
+
   const anomalies = useMemo(() => {
-    const all = detectAnomalies(queries, { limit: 0 });
+    const all = allAnomalies;
     const visible = showIgnoredAnomalies
       ? all
       : all.filter((a) => !ignoredAnomalySignatures.includes(signatureForAnomaly(a)));
@@ -450,12 +452,12 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
       const hay = `${a.device} ${a.issue} ${a.domain ?? ''} ${a.detail}`.toLowerCase();
       return hay.includes(needle);
     });
-  }, [queries, showIgnoredAnomalies, ignoredAnomalySignatures, anomalySearchTerm]);
+  }, [allAnomalies, showIgnoredAnomalies, ignoredAnomalySignatures, anomalySearchTerm]);
 
   const ignoredAnomaliesCount = useMemo(() => {
-    const all = detectAnomalies(queries, { limit: 0 });
+    const all = allAnomalies;
     return all.filter((a) => ignoredAnomalySignatures.includes(signatureForAnomaly(a))).length;
-  }, [queries, ignoredAnomalySignatures]);
+  }, [allAnomalies, ignoredAnomalySignatures]);
 
   // Extract Unique Clients from logs for the dropdown
   const uniqueClients = useMemo(
@@ -637,7 +639,7 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
   const getBlocklistName = (id?: string) => {
     if (!id) return 'Custom Rule';
     // Server logs `rule.category` as the "blocklistId" for now.
-    // Format: "Blocklist:<id>:<name>".
+    // Formats: "Blocklist:<id>" (current) or "Blocklist:<id>:<name>" (legacy).
     if (id.startsWith('Blocklist:')) {
       const parts = id.split(':');
       if (parts.length >= 3) return parts.slice(2).join(':') || 'Blocklist';
@@ -682,28 +684,30 @@ const QueryLogs: React.FC<QueryLogsProps> = ({ preset, onPresetConsumed }) => {
     }
   };
 
-    const filteredQueries = queries.filter(q => {
+    const filteredQueries = useMemo(() => {
       const needle = searchTerm.toLowerCase();
-      const clientIp = String((q as any).clientIp ?? '');
+      return queries.filter((q) => {
+        const clientIp = String((q as any).clientIp ?? '');
 
-      const matchesSearch =
-        q.domain.toLowerCase().includes(needle) ||
-        q.client.toLowerCase().includes(needle) ||
-        clientIp.toLowerCase().includes(needle);
+        const matchesSearch =
+          q.domain.toLowerCase().includes(needle) ||
+          q.client.toLowerCase().includes(needle) ||
+          clientIp.toLowerCase().includes(needle);
 
-      const matchesStatus =
-        statusFilter === 'ALL' ||
-        q.status === statusFilter ||
-        (statusFilter === QueryStatus.BLOCKED && q.status === QueryStatus.SHADOW_BLOCKED);
-      const matchesType = typeFilter === 'ALL' || q.type === typeFilter;
+        const matchesStatus =
+          statusFilter === 'ALL' ||
+          q.status === statusFilter ||
+          (statusFilter === QueryStatus.BLOCKED && q.status === QueryStatus.SHADOW_BLOCKED);
+        const matchesType = typeFilter === 'ALL' || q.type === typeFilter;
 
-      const matchesClient =
-        clientFilter === 'ALL' ||
-        q.client === clientFilter ||
-        (clientIp.length > 0 && clientIp === clientFilter);
+        const matchesClient =
+          clientFilter === 'ALL' ||
+          q.client === clientFilter ||
+          (clientIp.length > 0 && clientIp === clientFilter);
 
-      return matchesSearch && matchesStatus && matchesType && matchesClient;
-  });
+        return matchesSearch && matchesStatus && matchesType && matchesClient;
+      });
+    }, [queries, searchTerm, statusFilter, typeFilter, clientFilter]);
 
   // Reset to first page when filters change.
   useEffect(() => {

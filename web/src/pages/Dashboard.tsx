@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { AlertTriangle, Ban, BarChart3, EyeOff, Globe, Info, Map as MapIcon, Percent, Shield, ShieldX, Sparkles, TrendingUp, Users, X, XCircle, Zap, Check, ArrowUpRight } from 'lucide-react';
 import StatCard from '../components/StatCard';
-import WorldMap, { type CountryData, type MapPoint } from '../components/WorldMap';
+import type { CountryData, MapPoint } from '../components/WorldMap';
 import Modal from '../components/Modal';
 import { detectAnomalies } from '../services/anomalyService';
 import { analyzeDomain } from '../services/geminiService';
@@ -13,6 +13,7 @@ import { apiFetch } from '../services/apiClient';
 import { isReadOnlyFollower, useClusterStatus } from '../hooks/useClusterStatus';
 
 const IGNORED_ANOMALY_KEY = 'sentinel_ignored_anomaly_signatures';
+const WorldMap = lazy(() => import('../components/WorldMap'));
 
 function signatureForAnomaly(a: Anomaly): string {
   return `${a.device}|${a.issue}`;
@@ -622,8 +623,7 @@ const Dashboard: React.FC = () => {
                 <h2 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
                   <MapIcon className="w-4 h-4 text-emerald-500" /> Outbound Destinations
                 </h2>
-                <Info
-                  className="w-3.5 h-3.5 text-zinc-600 cursor-help"
+                <span
                   title={
                     geoStatus
                       ? geoStatus.available
@@ -631,7 +631,9 @@ const Dashboard: React.FC = () => {
                         : `GeoIP database missing at ${geoStatus.dbPath || '(unset)'}`
                       : 'GeoIP status unknown'
                   }
-                />
+                >
+                  <Info className="w-3.5 h-3.5 text-zinc-600 cursor-help" />
+                </span>
               </div>
               <div className="flex gap-2 items-center">
                 <span className="flex items-center gap-1.5 text-xs text-zinc-400">
@@ -645,7 +647,15 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="p-4 bg-[#09090b]">
               {geoData.length > 0 || geoPoints.length > 0 ? (
-                <WorldMap data={geoData} points={geoPoints} />
+                <Suspense
+                  fallback={
+                    <div className="h-[360px] flex items-center justify-center text-zinc-500 text-xs">
+                      Loading map…
+                    </div>
+                  }
+                >
+                  <WorldMap data={geoData} points={geoPoints} />
+                </Suspense>
               ) : (
                 <div className="p-8 text-center text-zinc-600 flex flex-col items-center">
                   <MapIcon className="w-8 h-8 opacity-20 mb-2" />

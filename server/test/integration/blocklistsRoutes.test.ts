@@ -144,7 +144,7 @@ describe('integration: blocklists routes', () => {
     expect(res.statusCode).toBe(202);
     expect(res.json()).toMatchObject({ ok: true, fetched: 2 });
 
-    const category = `Blocklist:${id}:Refresh List`;
+    const category = `Blocklist:${id}`;
     const rules = await pool.query('SELECT domain, category FROM rules WHERE category = $1 ORDER BY domain ASC', [category]);
     const domains = rules.rows.map((r) => String(r.domain));
     expect(domains).toEqual(['ads.example.com', 'tracker.example.org']);

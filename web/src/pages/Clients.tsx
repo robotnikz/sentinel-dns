@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Smartphone, Laptop, Tv, Gamepad2, Tablet, Search, Shield, GlobeLock, X, Filter, Lock, Skull, Heart, MessageCircle, Play, ShoppingCart, Ban, Grid, HelpCircle, Info, Moon, Clock, Calendar, Check, Pause, ChevronDown, ChevronUp, WifiOff, Power, Youtube, Network, Router, Sliders, Plus, Save, Fingerprint, RefreshCw, Pencil, Trash2 } from 'lucide-react';
+import { Smartphone, Laptop, Tv, Gamepad2, Tablet, Search, Shield, Globe, X, Filter, Lock, Skull, Heart, MessageCircle, Play, ShoppingCart, Ban, Grid, HelpCircle, Info, Moon, Clock, Calendar, Check, Pause, ChevronDown, ChevronUp, WifiOff, Power, Youtube, Network, Router, Sliders, Plus, Save, Fingerprint, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import { ClientProfile, ContentCategory, AppService, ScheduleModeType, BlocklistMode, Schedule } from '../types';
 import { AppLogo } from '../components/AppLogo';
 import { useClients } from '../contexts/ClientsContext';
@@ -1032,7 +1032,7 @@ const Clients: React.FC = () => {
                {/* Safe Search */}
                <div className="flex items-center justify-between pr-4 border-r border-[#27272a]/0">
                   <div className="flex items-center gap-2">
-                    <GlobeLock className={`w-3.5 h-3.5 ${client.safeSearch ? 'text-emerald-500' : 'text-zinc-600'}`} />
+                    <Globe className={`w-3.5 h-3.5 ${client.safeSearch ? 'text-emerald-500' : 'text-zinc-600'}`} />
                     <span className="text-xs font-medium text-zinc-400">Safe Search</span>
                   </div>
                   <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${client.safeSearch ? 'bg-emerald-950/30 text-emerald-500' : 'text-zinc-600'}`}>

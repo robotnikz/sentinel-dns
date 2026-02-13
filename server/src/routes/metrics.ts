@@ -255,33 +255,34 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
         return { error: 'MISSING_CLIENT', message: 'Provide querystring client.' };
       }
 
-      const topAllowedRes = await db.pool.query(
-        `SELECT entry->>'domain' AS domain, COUNT(*)::bigint AS count
-         FROM query_logs
-         WHERE ts >= NOW() - ($1::text || ' hours')::interval
-           AND COALESCE(NULLIF(entry->>'clientIp',''), NULLIF(entry->>'client',''), 'Unknown') = $2
-           AND COALESCE(entry->>'status','') NOT IN ('BLOCKED', 'SHADOW_BLOCKED')
-           AND entry ? 'domain'
-           AND NULLIF(entry->>'domain','') IS NOT NULL
-         GROUP BY 1
-         ORDER BY count DESC
-         LIMIT $3`,
-        [String(hours), client, limit]
-      );
-
-      const topBlockedRes = await db.pool.query(
-        `SELECT entry->>'domain' AS domain, COUNT(*)::bigint AS count
-         FROM query_logs
-         WHERE ts >= NOW() - ($1::text || ' hours')::interval
-           AND COALESCE(NULLIF(entry->>'clientIp',''), NULLIF(entry->>'client',''), 'Unknown') = $2
-           AND entry->>'status' IN ('BLOCKED', 'SHADOW_BLOCKED')
-           AND entry ? 'domain'
-           AND NULLIF(entry->>'domain','') IS NOT NULL
-         GROUP BY 1
-         ORDER BY count DESC
-         LIMIT $3`,
-        [String(hours), client, limit]
-      );
+      const [topAllowedRes, topBlockedRes] = await Promise.all([
+        db.pool.query(
+          `SELECT entry->>'domain' AS domain, COUNT(*)::bigint AS count
+           FROM query_logs
+           WHERE ts >= NOW() - ($1::text || ' hours')::interval
+             AND COALESCE(NULLIF(entry->>'clientIp',''), NULLIF(entry->>'client',''), 'Unknown') = $2
+             AND COALESCE(entry->>'status','') NOT IN ('BLOCKED', 'SHADOW_BLOCKED')
+             AND entry ? 'domain'
+             AND NULLIF(entry->>'domain','') IS NOT NULL
+           GROUP BY 1
+           ORDER BY count DESC
+           LIMIT $3`,
+          [String(hours), client, limit]
+        ),
+        db.pool.query(
+          `SELECT entry->>'domain' AS domain, COUNT(*)::bigint AS count
+           FROM query_logs
+           WHERE ts >= NOW() - ($1::text || ' hours')::interval
+             AND COALESCE(NULLIF(entry->>'clientIp',''), NULLIF(entry->>'client',''), 'Unknown') = $2
+             AND entry->>'status' IN ('BLOCKED', 'SHADOW_BLOCKED')
+             AND entry ? 'domain'
+             AND NULLIF(entry->>'domain','') IS NOT NULL
+           GROUP BY 1
+           ORDER BY count DESC
+           LIMIT $3`,
+          [String(hours), client, limit]
+        )
+      ]);
 
       const out = {
         windowHours: hours,
@@ -316,33 +317,23 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
 
       const hours = clampInt(request.query.hours, 24, 1, 168);
 
-      const totalRes = await db.pool.query(
-        `SELECT COUNT(*)::bigint AS total
+      const summaryRes = await db.pool.query(
+        `SELECT
+           COUNT(*)::bigint AS total,
+           SUM(CASE WHEN entry->>'status' IN ('BLOCKED', 'SHADOW_BLOCKED') THEN 1 ELSE 0 END)::bigint AS blocked,
+           COUNT(DISTINCT COALESCE(NULLIF(entry->>'clientIp',''), NULLIF(entry->>'client','')))::bigint AS clients
          FROM query_logs
          WHERE ts >= NOW() - ($1::text || ' hours')::interval`,
         [String(hours)]
       );
 
-      const blockedRes = await db.pool.query(
-        `SELECT COUNT(*)::bigint AS blocked
-         FROM query_logs
-         WHERE ts >= NOW() - ($1::text || ' hours')::interval
-           AND entry->>'status' IN ('BLOCKED', 'SHADOW_BLOCKED')`,
-        [String(hours)]
-      );
-
-      const clientsRes = await db.pool.query(
-        `SELECT COUNT(DISTINCT COALESCE(NULLIF(entry->>'clientIp',''), NULLIF(entry->>'client','')))::bigint AS clients
-         FROM query_logs
-         WHERE ts >= NOW() - ($1::text || ' hours')::interval`,
-        [String(hours)]
-      );
+      const row = summaryRes.rows?.[0] ?? {};
 
       const out = {
         windowHours: hours,
-        totalQueries: Number(totalRes.rows[0]?.total ?? 0),
-        blockedQueries: Number(blockedRes.rows[0]?.blocked ?? 0),
-        activeClients: Number(clientsRes.rows[0]?.clients ?? 0)
+        totalQueries: Number((row as any).total ?? 0),
+        blockedQueries: Number((row as any).blocked ?? 0),
+        activeClients: Number((row as any).clients ?? 0)
       };
 
       cacheSet(cacheKey, out);

@@ -17,11 +17,7 @@ describe('unit: metrics cache', () => {
 
     const db = {
       pool: {
-        query: vi
-          .fn()
-          .mockResolvedValueOnce({ rows: [{ total: 10n }] })
-          .mockResolvedValueOnce({ rows: [{ blocked: 2n }] })
-          .mockResolvedValueOnce({ rows: [{ clients: 3n }] })
+        query: vi.fn().mockResolvedValueOnce({ rows: [{ total: 10n, blocked: 2n, clients: 3n }] })
       }
     } as any;
 
@@ -35,13 +31,13 @@ describe('unit: metrics cache', () => {
     const r1 = await app.inject({ method: 'GET', url: '/api/metrics/summary?hours=24' });
     expect(r1.statusCode).toBe(200);
 
-    expect(db.pool.query).toHaveBeenCalledTimes(3);
+    expect(db.pool.query).toHaveBeenCalledTimes(1);
 
     const r2 = await app.inject({ method: 'GET', url: '/api/metrics/summary?hours=24' });
     expect(r2.statusCode).toBe(200);
 
     // second request should be served from cache (no extra DB calls)
-    expect(db.pool.query).toHaveBeenCalledTimes(3);
+    expect(db.pool.query).toHaveBeenCalledTimes(1);
 
     await app.close();
   });
