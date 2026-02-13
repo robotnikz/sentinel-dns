@@ -102,17 +102,29 @@ Not sure which Compose file to use? See [deploy/compose/README.md](deploy/compos
 2. Your firewall allows LAN access to: `53/udp`, `53/tcp`, `8080/tcp`
 
 > [!NOTE]
-> **HA/VIP failover requires Linux hosts** (keepalived uses host networking). Single-node works anywhere Docker works.
+> **HA/VIP failover requires Linux hosts** (keepalived uses host networking). The normal single-node install works anywhere Docker works.
 
 ### 🧩 Method 1: Docker Compose (Recommended)
 
 > [!TIP]
 > For production, pin a version tag (instead of `latest`) so upgrades/rollbacks are explicit.
 
-**Fastest path:** use the repo’s compose file (it already includes the optional keepalived sidecar).
+Pick one:
+
+#### A) Single-node (default)
+
+Use: `deploy/compose/docker-compose.yml`
+
+```bash
+# Linux/macOS
+curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.yml
+docker compose up -d
+```
+
+<details>
+<summary>Show full <code>docker-compose.yml</code></summary>
 
 ```yaml
-# deploy/compose/docker-compose.yml
 services:
   sentinel:
     image: ghcr.io/robotnikz/sentinel-dns:latest
@@ -137,8 +149,69 @@ services:
       # Ensure the Web UI/API is reachable via Docker port publishing.
       - HOST=0.0.0.0
       - PORT=8080
-      # Optional: HA/VIP role override file (written by keepalived sidecar).
-      # If you never configure HA in the UI, this file won't exist and Sentinel runs normally.
+    volumes:
+      # Persistent storage for Postgres data, settings, secrets, and the GeoIP database.
+      - sentinel-data:/data
+    # Required for embedded Tailscale (VPN / exit-node mode).
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    # Required for forwarding traffic when tailscale is acting as an exit node. (full traffic via Tailscale VPN)
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv6.conf.all.forwarding: "1"
+    restart: unless-stopped
+
+volumes:
+  sentinel-data:
+```
+
+</details>
+
+#### B) HA (VIP/VRRP failover via keepalived)
+
+Use: `deploy/compose/docker-compose.ha.yml` (Linux hosts only)
+
+```bash
+# Linux/macOS
+curl -fsSL -o docker-compose.ha.yml https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.ha.yml
+docker compose -f docker-compose.ha.yml up -d
+```
+
+<details>
+<summary>Show full <code>docker-compose.ha.yml</code></summary>
+
+```yaml
+# HA compose: Sentinel + VIP/VRRP failover via keepalived.
+# Run:
+#   docker compose -f deploy/compose/docker-compose.ha.yml up -d
+
+services:
+  sentinel:
+    image: ghcr.io/robotnikz/sentinel-dns:latest
+    container_name: sentinel-dns
+    ports:
+      # DNS service (UDP/TCP). If port 53 is already in use (e.g. systemd-resolved),
+      # adjust the host-side port mapping or disable the stub resolver.
+      # By default this is published on all host interfaces (0.0.0.0).
+      # To keep it reachable for all devices in your LAN while avoiding WAN exposure,
+      # bind explicitly to your LAN interface IP (example 192.168.1.10):
+      # - "192.168.1.10:53:53/udp"
+      # - "192.168.1.10:53:53/tcp"
+      - "53:53/udp"
+      - "53:53/tcp"
+      # Web UI + API
+      # Same idea for the UI/API:
+      # - "192.168.1.10:8080:8080"
+      - "8080:8080"
+    environment:
+      # Timezone used for logs/UI timestamps.
+      - TZ=Europe/Berlin
+      # Ensure the Web UI/API is reachable via Docker port publishing.
+      - HOST=0.0.0.0
+      - PORT=8080
+      # HA/VIP role override file written by keepalived.
       - CLUSTER_ROLE_FILE=/data/sentinel/cluster_role
     volumes:
       # Persistent storage for Postgres data, settings, secrets, and the GeoIP database.
@@ -154,13 +227,7 @@ services:
       net.ipv6.conf.all.forwarding: "1"
     restart: unless-stopped
 
-  # Optional HA sidecar (VRRP/VIP via keepalived)
-  # - Always included so users can enable HA from the UI without editing compose files.
-  # - Does nothing until the UI writes /data/sentinel/ha/config.json (enabled=true).
-  # - Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
   keepalived:
-    # Included by default so a simple `docker compose up -d` deploys everything.
-    # The container stays idle until the UI enables VIP failover (writes /data/sentinel/ha/config.json).
     image: ghcr.io/robotnikz/sentinel-dns-keepalived:latest
     container_name: sentinel-keepalived
     network_mode: host
@@ -182,23 +249,11 @@ volumes:
   sentinel-data:
 ```
 
-Or download the compose file directly and run it:
+</details>
 
-```bash
-# Linux/macOS
-curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.yml
-docker compose up -d
+Then follow: [docs/CLUSTER_HA.md](docs/CLUSTER_HA.md)
 
-# Windows PowerShell
-curl.exe -fsSL -o docker-compose.yml https://raw.githubusercontent.com/robotnikz/sentinel-dns/main/deploy/compose/docker-compose.yml
-docker compose up -d
-```
-
-VIP/HA failover (keepalived) is included by default in that compose file. Enable it in the UI (Cluster / HA) after startup.
-
-The source of truth is always [deploy/compose/docker-compose.yml](deploy/compose/docker-compose.yml).
-
-
+Compose templates and notes (ports, local test variants): [deploy/compose/README.md](deploy/compose/README.md)
 
 > [!IMPORTANT]
 > **Upgrade safety (data/history):** keep your `sentinel-data` volume. If you delete or change this mount, Sentinel will start fresh.

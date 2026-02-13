@@ -69,12 +69,17 @@ Default file path used in compose:
 On **Node A** and **Node B**:
 
 1. Deploy with the included compose file:
-   - `deploy/compose/docker-compose.yml`
-   - Keepalived is included by default and stays idle until enabled in the UI.
+   - HA (Sentinel + keepalived): `deploy/compose/docker-compose.ha.yml`
+
+   Start it like this:
+
+   ```bash
+   docker compose -f deploy/compose/docker-compose.ha.yml up -d
+   ```
 2. Ensure `/data` is persisted (default `sentinel-data` volume).
 3. Open the UI on each node and create/admin-login if this is the first run.
 
-Note: the default compose includes keepalived already, but it stays **idle** until you enable VIP failover in the UI.
+Note: keepalived stays **idle** until you enable VIP failover in the UI.
 
 ### Step 2 — Enable VIP failover (do this on both nodes)
 
@@ -192,7 +197,7 @@ This is a practical checklist you can run during a maintenance window to validat
 Assumptions:
 
 - Two Linux hosts: **Node A** + **Node B**
-- Both are running the compose from `deploy/compose/docker-compose.yml`
+- Both are running the HA compose from `deploy/compose/docker-compose.ha.yml`
 - Router/DHCP points DNS to the VIP
 - UI/API port is reachable on both nodes (default `8080`)
 
@@ -203,7 +208,7 @@ On each node:
 1) Confirm containers are up:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml ps
+docker compose -f deploy/compose/docker-compose.ha.yml ps
 ```
 
 2) Confirm keepalived is enabled (after you saved HA config in UI):
@@ -299,7 +304,7 @@ Note: `/api/cluster/*` endpoints are intentionally still allowed so you can reco
 2) Trigger failover by stopping Sentinel on the leader node:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml stop sentinel
+docker compose -f deploy/compose/docker-compose.ha.yml stop sentinel
 ```
 
 3) Observe on the other node (new VIP owner):
@@ -312,7 +317,7 @@ docker compose -f deploy/compose/docker-compose.yml stop sentinel
 4) Bring the old leader back:
 
 ```bash
-docker compose -f deploy/compose/docker-compose.yml start sentinel
+docker compose -f deploy/compose/docker-compose.ha.yml start sentinel
 ```
 
 Expected:

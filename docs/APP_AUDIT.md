@@ -63,7 +63,9 @@ Supply-chain baseline (root):
 - Auth / sessions: `server/src/auth.ts`, `server/src/routes/auth.ts`, `server/src/authStore.ts`.
 - DB init/schema: `server/src/db.ts`.
 - Single-container runtime: `docker/single/Dockerfile`, `docker/single/entrypoint.sh`, `docker/single/supervisord.conf`.
-- Compose deployment: `deploy/compose/docker-compose.yml`.
+- Compose deployment:
+  - single-node: `deploy/compose/docker-compose.yml`
+  - HA (keepalived/VRRP): `deploy/compose/docker-compose.ha.yml`
 
 ## Architecture overview
 
@@ -120,7 +122,7 @@ For a fuller threat model, also see `docs/THREAT_MODEL.md`.
 
 2) **Expose-by-default risk (DNS/UI ports)**
 
-- `deploy/compose/docker-compose.yml` publishes `53` and `8080` on all interfaces by default.
+- The Compose templates publish `53` and `8080` on all interfaces by default.
 - Recommendation:
   - Prefer binding to a LAN interface IP in docs/examples.
   - Optionally ship a “LAN-bind by default” compose variant/template.
