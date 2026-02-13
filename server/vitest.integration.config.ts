@@ -9,11 +9,8 @@ export default defineConfig({
     hookTimeout: 120_000,
     // Running multiple dockerized Postgres containers in parallel is flaky on some CI/Windows
     // runners (containers can get OOM-killed, causing sporadic "Connection terminated" errors).
-    poolOptions: {
-      threads: {
-        singleThread: true
-      }
-    },
+    minWorkers: 1,
+    maxWorkers: 1,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],

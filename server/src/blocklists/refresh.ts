@@ -1,4 +1,5 @@
 import type { Db } from '../db.js';
+import { Readable } from 'node:stream';
 
 function normalizeDomain(input: string): string | null {
   const d = input.trim().toLowerCase();
@@ -10,6 +11,10 @@ function normalizeDomain(input: string): string | null {
   if (noDot.startsWith('-') || noDot.endsWith('-')) return null;
   if (noDot.includes('..')) return null;
   return noDot;
+}
+
+function isLocalhostDomain(domain: string): boolean {
+  return domain === 'localhost' || domain.endsWith('.localhost');
 }
 
 function tryExtractDomainFromAdblock(line: string): string | null {
@@ -61,36 +66,25 @@ function tryExtractDomainFromAdblock(line: string): string | null {
   return null;
 }
 
-function extractDomainsFromText(text: string): string[] {
-  const out: string[] = [];
-  const lines = text.split(/\r?\n/);
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) continue;
-    if (line.startsWith('#') || line.startsWith('!') || line.startsWith('//')) continue;
+function extractDomainFromLine(raw: string): string | null {
+  const line = raw.trim();
+  if (!line) return null;
+  if (line.startsWith('#') || line.startsWith('!') || line.startsWith('//')) return null;
 
-    const hash = line.indexOf('#');
-    const cleaned = hash >= 0 ? line.slice(0, hash).trim() : line;
-    if (!cleaned) continue;
+  const hash = line.indexOf('#');
+  const cleaned = hash >= 0 ? line.slice(0, hash).trim() : line;
+  if (!cleaned) return null;
 
-    const adblockDomain = tryExtractDomainFromAdblock(cleaned);
-    if (adblockDomain) {
-      if (adblockDomain === 'localhost' || adblockDomain.endsWith('.localhost')) continue;
-      out.push(adblockDomain);
-      continue;
-    }
+  const adblockDomain = tryExtractDomainFromAdblock(cleaned);
+  if (adblockDomain) return isLocalhostDomain(adblockDomain) ? null : adblockDomain;
 
-    const parts = cleaned.split(/\s+/).filter(Boolean);
-    if (parts.length === 0) continue;
-
-    const candidate = parts.length >= 2 ? parts[1] : parts[0];
-    const domain = normalizeDomain(candidate);
-    if (!domain) continue;
-    if (domain === 'localhost' || domain.endsWith('.localhost')) continue;
-    out.push(domain);
-  }
-
-  return Array.from(new Set(out));
+  // hosts-style: "0.0.0.0 example.com" or plain domains
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return null;
+  const candidate = parts.length >= 2 ? parts[1] : parts[0];
+  const domain = normalizeDomain(candidate);
+  if (!domain) return null;
+  return isLocalhostDomain(domain) ? null : domain;
 }
 
 async function downloadText(url: string, timeoutMs: number, maxBytes: number): Promise<string> {
@@ -112,6 +106,55 @@ async function downloadText(url: string, timeoutMs: number, maxBytes: number): P
   }
 }
 
+async function* downloadLines(url: string, timeoutMs: number, maxBytes: number): AsyncGenerator<string> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'user-agent': 'sentinel-dns/0.1' },
+      signal: ac.signal
+    });
+    if (!res.ok) throw new Error(`HTTP_${res.status}`);
+
+    // Prefer streaming to keep memory bounded.
+    const body: any = (res as any).body;
+    if (!body) {
+      const text = await downloadText(url, timeoutMs, maxBytes);
+      for (const line of text.split(/\r?\n/)) yield line;
+      return;
+    }
+
+    const decoder = new TextDecoder('utf-8');
+    let buffered = '';
+    let seenBytes = 0;
+
+    // Node/undici: Response.body can be a WHATWG ReadableStream. Convert when needed.
+    const nodeStream: NodeJS.ReadableStream =
+      typeof body.getReader === 'function' ? Readable.fromWeb(body as ReadableStream<Uint8Array>) : (body as NodeJS.ReadableStream);
+
+    for await (const chunk of nodeStream as any) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      seenBytes += buf.length;
+      if (seenBytes > maxBytes) throw new Error('TOO_LARGE');
+
+      buffered += decoder.decode(buf, { stream: true });
+      let idx: number;
+      while ((idx = buffered.indexOf('\n')) >= 0) {
+        let line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (line.endsWith('\r')) line = line.slice(0, -1);
+        yield line;
+      }
+    }
+
+    buffered += decoder.decode();
+    if (buffered.length) yield buffered.endsWith('\r') ? buffered.slice(0, -1) : buffered;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function refreshBlocklist(
   db: Db,
   input: { id: number; name: string; url: string },
@@ -120,35 +163,52 @@ export async function refreshBlocklist(
   const timeoutMs = opts?.timeoutMs ?? 15_000;
   const maxBytes = opts?.maxBytes ?? 25 * 1024 * 1024;
 
-  const category = `Blocklist:${input.id}:${input.name}`;
-
-  const text = await downloadText(input.url, timeoutMs, maxBytes);
-  const domains = extractDomainsFromText(text);
+  // IMPORTANT: keep this stable. Older versions used `Blocklist:<id>:<name>`
+  // which breaks deletes after renames and slows lookups.
+  const category = `Blocklist:${input.id}`;
 
   const client = await db.pool.connect();
   try {
     await client.query('BEGIN');
 
-    await client.query('DELETE FROM rules WHERE category = $1 AND type = $2', [category, 'BLOCKED']);
+    // Backward-compatible cleanup for legacy categories (Blocklist:<id>:<name>).
+    await client.query(
+      "DELETE FROM rules WHERE type = 'BLOCKED' AND (category = $1 OR category LIKE ($1 || ':%'))",
+      [category]
+    );
 
     const chunkSize = 5000;
-    for (let i = 0; i < domains.length; i += chunkSize) {
-      const chunk = domains.slice(i, i + chunkSize);
-      await client.query(
+    let inserted = 0;
+    let chunk: string[] = [];
+
+    const flush = async (): Promise<void> => {
+      if (!chunk.length) return;
+      const res = await client.query(
         `INSERT INTO rules(domain, type, category)
          SELECT d, 'BLOCKED', $2 FROM unnest($1::text[]) AS d
          ON CONFLICT (domain, type, category) DO NOTHING`,
         [chunk, category]
       );
+      inserted += Number(res.rowCount ?? 0);
+      chunk = [];
+    };
+
+    // Parse and insert incrementally to keep memory bounded.
+    for await (const line of downloadLines(input.url, timeoutMs, maxBytes)) {
+      const domain = extractDomainFromLine(line);
+      if (!domain) continue;
+      chunk.push(domain);
+      if (chunk.length >= chunkSize) await flush();
     }
+    await flush();
 
     await client.query(
       'UPDATE blocklists SET last_updated_at = NOW(), last_error = NULL, last_rule_count = $2, updated_at = NOW() WHERE id = $1',
-      [input.id, domains.length]
+      [input.id, inserted]
     );
 
     await client.query('COMMIT');
-    return { fetched: domains.length };
+    return { fetched: inserted };
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;

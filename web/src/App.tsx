@@ -1,17 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import Sidebar from './components/Sidebar';
-import Dashboard from './pages/Dashboard';
-import QueryLogs from './pages/QueryLogs';
-import Clients from './pages/Clients';
-import Blocking from './pages/Blocking';
-import DnsSettings from './pages/DnsSettings';
-import NetworkMap from './pages/NetworkMap';
-import Settings from './pages/Settings2';
-import Cluster from './pages/Cluster';
 import Setup from './pages/Setup';
 import { Bell, Search, Terminal, Play, Pause, AlertTriangle, Shield, CheckCircle, Lock } from 'lucide-react';
 import { RulesProvider } from './contexts/RulesContext';
 import { ClientsProvider } from './contexts/ClientsContext';
+
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const QueryLogs = lazy(() => import('./pages/QueryLogs'));
+const Clients = lazy(() => import('./pages/Clients'));
+const Blocking = lazy(() => import('./pages/Blocking'));
+const DnsSettings = lazy(() => import('./pages/DnsSettings'));
+const NetworkMap = lazy(() => import('./pages/NetworkMap'));
+const Settings = lazy(() => import('./pages/Settings2'));
+const Cluster = lazy(() => import('./pages/Cluster'));
 
 const App: React.FC = () => {
   const VALID_PAGES = useRef(new Set(['dashboard', 'logs', 'clients', 'topology', 'blocking', 'dns', 'settings', 'cluster']));
@@ -890,7 +891,15 @@ const App: React.FC = () => {
             )}
 
             <div className="p-8 max-w-[1600px] mx-auto w-full flex-1">
-              {renderContent()}
+              <Suspense
+                fallback={
+                  <div className="min-h-[240px] w-full rounded-lg border border-[#27272a] bg-[#121214] flex items-center justify-center text-zinc-500 text-sm">
+                    Loading page…
+                  </div>
+                }
+              >
+                {renderContent()}
+              </Suspense>
             </div>
           </main>
         </div>

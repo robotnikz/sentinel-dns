@@ -366,8 +366,7 @@ function extractBlocklistId(category?: string): string | null {
   if (!category.startsWith('Blocklist:')) return null;
   const rest = category.slice('Blocklist:'.length);
   const idx = rest.indexOf(':');
-  if (idx <= 0) return null;
-  const id = rest.slice(0, idx).trim();
+  const id = (idx >= 0 ? rest.slice(0, idx) : rest).trim();
   return id ? id : null;
 }
 
@@ -733,14 +732,17 @@ async function loadRulesIndex(db: Db, neededBlocklistIds: number[]): Promise<Rul
       blockedByDomain
     };
 
+  const categories = ids.map((n) => `Blocklist:${Math.floor(n)}`);
+  const legacyPatterns = ids.map((n) => `Blocklist:${Math.floor(n)}:%`);
+
   const blocklistRes = await db.pool.query(
     `
     SELECT domain, category
     FROM rules
-    WHERE category LIKE 'Blocklist:%'
-      AND split_part(category, ':', 2)::int = ANY($1::int[])
+    WHERE type = 'BLOCKED'
+      AND (category = ANY($1::text[]) OR category LIKE ANY($2::text[]))
     `,
-    [ids]
+    [categories, legacyPatterns]
   );
 
   for (const r of blocklistRes.rows) {
@@ -831,6 +833,93 @@ export type DomainPolicyCheckResponse = {
   blocklist?: { id: string; name: string; mode: 'ACTIVE' | 'SHADOW' } | null;
 };
 
+type TtlState<T> = {
+  loadedAt: number;
+  value: T | null;
+  inFlight?: Promise<T>;
+};
+
+function createSingleFlightTtl<T>(ttlMs: number, loader: (db: Db) => Promise<T>) {
+  const state: TtlState<T> = { loadedAt: 0, value: null };
+
+  const get = async (db: Db): Promise<T> => {
+    const now = Date.now();
+    if (state.value != null && now - state.loadedAt < ttlMs) return state.value;
+    if (state.inFlight) return state.inFlight;
+
+    state.inFlight = (async () => {
+      const v = await loader(db);
+      state.value = v;
+      state.loadedAt = Date.now();
+      return v;
+    })().finally(() => {
+      state.inFlight = undefined;
+    });
+
+    return state.inFlight;
+  };
+
+  const reset = (): void => {
+    state.loadedAt = 0;
+    state.value = null;
+    state.inFlight = undefined;
+  };
+
+  return { get, reset };
+}
+
+// Policy checks are used by the UI and can be called in bursts.
+// Cache DB-derived configuration briefly to avoid N queries per keystroke.
+const POLICY_CACHE_TTL_MS = 1500;
+
+const policyClientsCache = createSingleFlightTtl(POLICY_CACHE_TTL_MS, loadClients);
+const policyBlocklistsCache = createSingleFlightTtl(POLICY_CACHE_TTL_MS, loadBlocklists);
+const policyCategoryBlocklistsCache = createSingleFlightTtl(POLICY_CACHE_TTL_MS, loadCategoryBlocklists);
+const policyAppBlocklistsCache = createSingleFlightTtl(POLICY_CACHE_TTL_MS, loadAppBlocklists);
+const policyGlobalAppsRowCache = createSingleFlightTtl(POLICY_CACHE_TTL_MS, async (db: Db) => {
+  const res = await db.pool.query('SELECT value FROM settings WHERE key = $1', ['global_blocked_apps']);
+  return res.rows?.[0]?.value;
+});
+
+type RulesIndexCacheEntry = {
+  expiresAt: number;
+  value?: RulesIndex;
+  inFlight?: Promise<RulesIndex>;
+};
+
+const POLICY_RULES_INDEX_TTL_MS = 1500;
+const policyRulesIndexCache = new Map<string, RulesIndexCacheEntry>();
+
+async function getPolicyRulesIndexCached(db: Db, neededIds: number[]): Promise<RulesIndex> {
+  const key = Array.from(new Set<number>(neededIds.filter((n) => Number.isFinite(n))))
+    .sort((a, b) => a - b)
+    .join(',');
+
+  const now = Date.now();
+  const hit = policyRulesIndexCache.get(key);
+  if (hit?.value && hit.expiresAt > now) return hit.value;
+  if (hit?.inFlight) return hit.inFlight;
+
+  const p = loadRulesIndex(db, neededIds).then((idx) => {
+    policyRulesIndexCache.set(key, { value: idx, expiresAt: Date.now() + POLICY_RULES_INDEX_TTL_MS });
+    // Safety guard against accidental unbounded growth.
+    if (policyRulesIndexCache.size > 50) policyRulesIndexCache.clear();
+    return idx;
+  });
+
+  policyRulesIndexCache.set(key, { inFlight: p, expiresAt: Date.now() + POLICY_RULES_INDEX_TTL_MS });
+  try {
+    return await p;
+  } finally {
+    const cur = policyRulesIndexCache.get(key);
+    if (cur?.inFlight === p) {
+      // Keep value (set by .then) if present, otherwise drop.
+      if (!cur.value) policyRulesIndexCache.delete(key);
+      else delete cur.inFlight;
+    }
+  }
+}
+
 export async function domainPolicyCheck(
   db: Db,
   inputDomain: string,
@@ -841,14 +930,13 @@ export async function domainPolicyCheck(
 
   if (!domain) return { domain, decision: 'NONE', reason: null, blocklist: null };
 
-  const [clients, blocklistsById, categoryBlocklistsByCategory, appBlocklistsByApp, globalBlockedAppsRes] =
-    await Promise.all([
-      loadClients(db),
-      loadBlocklists(db),
-      loadCategoryBlocklists(db),
-      loadAppBlocklists(db),
-      db.pool.query('SELECT value FROM settings WHERE key = $1', ['global_blocked_apps'])
-    ]);
+  const [clients, blocklistsById, categoryBlocklistsByCategory, appBlocklistsByApp, globalAppsValue] = await Promise.all([
+    policyClientsCache.get(db),
+    policyBlocklistsCache.get(db),
+    policyCategoryBlocklistsCache.get(db),
+    policyAppBlocklistsCache.get(db),
+    policyGlobalAppsRowCache.get(db)
+  ]);
 
   const exactClient = findExactClient(clients, clientIp);
   const subnetClient = exactClient ? null : findBestCidrClient(clients, clientIp);
@@ -866,7 +954,6 @@ export async function domainPolicyCheck(
     };
   }
 
-  const globalAppsValue = globalBlockedAppsRes.rows?.[0]?.value;
   const globalActiveApps = parseGlobalBlockedAppsSetting(globalAppsValue);
   const globalShadowApps = parseGlobalShadowAppsSetting(globalAppsValue).filter((a) => !globalActiveApps.includes(a));
 
@@ -1022,7 +1109,7 @@ export async function domainPolicyCheck(
     if (Number.isFinite(n)) neededIds.push(n);
   }
 
-  const index = await loadRulesIndex(db, neededIds);
+  const index = await getPolicyRulesIndexCached(db, neededIds);
   const candidates = buildCandidateDomains(domain);
 
   // Per-client / subnet manual allow/block rules.
@@ -2902,5 +2989,13 @@ export const __testing = {
   buildLocalAnswerResponse,
   extractAnswerIpsFromDnsResponse,
   buildNxDomainResponse,
-  buildServFailResponse
+  buildServFailResponse,
+  resetPolicyCaches: () => {
+    policyClientsCache.reset();
+    policyBlocklistsCache.reset();
+    policyCategoryBlocklistsCache.reset();
+    policyAppBlocklistsCache.reset();
+    policyGlobalAppsRowCache.reset();
+    policyRulesIndexCache.clear();
+  }
 };
