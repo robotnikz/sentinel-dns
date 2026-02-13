@@ -9,7 +9,7 @@
 
 <p>
   <a href="https://github.com/robotnikz/sentinel-dns/stargazers">
-    <img alt="Stars" src="https://img.shields.io/github/stars/robotnikz/sentinel-dns?style=flat-square" />
+    <img alt="Stars" src="https://img.shields.io/github/stars/robotnikz/sentinel-dns?style=flat-square&cacheSeconds=3600&v=1" />
   </a>
   <a href="https://github.com/robotnikz/sentinel-dns/issues">
     <img alt="Issues" src="https://img.shields.io/github/issues/robotnikz/sentinel-dns?style=flat-square" />
