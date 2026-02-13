@@ -704,7 +704,7 @@ const Blocking: React.FC = () => {
               const items = Array.isArray(data?.items) ? data.items : [];
 
               const matches = items.filter((q: any) => typeof q?.domain === 'string' && matchesDomain(canon, q.domain));
-              const clients = Array.from(new Set(matches.map((q: any) => String(q?.client ?? 'Unknown'))));
+              const clients: string[] = Array.from(new Set<string>(matches.map((q: any) => String(q?.client ?? 'Unknown'))));
 
               let gravityMatches: Blocklist[] = [];
 

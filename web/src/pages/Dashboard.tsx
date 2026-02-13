@@ -623,8 +623,7 @@ const Dashboard: React.FC = () => {
                 <h2 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
                   <MapIcon className="w-4 h-4 text-emerald-500" /> Outbound Destinations
                 </h2>
-                <Info
-                  className="w-3.5 h-3.5 text-zinc-600 cursor-help"
+                <span
                   title={
                     geoStatus
                       ? geoStatus.available
@@ -632,7 +631,9 @@ const Dashboard: React.FC = () => {
                         : `GeoIP database missing at ${geoStatus.dbPath || '(unset)'}`
                       : 'GeoIP status unknown'
                   }
-                />
+                >
+                  <Info className="w-3.5 h-3.5 text-zinc-600 cursor-help" />
+                </span>
               </div>
               <div className="flex gap-2 items-center">
                 <span className="flex items-center gap-1.5 text-xs text-zinc-400">

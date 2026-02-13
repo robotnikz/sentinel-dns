@@ -476,7 +476,7 @@ const NetworkMap: React.FC = () => {
                      <Clock className="w-4 h-4 text-zinc-500" />
                      <MenuSelect
                         value={windowHours}
-                        onChange={setWindowHours}
+                        onChange={(v) => setWindowHours(Number(v))}
                         options={[
                            { value: 1, label: 'Last 1h' },
                            { value: 6, label: 'Last 6h' },
