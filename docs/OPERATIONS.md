@@ -7,15 +7,22 @@ It intentionally does not cover local development (see `docs/DEVELOPMENT.md`).
 
 Recommended approach:
 
-- Pin a version tag in your compose file (e.g. `deploy/compose/docker-compose.yml`: `ghcr.io/robotnikz/sentinel-dns:0.1.1`).
+- Pin a version tag in your compose file (e.g. `deploy/compose/docker-compose.yml` or `deploy/compose/docker-compose.ha.yml`: `ghcr.io/robotnikz/sentinel-dns:0.1.1`).
 - Upgrade by changing the tag and restarting the container.
 - Roll back by restoring the previous tag.
 
 Commands:
 
 ```bash
-docker compose pull
+docker compose -f deploy/compose/docker-compose.yml pull
 docker compose -f deploy/compose/docker-compose.yml up -d
+```
+
+If you are running HA with keepalived, use the HA compose file:
+
+```bash
+docker compose -f deploy/compose/docker-compose.ha.yml pull
+docker compose -f deploy/compose/docker-compose.ha.yml up -d
 ```
 
 ## Backups
@@ -176,7 +183,7 @@ Sentinel supports optional **VIP/VRRP failover** via a keepalived sidecar and au
 
 - Setup guide: [docs/CLUSTER_HA.md](docs/CLUSTER_HA.md)
 - Linux only: keepalived requires `network_mode: host` and NET_* capabilities.
-- If you never enable VIP failover in the UI, keepalived stays idle and Sentinel behaves like a normal single node.
+- keepalived stays idle until you enable VIP failover in the UI.
 
 ## Debugging DNS upstream (resolver switching)
 

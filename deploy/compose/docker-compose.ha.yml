@@ -1,3 +1,7 @@
+# HA compose: Sentinel + VIP/VRRP failover via keepalived.
+# Run:
+#   docker compose -f deploy/compose/docker-compose.ha.yml up -d
+
 services:
   sentinel:
     image: ghcr.io/robotnikz/sentinel-dns:latest
@@ -22,6 +26,8 @@ services:
       # Ensure the Web UI/API is reachable via Docker port publishing.
       - HOST=0.0.0.0
       - PORT=8080
+      # HA/VIP role override file written by keepalived.
+      - CLUSTER_ROLE_FILE=/data/sentinel/cluster_role
     volumes:
       # Persistent storage for Postgres data, settings, secrets, and the GeoIP database.
       - sentinel-data:/data
@@ -35,6 +41,24 @@ services:
       net.ipv4.ip_forward: "1"
       net.ipv6.conf.all.forwarding: "1"
     restart: unless-stopped
+
+  keepalived:
+    image: ghcr.io/robotnikz/sentinel-dns-keepalived:latest
+    container_name: sentinel-keepalived
+    network_mode: host
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - NET_BROADCAST
+    environment:
+      - DATA_DIR=/data
+      - HA_CONFIG_FILE=/data/sentinel/ha/config.json
+      - HA_ROLE_FILE=/data/sentinel/cluster_role
+      - HA_NETINFO_FILE=/data/sentinel/ha/netinfo.json
+      - HA_READY_URL=http://127.0.0.1:8080/api/cluster/ready
+    volumes:
+      - sentinel-data:/data
 
 volumes:
   sentinel-data:
