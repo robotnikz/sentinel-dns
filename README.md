@@ -155,13 +155,11 @@ services:
     restart: unless-stopped
 
   # Optional HA sidecar (VRRP/VIP via keepalived)
-  # - Always included so users can enable HA from the UI without editing compose files.
-  # - Does nothing until the UI writes /data/sentinel/ha/config.json (enabled=true).
-  # - Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
-  # YOU DON'T NEED TO DEPLOY keepalived IF YOU DON'T PLAN TO USE HA
   keepalived:
+    # YOU DON'T NEED TO DEPLOY keepalived IF YOU DON'T PLAN TO USE HA
     # Included by default so a simple `docker compose up -d` deploys everything.
     # The container stays idle until the UI enables VIP failover (writes /data/sentinel/ha/config.json).
+    # Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
     image: ghcr.io/robotnikz/sentinel-dns-keepalived:latest
     container_name: sentinel-keepalived
     network_mode: host
