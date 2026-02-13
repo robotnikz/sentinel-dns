@@ -158,6 +158,7 @@ services:
   # - Always included so users can enable HA from the UI without editing compose files.
   # - Does nothing until the UI writes /data/sentinel/ha/config.json (enabled=true).
   # - Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
+  # YOU DON'T NEED TO DEPLOY keepalived IF YOU DON'T PLAN TO USE HA
   keepalived:
     # Included by default so a simple `docker compose up -d` deploys everything.
     # The container stays idle until the UI enables VIP failover (writes /data/sentinel/ha/config.json).
