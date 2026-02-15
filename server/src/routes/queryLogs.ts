@@ -183,10 +183,10 @@ export async function registerQueryLogsRoutes(app: FastifyInstance, config: AppC
     async (_request: FastifyRequest, reply: FastifyReply) => {
       await requireAdmin(db, _request);
 
-      const res = await db.pool.query('DELETE FROM query_logs');
+      const res = await db.pool.query('TRUNCATE query_logs');
       return {
         ok: true,
-        deleted: typeof res.rowCount === 'number' ? res.rowCount : 0
+        deleted: 0  // TRUNCATE doesn't report row count, but is instant
       };
     }
   );

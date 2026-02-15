@@ -34,9 +34,6 @@ export const dnsRuntimeStats: DnsRuntimeStats = {
   tailscaleV6Queries: 0
 };
 
-const TS_V4_CIDR = ipaddr.parseCIDR('100.64.0.0/10') as [ipaddr.IPv4, number];
-const TS_V6_CIDR = ipaddr.parseCIDR('fd7a:115c:a1e0::/48') as [ipaddr.IPv6, number];
-
 function normalizeClientIp(ipRaw: string): string {
   const raw = String(ipRaw ?? '').trim();
   if (!raw) return '0.0.0.0';
@@ -46,21 +43,37 @@ function normalizeClientIp(ipRaw: string): string {
   return noZone.startsWith('::ffff:') ? noZone.slice('::ffff:'.length) : noZone;
 }
 
+// Fast Tailscale-IP detection using string prefix checks instead of
+// ipaddr.parse() which involves expensive regex matching + object allocation.
+// Tailscale v4 = 100.64.0.0/10 (first octet 100, second 64-127).
+// Tailscale v6 = fd7a:115c:a1e0::/48.
 function isTailscaleClientIp(ip: string): { isTailscale: boolean; version: 'v4' | 'v6' | null } {
-  try {
-    const addr = ipaddr.parse(ip);
-    if (addr.kind() === 'ipv4') {
-      return { isTailscale: (addr as ipaddr.IPv4).match(TS_V4_CIDR), version: 'v4' };
+  if (ip.startsWith('fd7a:115c:a1e0:')) return { isTailscale: true, version: 'v6' };
+  if (ip.startsWith('100.')) {
+    const dotIdx = ip.indexOf('.', 4);
+    if (dotIdx > 4) {
+      const second = Number(ip.slice(4, dotIdx));
+      if (second >= 64 && second <= 127) return { isTailscale: true, version: 'v4' };
     }
-    return { isTailscale: (addr as ipaddr.IPv6).match(TS_V6_CIDR), version: 'v6' };
-  } catch {
-    return { isTailscale: false, version: null };
   }
+  return { isTailscale: false, version: null };
+}
+
+// Cache the ISO timestamp string; refresh it lazily at most once per second.
+let _lastQueryAtMs = 0;
+let _lastQueryAtIso = '';
+function lazyIsoNow(): string {
+  const now = Date.now();
+  if (now - _lastQueryAtMs >= 1000) {
+    _lastQueryAtMs = now;
+    _lastQueryAtIso = new Date(now).toISOString();
+  }
+  return _lastQueryAtIso;
 }
 
 function recordDnsQuerySeen(clientIp: string, transport: 'udp' | 'tcp'): void {
   dnsRuntimeStats.totalQueries += 1;
-  dnsRuntimeStats.lastQueryAt = new Date().toISOString();
+  dnsRuntimeStats.lastQueryAt = lazyIsoNow();
   dnsRuntimeStats.lastClientIp = clientIp;
   dnsRuntimeStats.lastTransport = transport;
 
@@ -69,6 +82,62 @@ function recordDnsQuerySeen(clientIp: string, transport: 'udp' | 'tcp'): void {
     dnsRuntimeStats.tailscaleQueries += 1;
     if (ts.version === 'v4') dnsRuntimeStats.tailscaleV4Queries += 1;
     if (ts.version === 'v6') dnsRuntimeStats.tailscaleV6Queries += 1;
+  }
+}
+
+// ── DNS upstream response cache ─────────────────────────────────────────
+// Caches raw upstream response buffers keyed by (normalizedName, qtype).
+// Only PERMITTED upstream responses are cached; blocked/rewritten/shadow
+// responses bypass the cache entirely.
+const DNS_RESPONSE_CACHE_MAX = 50_000;
+type DnsResponseCacheEntry = { resp: Buffer; expiresAt: number };
+const dnsResponseCache = new Map<string, DnsResponseCacheEntry>();
+
+function dnsResponseCacheGet(key: string): Buffer | null {
+  const hit = dnsResponseCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    dnsResponseCache.delete(key);
+    return null;
+  }
+  return hit.resp;
+}
+
+function dnsResponseCacheSet(key: string, resp: Buffer, ttlMs: number): void {
+  if (ttlMs <= 0) return;
+  // Evict expired entries when approaching limit.
+  if (dnsResponseCache.size >= DNS_RESPONSE_CACHE_MAX) {
+    const now = Date.now();
+    for (const [k, v] of dnsResponseCache) {
+      if (v.expiresAt <= now) dnsResponseCache.delete(k);
+    }
+    // If still over limit, evict oldest 25%.
+    if (dnsResponseCache.size >= DNS_RESPONSE_CACHE_MAX) {
+      const sorted = [...dnsResponseCache.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+      const toRemove = Math.max(1, Math.floor(sorted.length * 0.25));
+      for (let i = 0; i < toRemove; i++) dnsResponseCache.delete(sorted[i][0]);
+    }
+  }
+  dnsResponseCache.set(key, { resp, expiresAt: Date.now() + ttlMs });
+}
+
+/**
+ * Extract the minimum TTL from a DNS response buffer.
+ * Returns 0 if no answers or decode fails.
+ */
+function extractMinTtl(resp: Buffer): number {
+  try {
+    const decoded: any = dnsPacket.decode(resp);
+    const answers: any[] = Array.isArray(decoded?.answers) ? decoded.answers : [];
+    if (!answers.length) return 0;
+    let min = Infinity;
+    for (const a of answers) {
+      const ttl = Number(a?.ttl);
+      if (Number.isFinite(ttl) && ttl >= 0) min = Math.min(min, ttl);
+    }
+    return min === Infinity ? 0 : min;
+  } catch {
+    return 0;
   }
 }
 
@@ -380,10 +449,12 @@ function formatBlocklistCategory(id: string, name?: string): string {
 function buildCandidateDomains(queryName: string): string[] {
   const q = normalizeName(queryName);
   if (!q) return [];
-  const parts = q.split('.').filter(Boolean);
-  const out: string[] = [];
-  for (let i = 0; i < parts.length; i++) {
-    out.push(parts.slice(i).join('.'));
+  // Walk with indexOf instead of split+slice+join to avoid O(labels²) string allocs.
+  const out: string[] = [q];
+  let idx = 0;
+  while ((idx = q.indexOf('.', idx)) !== -1) {
+    idx++;
+    if (idx < q.length) out.push(q.substring(idx));
   }
   return out;
 }
@@ -610,19 +681,24 @@ const APP_SUFFIX_LOOKUP: Map<string, AppService> = (() => {
   return map;
 })();
 
-function isAppBlockedByPolicy(queryName: string, apps: AppService[]): AppService | null {
+function isAppBlockedByPolicy(queryName: string, apps: AppService[], preNormalized?: string): AppService | null {
   if (!apps.length) return null;
   const appsSet = apps.length <= 8 ? null : new Set<AppService>(apps);
-  const q = normalizeName(queryName);
+  const q = preNormalized ?? normalizeName(queryName);
   if (!q) return null;
 
-  // Check exact domain and all parent domains against the pre-built suffix map.
-  const parts = q.split('.');
-  for (let i = 0; i < parts.length; i++) {
-    const candidate = parts.slice(i).join('.');
-    const app = APP_SUFFIX_LOOKUP.get(candidate);
-    if (!app) continue;
-    if (appsSet ? appsSet.has(app) : apps.includes(app)) return app;
+  // Walk with indexOf instead of split+slice+join to avoid O(labels²) allocs.
+  // Check exact domain first, then all parent domains.
+  const app0 = APP_SUFFIX_LOOKUP.get(q);
+  if (app0 && (appsSet ? appsSet.has(app0) : apps.includes(app0))) return app0;
+  let idx = 0;
+  while ((idx = q.indexOf('.', idx)) !== -1) {
+    idx++;
+    if (idx < q.length) {
+      const candidate = q.substring(idx);
+      const app = APP_SUFFIX_LOOKUP.get(candidate);
+      if (app && (appsSet ? appsSet.has(app) : apps.includes(app))) return app;
+    }
   }
   return null;
 }
@@ -1645,7 +1721,12 @@ async function forwardTcp(
     socket.on('connect', () => {
       const len = Buffer.alloc(2);
       len.writeUInt16BE(msgBuf.length, 0);
-      socket.write(Buffer.concat([len, msgBuf]));
+      // cork + two writes + uncork: kernel coalesces into one TCP segment
+      // without allocating a concatenated buffer.
+      socket.cork();
+      socket.write(len);
+      socket.write(msgBuf);
+      socket.uncork();
     });
   });
 }
@@ -1704,7 +1785,10 @@ async function forwardDot(
     socket.on('secureConnect', () => {
       const len = Buffer.alloc(2);
       len.writeUInt16BE(msgBuf.length, 0);
-      socket.write(Buffer.concat([len, msgBuf]));
+      socket.cork();
+      socket.write(len);
+      socket.write(msgBuf);
+      socket.uncork();
     });
   });
 }
@@ -2396,7 +2480,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
   await refreshCaches();
   await refreshProtectionPause();
   const refreshTimer = setInterval(refreshCaches, DNS_CACHE_REFRESH_INTERVAL_MS);
-  const pauseTimer = setInterval(refreshProtectionPause, 1000);
+  const pauseTimer = setInterval(refreshProtectionPause, DNS_CACHE_REFRESH_INTERVAL_MS);
 
   const resolveDnsBindHosts = (
     hostRaw: string
@@ -2781,19 +2865,19 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const globalShadowApps = shouldUseGlobalApps ? globalAppsCache.shadowApps : [];
 
       const findBlockedAppWithScope = (): { app: AppService; scope: 'client' | 'subnet' | 'global' } | null => {
-        const clientScheduleHit = isAppBlockedByPolicy(name, clientScheduleApps);
+        const clientScheduleHit = isAppBlockedByPolicy(name, clientScheduleApps, normalizedName);
         if (clientScheduleHit) return { app: clientScheduleHit, scope: 'client' };
 
-        const clientBaseHit = isAppBlockedByPolicy(name, clientBaseApps);
+        const clientBaseHit = isAppBlockedByPolicy(name, clientBaseApps, normalizedName);
         if (clientBaseHit) return { app: clientBaseHit, scope: 'client' };
 
-        const subnetScheduleHit = isAppBlockedByPolicy(name, subnetScheduleApps);
+        const subnetScheduleHit = isAppBlockedByPolicy(name, subnetScheduleApps, normalizedName);
         if (subnetScheduleHit) return { app: subnetScheduleHit, scope: 'subnet' };
 
-        const subnetBaseHit = isAppBlockedByPolicy(name, subnetBaseApps);
+        const subnetBaseHit = isAppBlockedByPolicy(name, subnetBaseApps, normalizedName);
         if (subnetBaseHit) return { app: subnetBaseHit, scope: 'subnet' };
 
-        const globalHit = isAppBlockedByPolicy(name, globalBaseApps);
+        const globalHit = isAppBlockedByPolicy(name, globalBaseApps, normalizedName);
         if (globalHit) return { app: globalHit, scope: 'global' };
 
         return null;
@@ -2817,7 +2901,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       let appShadowHit: string | undefined;
-      const shadowApp = isAppBlockedByPolicy(name, globalShadowApps);
+      const shadowApp = isAppBlockedByPolicy(name, globalShadowApps, normalizedName);
       if (shadowApp) appShadowHit = `${policyPrefix('global')}:AppShadow:${shadowApp}`;
 
       // Determine which blocklists are active for this client.
@@ -2985,7 +3069,38 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         return resp;
       }
 
+      // ── DNS response cache ──────────────────────────────────────────
+      // Serve cached upstream responses for PERMITTED queries to avoid
+      // redundant upstream round-trips for popular domains.
+      const cacheKey = `${normalizedName}\0${qtype}`;
+      const cachedResp = dnsResponseCacheGet(cacheKey);
+      if (cachedResp && decision !== 'SHADOW_BLOCKED' && !appShadowHit) {
+        // Rewrite the transaction ID in the cached buffer to match the current query.
+        const out = Buffer.from(cachedResp);
+        out.writeUInt16BE(query.id ?? 0, 0);
+        await logEntry({
+          id: crypto.randomUUID(),
+          timestamp: lazyIsoNow(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps: extractAnswerIpsFromDnsResponse(out)
+        });
+        return out;
+      }
+
       const upstreamResp = await forwardActiveUpstreamWithTelemetry();
+
+      // Cache the upstream response using the minimum answer TTL.
+      const minTtl = extractMinTtl(upstreamResp);
+      if (minTtl > 0) {
+        // Cap cache TTL to 5 minutes to stay responsive to DNS changes.
+        const cacheTtlMs = Math.min(minTtl, 300) * 1000;
+        dnsResponseCacheSet(cacheKey, upstreamResp, cacheTtlMs);
+      }
 
       const finalStatus: 'SHADOW_BLOCKED' | 'PERMITTED' =
         decision === 'SHADOW_BLOCKED' || !!appShadowHit ? 'SHADOW_BLOCKED' : 'PERMITTED';
