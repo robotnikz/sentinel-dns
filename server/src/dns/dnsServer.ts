@@ -2409,6 +2409,10 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         rulesCache.loadedAt = nowMs;
         rulesCache.includedIdsKey = neededIdsKey;
 
+        // Invalidate upstream response cache so that newly-blocked domains
+        // are not served from stale PERMITTED cache entries.
+        dnsResponseCache.clear();
+
         logRulesIndexReload({
           selectedBlocklistCount: neededIds.size,
           maxId: maxRulesId,

@@ -11,8 +11,14 @@ export function createDb(config: AppConfig): Db {
     connectionString: config.DATABASE_URL,
     max: 20,
     idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
-    statement_timeout: 30_000 as any    // kill runaway queries after 30s
+    connectionTimeoutMillis: 5_000
+  });
+
+  // Set statement_timeout on each new connection so runaway queries
+  // are killed after 30 seconds. This must be done via SET, not as a
+  // Pool constructor option (which pg silently ignores).
+  pool.on('connect', (client) => {
+    client.query('SET statement_timeout = 30000').catch(() => {});
   });
 
   async function init(): Promise<void> {
