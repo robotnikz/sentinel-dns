@@ -44,7 +44,7 @@ describe('integration: authStore', () => {
     await db.pool.query('DELETE FROM settings');
     await db.pool.query('INSERT INTO settings(key, value) VALUES ($1, $2)', [
       'auth_admin',
-      { adminPassword: hashPassword('pw-old'), sessions: [] }
+      { adminPassword: await hashPassword('pw-old'), sessions: [] }
     ]);
 
     const v = await getAuthValue(db);
@@ -61,14 +61,14 @@ describe('integration: authStore', () => {
     await db.pool.query('INSERT INTO settings(key, value) VALUES ($1, $2)', [
       'auth_admin',
       {
-        adminUser: { username: 'admin', password: hashPassword('pw') },
+        adminUser: { username: 'admin', password: await hashPassword('pw') },
         sessions: [
           { idHashB64: 'a', createdAt: new Date(0).toISOString(), lastSeenAt: new Date(0).toISOString() }
         ]
       }
     ]);
 
-    await setAdminUser(db, { username: 'root', password: hashPassword('new') });
+    await setAdminUser(db, { username: 'root', password: await hashPassword('new') });
     const v = await getAuthValue(db);
 
     expect(v.adminUser?.username).toBe('root');
@@ -79,7 +79,7 @@ describe('integration: authStore', () => {
     if (!dockerOk || !db) return;
 
     await db.pool.query('DELETE FROM settings');
-    await setAdminUser(db, { username: 'admin', password: hashPassword('pw') });
+    await setAdminUser(db, { username: 'admin', password: await hashPassword('pw') });
 
     const now = new Date().toISOString();
 
@@ -99,7 +99,7 @@ describe('integration: authStore', () => {
     if (!dockerOk || !db) return;
 
     await db.pool.query('DELETE FROM settings');
-    await setAdminUser(db, { username: 'admin', password: hashPassword('pw') });
+    await setAdminUser(db, { username: 'admin', password: await hashPassword('pw') });
 
     const createdAt = new Date(0).toISOString();
     await addAdminSession(db, { idHashB64: 'x', createdAt, lastSeenAt: createdAt }, 10);
@@ -117,17 +117,17 @@ describe('integration: authStore', () => {
     if (!dockerOk || !db) return;
 
     await db.pool.query('DELETE FROM settings');
-    await setAdminUser(db, { username: 'admin', password: hashPassword('pw') });
+    await setAdminUser(db, { username: 'admin', password: await hashPassword('pw') });
 
     const now = new Date().toISOString();
     await addAdminSession(db, { idHashB64: 's1', createdAt: now, lastSeenAt: now }, 10);
 
-    await updateAdminPassword(db, hashPassword('pw2'));
+    await updateAdminPassword(db, await hashPassword('pw2'));
     let v = await getAuthValue(db);
     expect(v.sessions?.length).toBe(0);
 
     await addAdminSession(db, { idHashB64: 's2', createdAt: now, lastSeenAt: now }, 10);
-    await updateAdminPassword(db, hashPassword('pw3'), { clearSessions: false });
+    await updateAdminPassword(db, await hashPassword('pw3'), { clearSessions: false });
     v = await getAuthValue(db);
     expect(v.sessions?.map((s) => s.idHashB64)).toEqual(['s2']);
   });
@@ -136,7 +136,7 @@ describe('integration: authStore', () => {
     if (!dockerOk || !db) return;
 
     await db.pool.query('DELETE FROM settings');
-    await setAdminUser(db, { username: 'admin', password: hashPassword('pw') });
+    await setAdminUser(db, { username: 'admin', password: await hashPassword('pw') });
 
     const now = new Date().toISOString();
     await addAdminSession(db, { idHashB64: 'a', createdAt: now, lastSeenAt: now }, 10);

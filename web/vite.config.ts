@@ -25,7 +25,15 @@ export default defineConfig(({ mode }) => {
       },
       build: {
         outDir: path.resolve(repoRoot, 'dist'),
-        emptyOutDir: true
+        emptyOutDir: true,
+        target: 'es2020',
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              vendor: ['react', 'react-dom'],
+            },
+          },
+        },
       }
     };
 });

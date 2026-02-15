@@ -34,9 +34,6 @@ export const dnsRuntimeStats: DnsRuntimeStats = {
   tailscaleV6Queries: 0
 };
 
-const TS_V4_CIDR = ipaddr.parseCIDR('100.64.0.0/10') as [ipaddr.IPv4, number];
-const TS_V6_CIDR = ipaddr.parseCIDR('fd7a:115c:a1e0::/48') as [ipaddr.IPv6, number];
-
 function normalizeClientIp(ipRaw: string): string {
   const raw = String(ipRaw ?? '').trim();
   if (!raw) return '0.0.0.0';
@@ -46,21 +43,37 @@ function normalizeClientIp(ipRaw: string): string {
   return noZone.startsWith('::ffff:') ? noZone.slice('::ffff:'.length) : noZone;
 }
 
+// Fast Tailscale-IP detection using string prefix checks instead of
+// ipaddr.parse() which involves expensive regex matching + object allocation.
+// Tailscale v4 = 100.64.0.0/10 (first octet 100, second 64-127).
+// Tailscale v6 = fd7a:115c:a1e0::/48.
 function isTailscaleClientIp(ip: string): { isTailscale: boolean; version: 'v4' | 'v6' | null } {
-  try {
-    const addr = ipaddr.parse(ip);
-    if (addr.kind() === 'ipv4') {
-      return { isTailscale: (addr as ipaddr.IPv4).match(TS_V4_CIDR), version: 'v4' };
+  if (ip.startsWith('fd7a:115c:a1e0:')) return { isTailscale: true, version: 'v6' };
+  if (ip.startsWith('100.')) {
+    const dotIdx = ip.indexOf('.', 4);
+    if (dotIdx > 4) {
+      const second = Number(ip.slice(4, dotIdx));
+      if (second >= 64 && second <= 127) return { isTailscale: true, version: 'v4' };
     }
-    return { isTailscale: (addr as ipaddr.IPv6).match(TS_V6_CIDR), version: 'v6' };
-  } catch {
-    return { isTailscale: false, version: null };
   }
+  return { isTailscale: false, version: null };
+}
+
+// Cache the ISO timestamp string; refresh it lazily at most once per second.
+let _lastQueryAtMs = 0;
+let _lastQueryAtIso = '';
+function lazyIsoNow(): string {
+  const now = Date.now();
+  if (now - _lastQueryAtMs >= 1000) {
+    _lastQueryAtMs = now;
+    _lastQueryAtIso = new Date(now).toISOString();
+  }
+  return _lastQueryAtIso;
 }
 
 function recordDnsQuerySeen(clientIp: string, transport: 'udp' | 'tcp'): void {
   dnsRuntimeStats.totalQueries += 1;
-  dnsRuntimeStats.lastQueryAt = new Date().toISOString();
+  dnsRuntimeStats.lastQueryAt = lazyIsoNow();
   dnsRuntimeStats.lastClientIp = clientIp;
   dnsRuntimeStats.lastTransport = transport;
 
@@ -69,6 +82,62 @@ function recordDnsQuerySeen(clientIp: string, transport: 'udp' | 'tcp'): void {
     dnsRuntimeStats.tailscaleQueries += 1;
     if (ts.version === 'v4') dnsRuntimeStats.tailscaleV4Queries += 1;
     if (ts.version === 'v6') dnsRuntimeStats.tailscaleV6Queries += 1;
+  }
+}
+
+// ── DNS upstream response cache ─────────────────────────────────────────
+// Caches raw upstream response buffers keyed by (normalizedName, qtype).
+// Only PERMITTED upstream responses are cached; blocked/rewritten/shadow
+// responses bypass the cache entirely.
+const DNS_RESPONSE_CACHE_MAX = 50_000;
+type DnsResponseCacheEntry = { resp: Buffer; expiresAt: number };
+const dnsResponseCache = new Map<string, DnsResponseCacheEntry>();
+
+function dnsResponseCacheGet(key: string): Buffer | null {
+  const hit = dnsResponseCache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) {
+    dnsResponseCache.delete(key);
+    return null;
+  }
+  return hit.resp;
+}
+
+function dnsResponseCacheSet(key: string, resp: Buffer, ttlMs: number): void {
+  if (ttlMs <= 0) return;
+  // Evict expired entries when approaching limit.
+  if (dnsResponseCache.size >= DNS_RESPONSE_CACHE_MAX) {
+    const now = Date.now();
+    for (const [k, v] of dnsResponseCache) {
+      if (v.expiresAt <= now) dnsResponseCache.delete(k);
+    }
+    // If still over limit, evict oldest 25%.
+    if (dnsResponseCache.size >= DNS_RESPONSE_CACHE_MAX) {
+      const sorted = [...dnsResponseCache.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+      const toRemove = Math.max(1, Math.floor(sorted.length * 0.25));
+      for (let i = 0; i < toRemove; i++) dnsResponseCache.delete(sorted[i][0]);
+    }
+  }
+  dnsResponseCache.set(key, { resp, expiresAt: Date.now() + ttlMs });
+}
+
+/**
+ * Extract the minimum TTL from a DNS response buffer.
+ * Returns 0 if no answers or decode fails.
+ */
+function extractMinTtl(resp: Buffer): number {
+  try {
+    const decoded: any = dnsPacket.decode(resp);
+    const answers: any[] = Array.isArray(decoded?.answers) ? decoded.answers : [];
+    if (!answers.length) return 0;
+    let min = Infinity;
+    for (const a of answers) {
+      const ttl = Number(a?.ttl);
+      if (Number.isFinite(ttl) && ttl >= 0) min = Math.min(min, ttl);
+    }
+    return min === Infinity ? 0 : min;
+  } catch {
+    return 0;
   }
 }
 
@@ -380,10 +449,12 @@ function formatBlocklistCategory(id: string, name?: string): string {
 function buildCandidateDomains(queryName: string): string[] {
   const q = normalizeName(queryName);
   if (!q) return [];
-  const parts = q.split('.').filter(Boolean);
-  const out: string[] = [];
-  for (let i = 0; i < parts.length; i++) {
-    out.push(parts.slice(i).join('.'));
+  // Walk with indexOf instead of split+slice+join to avoid O(labels²) string allocs.
+  const out: string[] = [q];
+  let idx = 0;
+  while ((idx = q.indexOf('.', idx)) !== -1) {
+    idx++;
+    if (idx < q.length) out.push(q.substring(idx));
   }
   return out;
 }
@@ -423,9 +494,10 @@ function decideRuleIndexed(
   index: RulesIndex,
   queryName: string,
   blocklistsById: Map<string, BlocklistStatus>,
-  selectedBlocklists: Set<string>
+  selectedBlocklists: Set<string>,
+  preComputedCandidates?: string[]
 ): RuleMatchDecision {
-  const candidates = buildCandidateDomains(queryName);
+  const candidates = preComputedCandidates ?? buildCandidateDomains(queryName);
   if (!candidates.length) return { decision: 'NONE' };
 
   for (const c of candidates) {
@@ -597,17 +669,79 @@ function isScheduleActiveNow(schedule: Schedule, now: Date): boolean {
   return false;
 }
 
-function isAppBlockedByPolicy(queryName: string, apps: AppService[]): AppService | null {
-  for (const app of apps) {
-    const suffixes = APP_DOMAIN_SUFFIXES[app] ?? [];
+// Pre-built reverse index: suffix → app service (built once at module load).
+const APP_SUFFIX_LOOKUP: Map<string, AppService> = (() => {
+  const map = new Map<string, AppService>();
+  for (const [app, suffixes] of Object.entries(APP_DOMAIN_SUFFIXES) as Array<[AppService, string[]]>) {
     for (const s of suffixes) {
-      if (matchesDomain(s, queryName)) return app;
+      const normalized = s.trim().toLowerCase();
+      if (normalized) map.set(normalized, app);
+    }
+  }
+  return map;
+})();
+
+function isAppBlockedByPolicy(queryName: string, apps: AppService[], preNormalized?: string): AppService | null {
+  if (!apps.length) return null;
+  const appsSet = apps.length <= 8 ? null : new Set<AppService>(apps);
+  const q = preNormalized ?? normalizeName(queryName);
+  if (!q) return null;
+
+  // Walk with indexOf instead of split+slice+join to avoid O(labels²) allocs.
+  // Check exact domain first, then all parent domains.
+  const app0 = APP_SUFFIX_LOOKUP.get(q);
+  if (app0 && (appsSet ? appsSet.has(app0) : apps.includes(app0))) return app0;
+  let idx = 0;
+  while ((idx = q.indexOf('.', idx)) !== -1) {
+    idx++;
+    if (idx < q.length) {
+      const candidate = q.substring(idx);
+      const app = APP_SUFFIX_LOOKUP.get(candidate);
+      if (app && (appsSet ? appsSet.has(app) : apps.includes(app))) return app;
     }
   }
   return null;
 }
 
-function findClient(clients: ClientProfile[], clientIp: string): ClientProfile | null {
+// ── Optimised client lookup structures ──────────────────────────────────
+// Built once on cache refresh; avoids O(n) scans and repeated CIDR parsing
+// on every DNS query.
+type ParsedCidrClient = {
+  client: ClientProfile;
+  range: ipaddr.IPv4 | ipaddr.IPv6;
+  prefixLen: number;
+};
+
+type ClientIndex = {
+  byIp: Map<string, ClientProfile>;
+  cidrClients: ParsedCidrClient[]; // sorted descending by prefixLen for early exit
+};
+
+function buildClientIndex(clients: ClientProfile[]): ClientIndex {
+  const byIp = new Map<string, ClientProfile>();
+  const cidrClients: ParsedCidrClient[] = [];
+
+  for (const c of clients) {
+    if (c.ip) byIp.set(c.ip, c);
+    if (c.cidr) {
+      try {
+        const [range, prefixLen] = ipaddr.parseCIDR(c.cidr);
+        cidrClients.push({ client: c, range, prefixLen });
+      } catch {
+        // ignore invalid CIDR
+      }
+    }
+  }
+
+  // Sort descending by prefix length → most specific match first.
+  cidrClients.sort((a, b) => b.prefixLen - a.prefixLen);
+  return { byIp, cidrClients };
+}
+
+function findClient(clients: ClientProfile[], clientIp: string, index?: ClientIndex): ClientProfile | null {
+  if (index) {
+    return findExactClientIndexed(index, clientIp) ?? findBestCidrClientIndexed(index, clientIp);
+  }
   return findExactClient(clients, clientIp) ?? findBestCidrClient(clients, clientIp);
 }
 
@@ -616,6 +750,10 @@ function findExactClient(clients: ClientProfile[], clientIp: string): ClientProf
     if (c.ip && c.ip === clientIp) return c;
   }
   return null;
+}
+
+function findExactClientIndexed(index: ClientIndex, clientIp: string): ClientProfile | null {
+  return index.byIp.get(clientIp) ?? null;
 }
 
 function findBestCidrClient(clients: ClientProfile[], clientIp: string): ClientProfile | null {
@@ -647,6 +785,23 @@ function findBestCidrClient(clients: ClientProfile[], clientIp: string): ClientP
   }
 
   return best;
+}
+
+function findBestCidrClientIndexed(index: ClientIndex, clientIp: string): ClientProfile | null {
+  let addr: ipaddr.IPv4 | ipaddr.IPv6 | null = null;
+  try {
+    addr = ipaddr.parse(clientIp);
+  } catch {
+    return null;
+  }
+  if (!addr) return null;
+
+  // cidrClients sorted by prefixLen desc → first match is most specific.
+  for (const entry of index.cidrClients) {
+    if (addr.kind() !== entry.range.kind()) continue;
+    if (addr.match([entry.range, entry.prefixLen])) return entry.client;
+  }
+  return null;
 }
 
 async function getRulesMaxId(db: Db): Promise<number> {
@@ -1154,7 +1309,7 @@ export async function domainPolicyCheck(
   for (const a of clientScheduleApps) appScopeByApp.set(a, 'client');
 
   if (selectedActiveAppBlocklists.size) {
-    const appDecision = decideRuleIndexed(index, domain, blocklistsById, selectedActiveAppBlocklists);
+    const appDecision = decideRuleIndexed(index, domain, blocklistsById, selectedActiveAppBlocklists, candidates);
     if (appDecision.decision === 'BLOCKED') {
       const id = appDecision.blocklistId ?? '';
       const app = id ? blocklistIdToApp.get(id) : undefined;
@@ -1179,7 +1334,7 @@ export async function domainPolicyCheck(
   }
 
   if (selectedShadowAppBlocklists.size) {
-    const shadowDecision = decideRuleIndexed(index, domain, blocklistsById, selectedShadowAppBlocklists);
+    const shadowDecision = decideRuleIndexed(index, domain, blocklistsById, selectedShadowAppBlocklists, candidates);
     if ((shadowDecision.decision === 'BLOCKED' || shadowDecision.decision === 'SHADOW_BLOCKED') && !appShadowHit) {
       const id = shadowDecision.blocklistId ?? '';
       const app = id ? blocklistIdToApp.get(id) : undefined;
@@ -1193,7 +1348,7 @@ export async function domainPolicyCheck(
   }
 
   // Evaluate normal blocklists.
-  const { decision, blocklistId } = decideRuleIndexed(index, domain, blocklistsById, selectedBlocklists);
+  const { decision, blocklistId } = decideRuleIndexed(index, domain, blocklistsById, selectedBlocklists, candidates);
   if (decision === 'BLOCKED') {
     const id = blocklistId ?? '';
     const st = id ? blocklistsById.get(id) : undefined;
@@ -1387,23 +1542,82 @@ function buildLocalAnswerResponse(query: any, answerName: string, qtype: string,
   return dnsPacket.encode(response as any);
 }
 
+// ── Batched query log INSERT to avoid saturating the pg pool ────────────────
+type QueryLogEntry = {
+  id: string;
+  timestamp: string;
+  domain: string;
+  client: string;
+  clientIp: string;
+  status: string;
+  type: string;
+  durationMs: number;
+  blocklistId?: string;
+  answerIps?: string[];
+  protectionPaused?: boolean;
+};
+
+const QUERY_LOG_BATCH_SIZE = 100;
+const QUERY_LOG_FLUSH_INTERVAL_MS = 200;
+
+function createQueryLogBatcher(db: Db) {
+  let buffer: QueryLogEntry[] = [];
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const flush = async (): Promise<void> => {
+    if (!buffer.length) return;
+    const batch = buffer;
+    buffer = [];
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    try {
+      // Multi-row INSERT via unnest for maximum throughput.
+      const jsonEntries = batch.map((e) => JSON.stringify(e));
+      await db.pool.query(
+        `INSERT INTO query_logs(entry)
+         SELECT e::jsonb FROM unnest($1::text[]) AS e`,
+        [jsonEntries]
+      );
+    } catch {
+      // best-effort; drop on failure
+    }
+  };
+
+  const enqueue = (entry: QueryLogEntry): void => {
+    buffer.push(entry);
+    if (buffer.length >= QUERY_LOG_BATCH_SIZE) {
+      void flush();
+      return;
+    }
+    if (!flushTimer) {
+      flushTimer = setTimeout(() => {
+        flushTimer = null;
+        void flush();
+      }, QUERY_LOG_FLUSH_INTERVAL_MS);
+    }
+  };
+
+  const close = async (): Promise<void> => {
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = null;
+    await flush();
+  };
+
+  return { enqueue, close };
+}
+
 async function insertQueryLog(
   db: Db,
-  entry: {
-    id: string;
-    timestamp: string;
-    domain: string;
-    client: string;
-    clientIp: string;
-    status: string;
-    type: string;
-    durationMs: number;
-    blocklistId?: string;
-    answerIps?: string[];
-    protectionPaused?: boolean;
-  }
+  entry: QueryLogEntry,
+  batcher?: ReturnType<typeof createQueryLogBatcher>
 ): Promise<void> {
-  // Fire-and-forget; DNS latency must be minimal.
+  if (batcher) {
+    batcher.enqueue(entry);
+    return;
+  }
+  // Fallback: fire-and-forget single INSERT for non-DNS paths.
   void db.pool.query('INSERT INTO query_logs(entry) VALUES ($1)', [entry]).catch(() => {});
 }
 
@@ -1474,6 +1688,7 @@ async function forwardTcp(
     }, timeoutMs);
 
     let chunks: Buffer[] = [];
+    let totalLen = 0;
     let expected: number | null = null;
 
     socket.on('error', (e) => {
@@ -1484,14 +1699,21 @@ async function forwardTcp(
     socket.on('data', (data) => {
       const dataBuf = Buffer.isBuffer(data) ? data : Buffer.from(data);
       chunks.push(dataBuf);
-      const all = Buffer.concat(chunks);
+      totalLen += dataBuf.length;
+
+      if (expected == null && totalLen < 2) return;
+
+      // Concat only once when we have enough data.
       if (expected == null) {
-        if (all.length < 2) return;
+        const all = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
         expected = all.readUInt16BE(0);
+        if (chunks.length > 1) { chunks = [all]; }
       }
-      if (expected != null && all.length >= expected + 2) {
+
+      if (expected != null && totalLen >= expected + 2) {
         clearTimeout(timer);
         socket.end();
+        const all = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
         resolve(all.subarray(2, 2 + expected));
       }
     });
@@ -1499,7 +1721,16 @@ async function forwardTcp(
     socket.on('connect', () => {
       const len = Buffer.alloc(2);
       len.writeUInt16BE(msgBuf.length, 0);
-      socket.write(Buffer.concat([len, msgBuf]));
+      // cork + two writes + uncork: kernel coalesces into one TCP segment
+      // without allocating a concatenated buffer.
+      if (typeof socket.cork === 'function') {
+        socket.cork();
+        socket.write(len);
+        socket.write(msgBuf);
+        socket.uncork();
+      } else {
+        socket.write(Buffer.concat([len, msgBuf]));
+      }
     });
   });
 }
@@ -1525,6 +1756,7 @@ async function forwardDot(
     }, timeoutMs);
 
     let chunks: Buffer[] = [];
+    let totalLen = 0;
     let expected: number | null = null;
 
     socket.on('error', (e) => {
@@ -1535,14 +1767,21 @@ async function forwardDot(
     socket.on('data', (data) => {
       const dataBuf = Buffer.isBuffer(data) ? data : Buffer.from(data);
       chunks.push(dataBuf);
-      const all = Buffer.concat(chunks);
+      totalLen += dataBuf.length;
+
+      if (expected == null && totalLen < 2) return;
+
+      // Concat only once when we have enough data.
       if (expected == null) {
-        if (all.length < 2) return;
+        const all = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
         expected = all.readUInt16BE(0);
+        if (chunks.length > 1) { chunks = [all]; }
       }
-      if (expected != null && all.length >= expected + 2) {
+
+      if (expected != null && totalLen >= expected + 2) {
         clearTimeout(timer);
         socket.end();
+        const all = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
         resolve(all.subarray(2, 2 + expected));
       }
     });
@@ -1550,7 +1789,14 @@ async function forwardDot(
     socket.on('secureConnect', () => {
       const len = Buffer.alloc(2);
       len.writeUInt16BE(msgBuf.length, 0);
-      socket.write(Buffer.concat([len, msgBuf]));
+      if (typeof socket.cork === 'function') {
+        socket.cork();
+        socket.write(len);
+        socket.write(msgBuf);
+        socket.uncork();
+      } else {
+        socket.write(Buffer.concat([len, msgBuf]));
+      }
     });
   });
 }
@@ -1926,6 +2172,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     }
   };
   const clientsCache: ClientsCache = { loadedAt: 0, clients: [] };
+  let clientIndex: ClientIndex = { byIp: new Map(), cidrClients: [] };
   const rewritesCache: RewritesCache = { loadedAt: 0, byDomain: new Map(), wildcards: [] };
   const blocklistsCache: BlocklistsCache = { loadedAt: 0, byId: new Map() };
   const categoryBlocklistsCache: CategoryBlocklistsCache = { loadedAt: 0, byCategory: new Map() };
@@ -1946,6 +2193,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
   const APP_BLOCKLIST_WARMUP_COOLDOWN_MS = 5 * 60_000;
 
   let protectionPause: ProtectionPauseState = { mode: 'OFF' };
+
+  // Batched query-log writer \u2013 flushes every 200 ms or 100 entries.
+  const queryLogBatcher = createQueryLogBatcher(db);
 
   async function refreshProtectionPause(): Promise<void> {
     try {
@@ -2044,6 +2294,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       clientsCache.clients = clients;
       clientsCache.loadedAt = Date.now();
+      clientIndex = buildClientIndex(clients);
       blocklistsCache.byId = blocklists;
       blocklistsCache.loadedAt = Date.now();
       categoryBlocklistsCache.byCategory = categoryBlocklists;
@@ -2166,6 +2417,10 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         rulesCache.loadedAt = nowMs;
         rulesCache.includedIdsKey = neededIdsKey;
 
+        // Invalidate upstream response cache so that newly-blocked domains
+        // are not served from stale PERMITTED cache entries.
+        dnsResponseCache.clear();
+
         logRulesIndexReload({
           selectedBlocklistCount: neededIds.size,
           maxId: maxRulesId,
@@ -2237,6 +2492,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
   await refreshCaches();
   await refreshProtectionPause();
   const refreshTimer = setInterval(refreshCaches, DNS_CACHE_REFRESH_INTERVAL_MS);
+  // Protection pause must poll every 1 s so the UI countdown stays responsive.
   const pauseTimer = setInterval(refreshProtectionPause, 1000);
 
   const resolveDnsBindHosts = (
@@ -2275,6 +2531,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
   async function handleQuery(msg: Buffer, clientIp: string): Promise<Buffer> {
     const start = Date.now();
+    const logEntry = (entry: QueryLogEntry) => insertQueryLog(db, entry, queryLogBatcher);
     let query: any;
     try {
       query = dnsPacket.decode(msg);
@@ -2372,12 +2629,12 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       if (rewrite) {
         const localResp = buildLocalAnswerResponse(query, name, qtype, rewrite.target);
         if (localResp) {
-          const exactClient = findExactClient(clientsCache.clients, clientIp);
-          const subnetClient = findBestCidrClient(clientsCache.clients, clientIp);
+          const exactClient = findExactClientIndexed(clientIndex, clientIp);
+          const subnetClient = findBestCidrClientIndexed(clientIndex, clientIp);
           const effectiveClient = exactClient ?? subnetClient;
           const clientName = effectiveClient?.name ?? 'Unknown';
           const answerIps = extractAnswerIpsFromDnsResponse(localResp);
-          await insertQueryLog(db, {
+          await logEntry({
             id: crypto.randomUUID(),
             timestamp: new Date().toISOString(),
             domain: name,
@@ -2392,15 +2649,15 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         }
       }
 
-      const exactClient = findExactClient(clientsCache.clients, clientIp);
-      const subnetClient = findBestCidrClient(clientsCache.clients, clientIp);
+      const exactClient = findExactClientIndexed(clientIndex, clientIp);
+      const subnetClient = findBestCidrClientIndexed(clientIndex, clientIp);
       const client = exactClient ?? subnetClient;
       const clientName = client?.name ?? 'Unknown';
 
       // Client kill-switch: blocks *all* DNS for this client/subnet.
       if (exactClient?.isInternetPaused || subnetClient?.isInternetPaused) {
         const resp = buildNxDomainResponse(query);
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2420,7 +2677,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
         const answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2438,7 +2695,8 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       // Manual allow/block rules with precedence: Client > Subnet > Global.
       // (These are applied after protection pause, but before app/blocklist evaluation.)
-      const candidates = buildCandidateDomains(name);
+      // Re-use the already-normalised name to avoid a redundant normalizeName() call.
+      const candidates = buildCandidateDomains(normalizedName);
       const idx = rulesCache.index;
 
       const clientManual = exactClient
@@ -2451,7 +2709,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       if (clientManual === 'BLOCKED') {
         const resp = buildNxDomainResponse(query);
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2468,7 +2726,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       if (clientManual === 'ALLOWED') {
         const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2492,7 +2750,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       if (subnetManual === 'BLOCKED') {
         const resp = buildNxDomainResponse(query);
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2509,7 +2767,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       if (subnetManual === 'ALLOWED') {
         const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2527,7 +2785,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       if (globalManual === 'BLOCKED') {
         const resp = buildNxDomainResponse(query);
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2544,7 +2802,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       if (globalManual === 'ALLOWED') {
         const upstreamResp = await forwardActiveUpstreamWithTelemetry();
 
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2598,7 +2856,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       if (blockAll) {
         const blockAllScope: 'client' | 'subnet' = activeClientSchedules.some((s) => s.blockAll) ? 'client' : 'subnet';
         const resp = buildNxDomainResponse(query);
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2620,19 +2878,19 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const globalShadowApps = shouldUseGlobalApps ? globalAppsCache.shadowApps : [];
 
       const findBlockedAppWithScope = (): { app: AppService; scope: 'client' | 'subnet' | 'global' } | null => {
-        const clientScheduleHit = isAppBlockedByPolicy(name, clientScheduleApps);
+        const clientScheduleHit = isAppBlockedByPolicy(name, clientScheduleApps, normalizedName);
         if (clientScheduleHit) return { app: clientScheduleHit, scope: 'client' };
 
-        const clientBaseHit = isAppBlockedByPolicy(name, clientBaseApps);
+        const clientBaseHit = isAppBlockedByPolicy(name, clientBaseApps, normalizedName);
         if (clientBaseHit) return { app: clientBaseHit, scope: 'client' };
 
-        const subnetScheduleHit = isAppBlockedByPolicy(name, subnetScheduleApps);
+        const subnetScheduleHit = isAppBlockedByPolicy(name, subnetScheduleApps, normalizedName);
         if (subnetScheduleHit) return { app: subnetScheduleHit, scope: 'subnet' };
 
-        const subnetBaseHit = isAppBlockedByPolicy(name, subnetBaseApps);
+        const subnetBaseHit = isAppBlockedByPolicy(name, subnetBaseApps, normalizedName);
         if (subnetBaseHit) return { app: subnetBaseHit, scope: 'subnet' };
 
-        const globalHit = isAppBlockedByPolicy(name, globalBaseApps);
+        const globalHit = isAppBlockedByPolicy(name, globalBaseApps, normalizedName);
         if (globalHit) return { app: globalHit, scope: 'global' };
 
         return null;
@@ -2641,7 +2899,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       const blockedAppHit = findBlockedAppWithScope();
       if (blockedAppHit) {
         const resp = buildNxDomainResponse(query);
-        await insertQueryLog(db, {
+        await logEntry({
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           domain: name,
@@ -2656,7 +2914,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       let appShadowHit: string | undefined;
-      const shadowApp = isAppBlockedByPolicy(name, globalShadowApps);
+      const shadowApp = isAppBlockedByPolicy(name, globalShadowApps, normalizedName);
       if (shadowApp) appShadowHit = `${policyPrefix('global')}:AppShadow:${shadowApp}`;
 
       // Determine which blocklists are active for this client.
@@ -2732,13 +2990,13 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         }
 
         if (selectedActiveAppBlocklists.size) {
-          const appDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedActiveAppBlocklists);
+          const appDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedActiveAppBlocklists, candidates);
           if (appDecision.decision === 'BLOCKED') {
             const resp = buildNxDomainResponse(query);
             const id = appDecision.blocklistId ?? '';
             const app = id ? blocklistIdToApp.get(id) : undefined;
             const scope = app ? (appScopeByApp.get(app) ?? 'global') : 'global';
-            await insertQueryLog(db, {
+            await logEntry({
               id: crypto.randomUUID(),
               timestamp: new Date().toISOString(),
               domain: name,
@@ -2769,7 +3027,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         }
 
         if (selectedShadowAppBlocklists.size) {
-          const shadowDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedShadowAppBlocklists);
+          const shadowDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedShadowAppBlocklists, candidates);
           if ((shadowDecision.decision === 'BLOCKED' || shadowDecision.decision === 'SHADOW_BLOCKED') && !appShadowHit) {
             const id = shadowDecision.blocklistId ?? '';
             const app = id ? blocklistIdToApp.get(id) : undefined;
@@ -2783,37 +3041,79 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         }
       }
 
-      const { decision, blocklistId } = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedBlocklists);
+      const { decision, blocklistId } = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedBlocklists, candidates);
 
       if (decision === 'BLOCKED') {
         const resp = buildNxDomainResponse(query);
 
-        let answerIps: string[] | undefined;
+        const logId = crypto.randomUUID();
+        const logTimestamp = new Date().toISOString();
+        const logDurationMs = Date.now() - start;
+        const logBlocklistId = blocklistId ? formatBlocklistCategory(blocklistId, blocklistsCache.byId.get(blocklistId)?.name) : undefined;
+
         if (config.SHADOW_RESOLVE_BLOCKED) {
-          try {
-            const upstreamResp = await forwardActiveUpstreamNoTelemetry();
-            answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
-          } catch {
-            // ignore: blocked response should still be fast/reliable
-          }
+          // Fire-and-forget: resolve upstream in background for analytics only.
+          // This no longer blocks the NXDOMAIN response to the client.
+          void (async () => {
+            try {
+              const upstreamResp = await forwardActiveUpstreamNoTelemetry();
+              const answerIps = extractAnswerIpsFromDnsResponse(upstreamResp);
+              await logEntry({
+                id: logId, timestamp: logTimestamp, domain: name, client: clientName, clientIp,
+                status: 'BLOCKED', type: qtype, durationMs: logDurationMs,
+                blocklistId: logBlocklistId, answerIps
+              });
+            } catch {
+              await logEntry({
+                id: logId, timestamp: logTimestamp, domain: name, client: clientName, clientIp,
+                status: 'BLOCKED', type: qtype, durationMs: logDurationMs,
+                blocklistId: logBlocklistId
+              });
+            }
+          })();
+        } else {
+          await logEntry({
+            id: logId, timestamp: logTimestamp, domain: name, client: clientName, clientIp,
+            status: 'BLOCKED', type: qtype, durationMs: logDurationMs,
+            blocklistId: logBlocklistId
+          });
         }
 
-        await insertQueryLog(db, {
-          id: crypto.randomUUID(),
-          timestamp: new Date().toISOString(),
-          domain: name,
-          client: clientName,
-          clientIp,
-          status: 'BLOCKED',
-          type: qtype,
-          durationMs: Date.now() - start,
-          blocklistId: blocklistId ? formatBlocklistCategory(blocklistId, blocklistsCache.byId.get(blocklistId)?.name) : undefined,
-          answerIps
-        });
         return resp;
       }
 
+      // ── DNS response cache ──────────────────────────────────────────
+      // Serve cached upstream responses for PERMITTED queries to avoid
+      // redundant upstream round-trips for popular domains.
+      const cacheKey = `${normalizedName}\0${qtype}`;
+      const cachedResp = dnsResponseCacheGet(cacheKey);
+      if (cachedResp && decision !== 'SHADOW_BLOCKED' && !appShadowHit) {
+        // Rewrite the transaction ID in the cached buffer to match the current query.
+        const out = Buffer.from(cachedResp);
+        out.writeUInt16BE(query.id ?? 0, 0);
+        await logEntry({
+          id: crypto.randomUUID(),
+          timestamp: lazyIsoNow(),
+          domain: name,
+          client: clientName,
+          clientIp,
+          status: 'PERMITTED',
+          type: qtype,
+          durationMs: Date.now() - start,
+          answerIps: extractAnswerIpsFromDnsResponse(out)
+        });
+        return out;
+      }
+
       const upstreamResp = await forwardActiveUpstreamWithTelemetry();
+
+      // Cache the upstream response using the minimum answer TTL.
+      const minTtl = extractMinTtl(upstreamResp);
+      if (minTtl > 0) {
+        // Cap cache TTL to 5 minutes to stay responsive to DNS changes.
+        const cacheTtlMs = Math.min(minTtl, 300) * 1000;
+        dnsResponseCacheSet(cacheKey, upstreamResp, cacheTtlMs);
+      }
 
       const finalStatus: 'SHADOW_BLOCKED' | 'PERMITTED' =
         decision === 'SHADOW_BLOCKED' || !!appShadowHit ? 'SHADOW_BLOCKED' : 'PERMITTED';
@@ -2825,7 +3125,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
               : undefined)
           : undefined;
 
-      await insertQueryLog(db, {
+      await logEntry({
         id: crypto.randomUUID(),
         timestamp: new Date().toISOString(),
         domain: name,
@@ -2864,16 +3164,30 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       socket.setTimeout(5000);
       socket.setNoDelay(true);
 
-      let buf = Buffer.alloc(0);
+      // Use a chunk list instead of repeated Buffer.concat to avoid O(n²) copying.
+      const chunks: Buffer[] = [];
+      let totalLen = 0;
 
       socket.on('data', async (data) => {
         const dataBuf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-        buf = Buffer.concat([buf, dataBuf]);
-        while (buf.length >= 2) {
+        chunks.push(dataBuf);
+        totalLen += dataBuf.length;
+
+        while (totalLen >= 2) {
+          // Consolidate only when needed.
+          let buf = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
+          if (chunks.length > 1) {
+            chunks.length = 0;
+            chunks.push(buf);
+          }
+
           const len = buf.readUInt16BE(0);
           if (buf.length < 2 + len) return;
           const msg = buf.subarray(2, 2 + len);
-          buf = buf.subarray(2 + len);
+          const remainder = buf.subarray(2 + len);
+          chunks.length = 0;
+          if (remainder.length > 0) chunks.push(remainder);
+          totalLen = remainder.length;
 
           try {
             const ipRaw = socket.remoteAddress ?? '0.0.0.0';
@@ -2944,6 +3258,9 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
     clearInterval(refreshTimer);
     clearInterval(pauseTimer);
 
+    // Flush any remaining buffered query log entries.
+    await queryLogBatcher.close();
+
     for (const udp of udpSockets) {
       await new Promise<void>((resolve) => {
         try {
@@ -2990,6 +3307,12 @@ export const __testing = {
   extractAnswerIpsFromDnsResponse,
   buildNxDomainResponse,
   buildServFailResponse,
+  isTailscaleClientIp,
+  extractMinTtl,
+  normalizeClientIp,
+  dnsResponseCacheGet,
+  dnsResponseCacheSet,
+  get dnsResponseCache() { return dnsResponseCache; },
   resetPolicyCaches: () => {
     policyClientsCache.reset();
     policyBlocklistsCache.reset();

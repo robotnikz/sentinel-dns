@@ -85,7 +85,7 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
         return { error: 'INVALID_USERNAME' };
       }
 
-      const passwordHash = hashPassword(request.body.password);
+      const passwordHash = await hashPassword(request.body.password);
       await setAdminUser(db, { username, password: passwordHash });
 
       const sessionId = generateSessionId();
@@ -128,7 +128,7 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
         return { error: 'INVALID_CREDENTIALS' };
       }
 
-      const ok = verifyPassword(request.body.password, rec);
+      const ok = await verifyPassword(request.body.password, rec);
       if (!ok) {
         reply.code(401);
         return { error: 'INVALID_CREDENTIALS' };
@@ -174,13 +174,13 @@ export async function registerAuthRoutes(app: FastifyInstance, _config: unknown,
         return { error: 'NOT_CONFIGURED' };
       }
 
-      const ok = verifyPassword(request.body.currentPassword, rec);
+      const ok = await verifyPassword(request.body.currentPassword, rec);
       if (!ok) {
         reply.code(401);
         return { error: 'INVALID_CREDENTIALS', message: 'Current password is incorrect.' };
       }
 
-      const nextHash = hashPassword(request.body.newPassword);
+      const nextHash = await hashPassword(request.body.newPassword);
       // Rotate sessions (log out other browsers) and issue a new session for this browser.
       await updateAdminPassword(db, nextHash, { clearSessions: true });
       const sessionId = generateSessionId();

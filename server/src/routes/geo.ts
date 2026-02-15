@@ -73,8 +73,13 @@ export async function registerGeoRoutes(app: FastifyInstance, config: AppConfig,
       // Bound input to keep this endpoint cheap.
       const maxLogs = 50_000;
 
+      // Only extract the four JSONB fields we actually use to reduce data
+      // transfer and allocations (avoids pulling full entry objects).
       const res = await db.pool.query(
-        `SELECT entry
+        `SELECT entry->>'domain'    AS domain,
+                entry->>'status'    AS status,
+                entry->'answerIps'  AS answer_ips,
+                entry->>'type'      AS qtype
          FROM query_logs
          WHERE ts >= NOW() - ($1::text || ' hours')::interval
          ORDER BY ts DESC, id DESC
@@ -88,13 +93,14 @@ export async function registerGeoRoutes(app: FastifyInstance, config: AppConfig,
       const byPoint = new Map<string, GeoPointAgg>();
 
       for (const row of res.rows) {
-        const entry: any = row?.entry;
-        if (!entry || typeof entry !== 'object') continue;
+        const domain = typeof row?.domain === 'string' ? row.domain : '';
+        const status = typeof row?.status === 'string' ? row.status : '';
 
-        const domain = typeof entry.domain === 'string' ? entry.domain : '';
-        const status = typeof entry.status === 'string' ? entry.status : '';
-
-        const destIp = pickDestinationIp(entry);
+        const ips = Array.isArray(row?.answer_ips) ? row.answer_ips : [];
+        let destIp = '';
+        for (const ip of ips) {
+          if (typeof ip === 'string' && ip.trim()) { destIp = ip.trim(); break; }
+        }
         const isBlocked = status === 'BLOCKED' || status === 'SHADOW_BLOCKED';
 
         // World map is for outbound destinations, so we geolocate the resolved answer IP.
@@ -103,10 +109,10 @@ export async function registerGeoRoutes(app: FastifyInstance, config: AppConfig,
         let countryName = '';
 
         if (!destIp) {
-          const qtype = typeof entry.type === 'string' ? String(entry.type) : '';
+          const qt = typeof row?.qtype === 'string' ? row.qtype : '';
           if (isBlocked) {
             countryName = 'Blocked (no IP answers)';
-          } else if (qtype && qtype !== 'A' && qtype !== 'AAAA' && qtype !== 'ANY') {
+          } else if (qt && qt !== 'A' && qt !== 'AAAA' && qt !== 'ANY') {
             // Many successful DNS lookups (TXT/HTTPS/SVCB/SRV/CNAME-only/etc.) still contain no IPs.
             // World map is strictly “where the resolved IPs are”, so these are intentionally excluded.
             countryName = 'No IP answers (non-A/AAAA)';

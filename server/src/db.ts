@@ -7,7 +7,19 @@ export type Db = {
 };
 
 export function createDb(config: AppConfig): Db {
-  const pool = new Pool({ connectionString: config.DATABASE_URL });
+  const pool = new Pool({
+    connectionString: config.DATABASE_URL,
+    max: 20,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000
+  });
+
+  // Set statement_timeout on each new connection so runaway queries
+  // are killed after 30 seconds. This must be done via SET, not as a
+  // Pool constructor option (which pg silently ignores).
+  pool.on('connect', (client) => {
+    client.query('SET statement_timeout = 30000').catch(() => {});
+  });
 
   async function init(): Promise<void> {
     const client = await pool.connect();
@@ -115,6 +127,12 @@ export function createDb(config: AppConfig): Db {
       // Partial index for blocked lookups/counts.
       await client.query(
         "CREATE INDEX IF NOT EXISTS query_logs_blocked_ts_idx ON query_logs (ts DESC, id DESC) WHERE entry->>'status' IN ('BLOCKED','SHADOW_BLOCKED')"
+      );
+
+      // General expression index for status-filtered queries (PERMITTED, CACHED, etc.)
+      // that are not covered by the partial blocked index above.
+      await client.query(
+        "CREATE INDEX IF NOT EXISTS query_logs_status_ts_idx ON query_logs ((entry->>'status'), ts DESC, id DESC)"
       );
 
       await client.query('CREATE INDEX IF NOT EXISTS notifications_ts_idx ON notifications (ts DESC)');

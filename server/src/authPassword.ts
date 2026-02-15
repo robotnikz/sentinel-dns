@@ -1,4 +1,12 @@
 import crypto from 'node:crypto';
+import { promisify } from 'node:util';
+
+const scryptAsync = promisify(crypto.scrypt) as (
+  password: crypto.BinaryLike,
+  salt: crypto.BinaryLike,
+  keylen: number,
+  options: crypto.ScryptOptions
+) => Promise<Buffer>;
 
 export type PasswordHashRecord = {
   scheme: 'scrypt';
@@ -17,10 +25,10 @@ const DEFAULT_PARAMS = {
   p: 1
 } as const;
 
-export function hashPassword(password: string): PasswordHashRecord {
+export async function hashPassword(password: string): Promise<PasswordHashRecord> {
   const salt = crypto.randomBytes(16);
   const keyLen = DEFAULT_PARAMS.keyLen;
-  const derived = crypto.scryptSync(password, salt, keyLen, {
+  const derived = await scryptAsync(password, salt, keyLen, {
     N: DEFAULT_PARAMS.N,
     r: DEFAULT_PARAMS.r,
     p: DEFAULT_PARAMS.p,
@@ -38,12 +46,12 @@ export function hashPassword(password: string): PasswordHashRecord {
   };
 }
 
-export function verifyPassword(password: string, record: PasswordHashRecord): boolean {
+export async function verifyPassword(password: string, record: PasswordHashRecord): Promise<boolean> {
   if (!record || record.scheme !== 'scrypt') return false;
 
   const salt = Buffer.from(record.saltB64, 'base64');
   const expected = Buffer.from(record.hashB64, 'base64');
-  const derived = crypto.scryptSync(password, salt, record.keyLen, {
+  const derived = await scryptAsync(password, salt, record.keyLen, {
     N: record.N,
     r: record.r,
     p: record.p,

@@ -39,6 +39,23 @@ function normalizeDiscoverySettings(input: any): DiscoverySettings {
 
 type CacheEntry = { hostname: string | null; expiresAt: number };
 const PTR_CACHE = new Map<string, CacheEntry>();
+const PTR_CACHE_MAX = 4096;
+
+/**
+ * Evict expired entries from the PTR cache. If still over the limit,
+ * remove the oldest entries (by expiration time) to stay bounded.
+ */
+function ptrCacheSweep(): void {
+  const now = Date.now();
+  for (const [k, v] of PTR_CACHE) {
+    if (v.expiresAt <= now) PTR_CACHE.delete(k);
+  }
+  if (PTR_CACHE.size > PTR_CACHE_MAX) {
+    const sorted = [...PTR_CACHE.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+    const excess = PTR_CACHE.size - PTR_CACHE_MAX;
+    for (let i = 0; i < excess; i++) PTR_CACHE.delete(sorted[i][0]);
+  }
+}
 
 function stripTrailingDot(name: string): string {
   return name.endsWith('.') ? name.slice(0, -1) : name;
@@ -112,6 +129,7 @@ async function resolvePtrHostname(ip: string, resolverIp: string, timeoutMs: num
   if (timer) clearTimeout(timer);
 
   // Cache: positives longer than negatives.
+  if (PTR_CACHE.size >= PTR_CACHE_MAX) ptrCacheSweep();
   PTR_CACHE.set(ip, {
     hostname,
     expiresAt: now + (hostname ? 10 * 60_000 : 60_000)
