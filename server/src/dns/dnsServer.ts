@@ -423,9 +423,10 @@ function decideRuleIndexed(
   index: RulesIndex,
   queryName: string,
   blocklistsById: Map<string, BlocklistStatus>,
-  selectedBlocklists: Set<string>
+  selectedBlocklists: Set<string>,
+  preComputedCandidates?: string[]
 ): RuleMatchDecision {
-  const candidates = buildCandidateDomains(queryName);
+  const candidates = preComputedCandidates ?? buildCandidateDomains(queryName);
   if (!candidates.length) return { decision: 'NONE' };
 
   for (const c of candidates) {
@@ -1232,7 +1233,7 @@ export async function domainPolicyCheck(
   for (const a of clientScheduleApps) appScopeByApp.set(a, 'client');
 
   if (selectedActiveAppBlocklists.size) {
-    const appDecision = decideRuleIndexed(index, domain, blocklistsById, selectedActiveAppBlocklists);
+    const appDecision = decideRuleIndexed(index, domain, blocklistsById, selectedActiveAppBlocklists, candidates);
     if (appDecision.decision === 'BLOCKED') {
       const id = appDecision.blocklistId ?? '';
       const app = id ? blocklistIdToApp.get(id) : undefined;
@@ -1257,7 +1258,7 @@ export async function domainPolicyCheck(
   }
 
   if (selectedShadowAppBlocklists.size) {
-    const shadowDecision = decideRuleIndexed(index, domain, blocklistsById, selectedShadowAppBlocklists);
+    const shadowDecision = decideRuleIndexed(index, domain, blocklistsById, selectedShadowAppBlocklists, candidates);
     if ((shadowDecision.decision === 'BLOCKED' || shadowDecision.decision === 'SHADOW_BLOCKED') && !appShadowHit) {
       const id = shadowDecision.blocklistId ?? '';
       const app = id ? blocklistIdToApp.get(id) : undefined;
@@ -1271,7 +1272,7 @@ export async function domainPolicyCheck(
   }
 
   // Evaluate normal blocklists.
-  const { decision, blocklistId } = decideRuleIndexed(index, domain, blocklistsById, selectedBlocklists);
+  const { decision, blocklistId } = decideRuleIndexed(index, domain, blocklistsById, selectedBlocklists, candidates);
   if (decision === 'BLOCKED') {
     const id = blocklistId ?? '';
     const st = id ? blocklistsById.get(id) : undefined;
@@ -2597,7 +2598,8 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
 
       // Manual allow/block rules with precedence: Client > Subnet > Global.
       // (These are applied after protection pause, but before app/blocklist evaluation.)
-      const candidates = buildCandidateDomains(name);
+      // Re-use the already-normalised name to avoid a redundant normalizeName() call.
+      const candidates = buildCandidateDomains(normalizedName);
       const idx = rulesCache.index;
 
       const clientManual = exactClient
@@ -2891,7 +2893,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         }
 
         if (selectedActiveAppBlocklists.size) {
-          const appDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedActiveAppBlocklists);
+          const appDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedActiveAppBlocklists, candidates);
           if (appDecision.decision === 'BLOCKED') {
             const resp = buildNxDomainResponse(query);
             const id = appDecision.blocklistId ?? '';
@@ -2928,7 +2930,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         }
 
         if (selectedShadowAppBlocklists.size) {
-          const shadowDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedShadowAppBlocklists);
+          const shadowDecision = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedShadowAppBlocklists, candidates);
           if ((shadowDecision.decision === 'BLOCKED' || shadowDecision.decision === 'SHADOW_BLOCKED') && !appShadowHit) {
             const id = shadowDecision.blocklistId ?? '';
             const app = id ? blocklistIdToApp.get(id) : undefined;
@@ -2942,7 +2944,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         }
       }
 
-      const { decision, blocklistId } = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedBlocklists);
+      const { decision, blocklistId } = decideRuleIndexed(rulesCache.index, name, blocklistsCache.byId, selectedBlocklists, candidates);
 
       if (decision === 'BLOCKED') {
         const resp = buildNxDomainResponse(query);

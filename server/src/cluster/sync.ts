@@ -216,50 +216,88 @@ export async function applySnapshot(config: AppConfig, db: Db, snapshot: Cluster
       }
 
       for (const c of incomingClients) {
-      const id = String((c as any).id || '');
-      if (!id) continue;
-      const profile = (c as any).profile;
-      const updatedAt = String((c as any).updatedAt || new Date().toISOString());
-      await client.query(
-        'INSERT INTO clients(id, profile, updated_at) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET profile = EXCLUDED.profile, updated_at = EXCLUDED.updated_at',
-        [id, profile, updatedAt]
-      );
+        const id = String((c as any).id || '');
+        if (!id) continue;
+        const profile = (c as any).profile;
+        const updatedAt = String((c as any).updatedAt || new Date().toISOString());
+        await client.query(
+          'INSERT INTO clients(id, profile, updated_at) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET profile = EXCLUDED.profile, updated_at = EXCLUDED.updated_at',
+          [id, profile, updatedAt]
+        );
       }
     }
 
-    // Manual rules (non-blocklist)
+    // Manual rules (non-blocklist) – batch insert via unnest.
     await client.query("DELETE FROM rules WHERE category NOT ILIKE 'blocklist:%'");
-    for (const r of snapshot.rules || []) {
-      const domain = String((r as any).domain || '').trim();
-      const type = String((r as any).type || '').trim();
-      const category = String((r as any).category || 'Manual').trim() || 'Manual';
-      const createdAt = String((r as any).createdAt || new Date().toISOString());
-      if (!domain || (type !== 'ALLOWED' && type !== 'BLOCKED')) continue;
-      await client.query(
-        'INSERT INTO rules(domain, type, category, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
-        [domain, type, category, createdAt]
-      );
+
+    {
+      const domains: string[] = [];
+      const types: string[] = [];
+      const categories: string[] = [];
+      const createdAts: string[] = [];
+
+      for (const r of snapshot.rules || []) {
+        const domain = String((r as any).domain || '').trim();
+        const type = String((r as any).type || '').trim();
+        if (!domain || (type !== 'ALLOWED' && type !== 'BLOCKED')) continue;
+        domains.push(domain);
+        types.push(type);
+        categories.push(String((r as any).category || 'Manual').trim() || 'Manual');
+        createdAts.push(String((r as any).createdAt || new Date().toISOString()));
+      }
+
+      if (domains.length) {
+        await client.query(
+          `INSERT INTO rules(domain, type, category, created_at)
+           SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[])
+           ON CONFLICT DO NOTHING`,
+          [domains, types, categories, createdAts]
+        );
+      }
     }
 
     // Blocklists config must keep IDs stable to match client assignedBlocklists.
     await client.query('TRUNCATE blocklists');
-    for (const b of snapshot.blocklists || []) {
-      const id = Number((b as any).id);
-      const name = String((b as any).name || '');
-      const url = String((b as any).url || '');
-      const enabled = Boolean((b as any).enabled);
-      const mode = String((b as any).mode || 'ACTIVE');
-      const lastUpdatedAt = (b as any).lastUpdatedAt ? String((b as any).lastUpdatedAt) : null;
-      const lastError = (b as any).lastError ? String((b as any).lastError) : null;
-      const lastRuleCount = Number((b as any).lastRuleCount ?? 0);
-      const createdAt = String((b as any).createdAt || new Date().toISOString());
-      const updatedAt = String((b as any).updatedAt || new Date().toISOString());
-      if (!Number.isFinite(id) || id <= 0 || !name || !url) continue;
-      await client.query(
-        `INSERT INTO blocklists(id, name, url, enabled, mode, last_updated_at, last_error, last_rule_count, created_at, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [id, name, url, enabled, mode, lastUpdatedAt, lastError, lastRuleCount, createdAt, updatedAt]
-      );
+
+    {
+      const ids: number[] = [];
+      const names: string[] = [];
+      const urls: string[] = [];
+      const enableds: boolean[] = [];
+      const modes: string[] = [];
+      const lastUpdatedAts: (string | null)[] = [];
+      const lastErrors: (string | null)[] = [];
+      const lastRuleCounts: number[] = [];
+      const createdAts: string[] = [];
+      const updatedAts: string[] = [];
+
+      for (const b of snapshot.blocklists || []) {
+        const id = Number((b as any).id);
+        const name = String((b as any).name || '');
+        const url = String((b as any).url || '');
+        if (!Number.isFinite(id) || id <= 0 || !name || !url) continue;
+        ids.push(id);
+        names.push(name);
+        urls.push(url);
+        enableds.push(Boolean((b as any).enabled));
+        modes.push(String((b as any).mode || 'ACTIVE'));
+        lastUpdatedAts.push((b as any).lastUpdatedAt ? String((b as any).lastUpdatedAt) : null);
+        lastErrors.push((b as any).lastError ? String((b as any).lastError) : null);
+        lastRuleCounts.push(Number((b as any).lastRuleCount ?? 0));
+        createdAts.push(String((b as any).createdAt || new Date().toISOString()));
+        updatedAts.push(String((b as any).updatedAt || new Date().toISOString()));
+      }
+
+      if (ids.length) {
+        await client.query(
+          `INSERT INTO blocklists(id, name, url, enabled, mode, last_updated_at, last_error, last_rule_count, created_at, updated_at)
+           SELECT * FROM unnest(
+             $1::int[], $2::text[], $3::text[], $4::boolean[], $5::text[],
+             $6::text[], $7::text[], $8::int[], $9::text[], $10::text[]
+           )`,
+          [ids, names, urls, enableds, modes, lastUpdatedAts, lastErrors, lastRuleCounts, createdAts, updatedAts]
+        );
+      }
     }
     // Keep sequence sane if this node later adds a new blocklist.
     await client.query(

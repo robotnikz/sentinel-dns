@@ -178,8 +178,21 @@ export async function registerMetricsRoutes(app: FastifyInstance, config: AppCon
 
   const cacheSet = (key: string, value: unknown): void => {
     if (ttlMs <= 0) return;
-    // Safety guard against accidental unbounded growth.
-    if (cache.size > 1000) cache.clear();
+    // Evict expired + oldest entries instead of clearing the entire cache,
+    // which would cause a thundering-herd of DB queries.
+    if (cache.size > 1000) {
+      const now = Date.now();
+      // First pass: remove expired entries.
+      for (const [k, v] of cache) {
+        if (v.expiresAt <= now) cache.delete(k);
+      }
+      // If still over-limit, evict the 25 % with the nearest expiry.
+      if (cache.size > 1000) {
+        const sorted = [...cache.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+        const toRemove = Math.max(1, Math.floor(sorted.length * 0.25));
+        for (let i = 0; i < toRemove; i++) cache.delete(sorted[i][0]);
+      }
+    }
     cache.set(key, { expiresAt: Date.now() + ttlMs, value });
   };
 
