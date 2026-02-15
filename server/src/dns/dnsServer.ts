@@ -3298,6 +3298,12 @@ export const __testing = {
   extractAnswerIpsFromDnsResponse,
   buildNxDomainResponse,
   buildServFailResponse,
+  isTailscaleClientIp,
+  extractMinTtl,
+  normalizeClientIp,
+  dnsResponseCacheGet,
+  dnsResponseCacheSet,
+  get dnsResponseCache() { return dnsResponseCache; },
   resetPolicyCaches: () => {
     policyClientsCache.reset();
     policyBlocklistsCache.reset();
