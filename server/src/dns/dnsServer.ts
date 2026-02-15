@@ -2492,7 +2492,8 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
   await refreshCaches();
   await refreshProtectionPause();
   const refreshTimer = setInterval(refreshCaches, DNS_CACHE_REFRESH_INTERVAL_MS);
-  const pauseTimer = setInterval(refreshProtectionPause, DNS_CACHE_REFRESH_INTERVAL_MS);
+  // Protection pause must poll every 1 s so the UI countdown stays responsive.
+  const pauseTimer = setInterval(refreshProtectionPause, 1000);
 
   const resolveDnsBindHosts = (
     hostRaw: string
