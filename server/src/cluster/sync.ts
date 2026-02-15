@@ -249,7 +249,7 @@ export async function applySnapshot(config: AppConfig, db: Db, snapshot: Cluster
       if (domains.length) {
         await client.query(
           `INSERT INTO rules(domain, type, category, created_at)
-           SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[])
+           SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::timestamptz[])
            ON CONFLICT DO NOTHING`,
           [domains, types, categories, createdAts]
         );
@@ -293,7 +293,7 @@ export async function applySnapshot(config: AppConfig, db: Db, snapshot: Cluster
           `INSERT INTO blocklists(id, name, url, enabled, mode, last_updated_at, last_error, last_rule_count, created_at, updated_at)
            SELECT * FROM unnest(
              $1::int[], $2::text[], $3::text[], $4::boolean[], $5::text[],
-             $6::text[], $7::text[], $8::int[], $9::text[], $10::text[]
+             $6::timestamptz[], $7::text[], $8::int[], $9::timestamptz[], $10::timestamptz[]
            )`,
           [ids, names, urls, enableds, modes, lastUpdatedAts, lastErrors, lastRuleCounts, createdAts, updatedAts]
         );

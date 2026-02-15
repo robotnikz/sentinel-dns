@@ -1723,10 +1723,14 @@ async function forwardTcp(
       len.writeUInt16BE(msgBuf.length, 0);
       // cork + two writes + uncork: kernel coalesces into one TCP segment
       // without allocating a concatenated buffer.
-      socket.cork();
-      socket.write(len);
-      socket.write(msgBuf);
-      socket.uncork();
+      if (typeof socket.cork === 'function') {
+        socket.cork();
+        socket.write(len);
+        socket.write(msgBuf);
+        socket.uncork();
+      } else {
+        socket.write(Buffer.concat([len, msgBuf]));
+      }
     });
   });
 }
@@ -1785,10 +1789,14 @@ async function forwardDot(
     socket.on('secureConnect', () => {
       const len = Buffer.alloc(2);
       len.writeUInt16BE(msgBuf.length, 0);
-      socket.cork();
-      socket.write(len);
-      socket.write(msgBuf);
-      socket.uncork();
+      if (typeof socket.cork === 'function') {
+        socket.cork();
+        socket.write(len);
+        socket.write(msgBuf);
+        socket.uncork();
+      } else {
+        socket.write(Buffer.concat([len, msgBuf]));
+      }
     });
   });
 }
@@ -2621,7 +2629,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
         const localResp = buildLocalAnswerResponse(query, name, qtype, rewrite.target);
         if (localResp) {
           const exactClient = findExactClientIndexed(clientIndex, clientIp);
-          const subnetClient = exactClient ? null : findBestCidrClientIndexed(clientIndex, clientIp);
+          const subnetClient = findBestCidrClientIndexed(clientIndex, clientIp);
           const effectiveClient = exactClient ?? subnetClient;
           const clientName = effectiveClient?.name ?? 'Unknown';
           const answerIps = extractAnswerIpsFromDnsResponse(localResp);
@@ -2641,7 +2649,7 @@ export async function startDnsServer(config: AppConfig, db: Db): Promise<{ close
       }
 
       const exactClient = findExactClientIndexed(clientIndex, clientIp);
-      const subnetClient = exactClient ? null : findBestCidrClientIndexed(clientIndex, clientIp);
+      const subnetClient = findBestCidrClientIndexed(clientIndex, clientIp);
       const client = exactClient ?? subnetClient;
       const clientName = client?.name ?? 'Unknown';
 
