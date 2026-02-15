@@ -20,10 +20,30 @@ export function startMaintenanceJobs(config: AppConfig, db: Db): MaintenanceHand
   const runOnce = async () => {
     try {
       // Best-effort: delete old query logs to prevent unbounded DB growth.
+      // Delete in batches to avoid long-running transactions and WAL pressure.
       if (retentionDays > 0) {
-        await db.pool.query(`DELETE FROM query_logs WHERE ts < NOW() - ($1::text || ' days')::interval`, [
-          String(retentionDays)
-        ]);
+        const BATCH_SIZE = 10_000;
+        let totalDeleted = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const res = await db.pool.query(
+            `DELETE FROM query_logs
+             WHERE id IN (
+               SELECT id FROM query_logs
+               WHERE ts < NOW() - ($1::text || ' days')::interval
+               LIMIT $2
+             )`,
+            [String(retentionDays), BATCH_SIZE]
+          );
+          const deleted = Number(res.rowCount ?? 0);
+          totalDeleted += deleted;
+          if (deleted < BATCH_SIZE) break;
+          // Yield to the event loop between batches.
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        if (totalDeleted > 0) {
+          console.info(`[maintenance] purged ${totalDeleted} expired query logs`);
+        }
       }
 
       // Keep ignored anomalies bounded too (matches UI behavior).
