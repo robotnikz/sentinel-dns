@@ -3,10 +3,11 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
+      day-of-month: "1"
       time: "06:00"
-    open-pull-requests-limit: 5
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 2
     # Stability-first: avoid big-bang toolchain upgrades on the default branch.
     ignore:
       - dependency-name: "tailwindcss"
@@ -24,38 +25,19 @@ updates:
       - dependency-name: "react-dom"
         update-types: ["version-update:semver-major"]
     groups:
-      frontend-runtime:
-        dependency-type: "production"
+      all-non-major:
+        update-types: ["minor", "patch"]
         patterns:
-          - "@google/genai"
-          - "react"
-          - "react-dom"
-          - "lucide-react"
-          - "recharts"
-          - "d3-*"
-          - "topojson-client"
-          - "world-atlas"
-      frontend-tooling-patch:
-        dependency-type: "development"
-        update-types: ["patch"]
-        patterns:
-          - "vite"
-          - "@vitejs/*"
-          - "vitest"
-          - "@vitest/*"
-          - "typescript"
-          - "tailwindcss"
-          - "postcss"
-          - "autoprefixer"
-          - "@types/node"
+          - "*"
 
   - package-ecosystem: "npm"
     directory: "/server"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
+      day-of-month: "1"
       time: "06:00"
-    open-pull-requests-limit: 5
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 2
     # Stability-first: block major runtime/tooling jumps; prefer small, reviewed steps.
     ignore:
       - dependency-name: "fastify"
@@ -69,31 +51,19 @@ updates:
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
     groups:
-      server-runtime:
-        dependency-type: "production"
+      all-non-major:
+        update-types: ["minor", "patch"]
         patterns:
-          - "fastify"
-          - "@fastify/*"
-          - "dotenv"
-          - "maxmind"
-          - "zod"
-          - "tar"
-      server-tooling-patch:
-        dependency-type: "development"
-        update-types: ["patch"]
-        patterns:
-          - "typescript"
-          - "@types/node"
-          - "vitest"
-          - "@vitest/*"
+          - "*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
+      day-of-month: "1"
       time: "06:00"
-    open-pull-requests-limit: 10
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 2
     groups:
       github-actions:
         patterns:
@@ -102,10 +72,11 @@ updates:
   - package-ecosystem: "docker"
     directory: "/docker/single"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
+      day-of-month: "1"
       time: "06:00"
-    open-pull-requests-limit: 2
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 1
     # Prefer LTS runtime changes to be handled manually with full smoke/e2e testing.
     ignore:
       - dependency-name: "node"
