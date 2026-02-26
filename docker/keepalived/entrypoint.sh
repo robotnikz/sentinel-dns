@@ -138,4 +138,23 @@ while true; do
   sleep 5
 done
 
-exec keepalived --dont-fork --log-console -f "$CONF_DIR/keepalived.conf"
+# Run keepalived and keep netinfo fresh in the background.
+# The backend uses netinfo.json freshness as a signal that the HA sidecar is deployed.
+keepalived --dont-fork --log-console -f "$CONF_DIR/keepalived.conf" &
+KEEPALIVED_PID="$!"
+
+term_handler() {
+  if [ -n "${KEEPALIVED_PID:-}" ]; then
+    kill "$KEEPALIVED_PID" 2>/dev/null || true
+  fi
+  exit 0
+}
+
+trap term_handler INT TERM
+
+while kill -0 "$KEEPALIVED_PID" 2>/dev/null; do
+  write_netinfo || true
+  sleep 5
+done
+
+wait "$KEEPALIVED_PID"
