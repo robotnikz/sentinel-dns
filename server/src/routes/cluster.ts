@@ -17,7 +17,10 @@ const HA_NETINFO_FRESH_MS = 30_000;
 function isFreshFile(p: string, maxAgeMs: number): boolean {
   try {
     const st = fs.statSync(p);
-    return Date.now() - st.mtimeMs <= maxAgeMs;
+    const ageMs = Date.now() - st.mtimeMs;
+    // Guard against clock skew / copied volumes where mtime may be in the future.
+    // Future timestamps should not keep HA marked "available" indefinitely.
+    return ageMs >= 0 && ageMs <= maxAgeMs;
   } catch {
     return false;
   }
