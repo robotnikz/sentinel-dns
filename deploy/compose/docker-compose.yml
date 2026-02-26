@@ -28,40 +28,64 @@ services:
     volumes:
       # Persistent storage for Postgres data, settings, secrets, and the GeoIP database.
       - sentinel-data:/data
-    # Required for embedded Tailscale (VPN / exit-node mode).
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    # Required for forwarding traffic when tailscale is acting as an exit node. (full traffic via Tailscale VPN)
-    sysctls:
-      net.ipv4.ip_forward: "1"
-      net.ipv6.conf.all.forwarding: "1"
+
+    # --------------------------------------------------------------------------
+    # Optional feature: Tailscale remote access (embedded tailscaled)
+    # --------------------------------------------------------------------------
+    # Enable this when you want to reach the Web UI / API over your tailnet,
+    # or use Sentinel as a tailnet DNS nameserver.
+    #
+    # Required for *any* Tailscale functionality in Docker:
+    # - CAP_NET_ADMIN
+    # - /dev/net/tun
+    #
+    # Uncomment the block below to enable Tailscale.
+    #
+    # cap_add:
+    #   - NET_ADMIN
+    # devices:
+    #   - /dev/net/tun:/dev/net/tun
+    #
+    # Optional: Exit Node / subnet routes
+    # If Tailscale is acting as an exit node (or advertising subnet routes),
+    # you typically also need IP forwarding. Uncomment as needed.
+    #
+    # sysctls:
+    #   net.ipv4.ip_forward: "1"
+    #   net.ipv6.conf.all.forwarding: "1"
     restart: unless-stopped
 
-  # Optional HA sidecar (VRRP/VIP via keepalived)
-  # - Always included so users can enable HA from the UI without editing compose files.
-  # - Does nothing until the UI writes /data/sentinel/ha/config.json (enabled=true).
-  # - Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
-  keepalived:
-    # Included by default so a simple `docker compose up -d` deploys everything.
-    # The container stays idle until the UI enables VIP failover (writes /data/sentinel/ha/config.json).
-    image: ghcr.io/robotnikz/sentinel-dns-keepalived:latest
-    container_name: sentinel-keepalived
-    network_mode: host
-    restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-      - NET_BROADCAST
-    environment:
-      - DATA_DIR=/data
-      - HA_CONFIG_FILE=/data/sentinel/ha/config.json
-      - HA_ROLE_FILE=/data/sentinel/cluster_role
-      - HA_NETINFO_FILE=/data/sentinel/ha/netinfo.json
-      - HA_READY_URL=http://127.0.0.1:8080/api/cluster/ready
-    volumes:
-      - sentinel-data:/data
+  # --------------------------------------------------------------------------
+  # Optional feature: HA / VIP failover (keepalived sidecar)
+  # --------------------------------------------------------------------------
+  # Enable this when you want two Sentinel nodes with a shared Virtual IP (VIP)
+  # and automatic failover on your LAN.
+  #
+  # Notes:
+  # - Linux only (requires host networking + network capabilities).
+  # - The keepalived container writes /data/sentinel/ha/netinfo.json so the UI can
+  #   detect HA availability and guide setup.
+  # - HA does nothing until you configure/enable it in the UI (writes /data/sentinel/ha/config.json).
+  #
+  # Uncomment the whole service below to enable keepalived/HA.
+  #
+  # keepalived:
+  #   image: ghcr.io/robotnikz/sentinel-dns-keepalived:latest
+  #   container_name: sentinel-keepalived
+  #   network_mode: host
+  #   restart: unless-stopped
+  #   cap_add:
+  #     - NET_ADMIN
+  #     - NET_RAW
+  #     - NET_BROADCAST
+  #   environment:
+  #     - DATA_DIR=/data
+  #     - HA_CONFIG_FILE=/data/sentinel/ha/config.json
+  #     - HA_ROLE_FILE=/data/sentinel/cluster_role
+  #     - HA_NETINFO_FILE=/data/sentinel/ha/netinfo.json
+  #     - HA_READY_URL=http://127.0.0.1:8080/api/cluster/ready
+  #   volumes:
+  #     - sentinel-data:/data
 
 volumes:
   sentinel-data:
