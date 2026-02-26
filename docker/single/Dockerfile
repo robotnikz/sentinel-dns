@@ -75,8 +75,9 @@ COPY docker/single/unbound.conf /etc/unbound/unbound.conf
 
 # Supervisor config + entrypoint
 COPY docker/single/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/single/tailscaled-wrapper.sh /usr/local/bin/tailscaled-wrapper.sh
 COPY docker/single/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh /usr/local/bin/tailscaled-wrapper.sh
 
 # Data dirs
 VOLUME ["/data"]
