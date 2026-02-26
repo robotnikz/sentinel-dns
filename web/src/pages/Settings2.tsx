@@ -33,6 +33,7 @@ type GeoIpStatus = {
 
 type TailscaleStatus = {
   supported: boolean;
+  available?: boolean;
   running: boolean;
   backendState?: string;
   hasAuthKey?: boolean;
@@ -144,6 +145,7 @@ const Settings2: React.FC<{
 
   // Tailscale
   const [tailscaleStatus, setTailscaleStatus] = useState<TailscaleStatus | null>(null);
+  const [tailscaleAvailable, setTailscaleAvailable] = useState<boolean | null>(null);
   const [tailscaleHostname, setTailscaleHostname] = useState('');
   const [tailscaleAuthKey, setTailscaleAuthKey] = useState('');
   const [tailscaleAdvertiseExitNode, setTailscaleAdvertiseExitNode] = useState(false);
@@ -388,6 +390,7 @@ const Settings2: React.FC<{
       if (res.ok && data?.supported) {
         const s = data as TailscaleStatus;
         setTailscaleStatus(s);
+        setTailscaleAvailable((s as any)?.available === false ? false : true);
         setTailscaleHostname((prev) => {
           if (prev.trim()) return prev;
           const hn = String(s?.self?.hostName ?? '').trim();
@@ -404,12 +407,20 @@ const Settings2: React.FC<{
         return s;
       }
       setTailscaleStatus(null);
+      setTailscaleAvailable(null);
       return null;
     } catch {
       setTailscaleStatus(null);
+      setTailscaleAvailable(null);
       return null;
     }
   };
+
+  // If Tailscale isn't enabled in this deployment, hide the entire tab.
+  // If the user is currently on that tab (e.g. from a preset), bounce to a safe default.
+  useEffect(() => {
+    if (tailscaleAvailable === false && tab === 'remote') setTab('general');
+  }, [tailscaleAvailable, tab]);
 
   const loadDiscordWebhook = async (): Promise<void> => {
     try {
@@ -1245,7 +1256,7 @@ const Settings2: React.FC<{
   const tabs = [
     { id: 'general' as const, label: 'AI Keys', icon: Sparkles },
     { id: 'geoip' as const, label: 'GeoIP / World Map', icon: Globe },
-    { id: 'remote' as const, label: 'Tailscale', icon: Network },
+    ...(tailscaleAvailable === false ? [] : [{ id: 'remote' as const, label: 'Tailscale', icon: Network }]),
     { id: 'notifications' as const, label: 'Notifications', icon: Bell },
     { id: 'system' as const, label: 'System Status', icon: Activity },
     { id: 'maintenance' as const, label: 'Maintenance', icon: Trash2 }
@@ -1490,7 +1501,7 @@ const Settings2: React.FC<{
           </div>
         )}
 
-        {tab === 'remote' && (
+        {tab === 'remote' && tailscaleAvailable !== false && (
           <div className="space-y-6">
             <div className="dashboard-card p-6 rounded-lg">
               <h2 className="text-white font-bold text-lg flex items-center gap-2">

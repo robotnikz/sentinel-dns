@@ -199,4 +199,73 @@ describe('Sidebar', () => {
     fireEvent.click(overview);
     expect(setActivePage).toHaveBeenCalledWith('dashboard');
   });
+
+  it('hides Cluster / HA menu item when cluster is disabled', async () => {
+    mockFetchOnceJson({
+      '/api/health': { ok: true },
+      '/api/version': { version: '0.0.0-test' },
+      '/api/metrics/summary?hours=24': {
+        windowHours: 24,
+        totalQueries: 10,
+        blockedQueries: 1,
+        activeClients: 2
+      },
+      '/api/cluster/peer-status': {
+        ok: true,
+        clusterEnabled: false,
+        haAvailable: false,
+        local: { reachable: true, nodeId: 'n1', ready: { ok: true, configuredRole: 'standalone', role: 'standalone', lastSync: null } },
+        peers: []
+      }
+    });
+
+    render(
+      <Sidebar
+        activePage="dashboard"
+        setActivePage={() => undefined}
+        isCollapsed={false}
+        toggleSidebar={() => undefined}
+      />
+    );
+
+    // Wait for the async system status to resolve.
+    expect(await screen.findByText('Queries (24h)')).toBeInTheDocument();
+
+    // System status still shows cluster disabled, but the footer menu entry is hidden.
+    expect(screen.getByText('Cluster')).toBeInTheDocument();
+    expect(screen.getByText('Disabled')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cluster / HA' })).not.toBeInTheDocument();
+  });
+
+  it('shows Cluster / HA menu item when HA is available but not yet enabled', async () => {
+    mockFetchOnceJson({
+      '/api/health': { ok: true },
+      '/api/version': { version: '0.0.0-test' },
+      '/api/metrics/summary?hours=24': {
+        windowHours: 24,
+        totalQueries: 10,
+        blockedQueries: 1,
+        activeClients: 2
+      },
+      '/api/cluster/peer-status': {
+        ok: true,
+        clusterEnabled: false,
+        haAvailable: true,
+        local: { reachable: true, nodeId: 'n1', ready: { ok: true, configuredRole: 'standalone', role: 'standalone', lastSync: null } },
+        peers: []
+      }
+    });
+
+    render(
+      <Sidebar
+        activePage="dashboard"
+        setActivePage={() => undefined}
+        isCollapsed={false}
+        toggleSidebar={() => undefined}
+      />
+    );
+
+    expect(await screen.findByText('Queries (24h)')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cluster / HA' })).toBeInTheDocument();
+  });
 });

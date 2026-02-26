@@ -22,6 +22,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
     updatedAt?: string;
     error?: string;
     cluster?: {
+      available: boolean;
       enabled: boolean;
       leader: { state: 'active' | 'standby' | 'offline' | 'unknown'; title: string };
       follower: { state: 'active' | 'standby' | 'offline' | 'unknown'; title: string };
@@ -54,7 +55,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
 
         const computeCluster = (): SystemStatus['cluster'] | undefined => {
           const enabled = Boolean(cluster?.clusterEnabled);
-          if (!enabled) return { enabled: false, leader: { state: 'unknown', title: 'Cluster disabled' }, follower: { state: 'unknown', title: 'Cluster disabled' } };
+          const available = Boolean(cluster?.haAvailable) || enabled;
+          if (!enabled) return { available, enabled: false, leader: { state: 'unknown', title: 'Cluster disabled' }, follower: { state: 'unknown', title: 'Cluster disabled' } };
 
           const localReady = cluster?.local?.ready;
           const peerReadies = Array.isArray(cluster?.peers) ? cluster.peers : [];
@@ -101,7 +103,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
             if (localCfg === 'follower') Object.assign(leader, { state: 'unknown' as const, title: 'No peer configured' });
           }
 
-          return { enabled: true, leader, follower };
+          return { available, enabled: true, leader, follower };
         };
 
         const clusterUi = computeCluster();
@@ -232,6 +234,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
 
         <div className="h-px bg-[#27272a] my-2"></div>
 
+        {systemStatus.cluster?.available ? (
           <button
             onClick={() => setActivePage('cluster')}
             title={isCollapsed ? "Cluster / HA" : undefined}
@@ -244,6 +247,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage, isCollapse
             <Globe className={`w-4 h-4 transition-colors ${activePage === 'cluster' ? 'text-white' : 'text-zinc-500 group-hover:text-zinc-400'}`} />
             {!isCollapsed && <span className="font-medium animate-fade-in">Cluster / HA</span>}
           </button>
+        ) : null}
 
         <button
            onClick={() => setActivePage('settings')}
