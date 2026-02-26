@@ -6,6 +6,7 @@ CONFIG_FILE="${HA_CONFIG_FILE:-${DATA_DIR}/sentinel/ha/config.json}"
 NETINFO_FILE="${HA_NETINFO_FILE:-${DATA_DIR}/sentinel/ha/netinfo.json}"
 READY_URL="${HA_READY_URL:-http://127.0.0.1:8080/api/cluster/ready}"
 ROLE_FILE="${HA_ROLE_FILE:-${DATA_DIR}/sentinel/cluster_role}"
+NETINFO_REFRESH_SEC="${NETINFO_REFRESH_SEC:-5}"
 
 CONF_DIR="/etc/keepalived"
 mkdir -p "$CONF_DIR"
@@ -135,7 +136,26 @@ while true; do
     break
   fi
   write_netinfo || true
-  sleep 5
+  sleep "$NETINFO_REFRESH_SEC"
 done
 
-exec keepalived --dont-fork --log-console -f "$CONF_DIR/keepalived.conf"
+# Run keepalived and keep netinfo fresh in the background.
+# The backend uses netinfo.json freshness as a signal that the HA sidecar is deployed.
+keepalived --dont-fork --log-console -f "$CONF_DIR/keepalived.conf" &
+KEEPALIVED_PID="$!"
+
+term_handler() {
+  if [ -n "${KEEPALIVED_PID:-}" ]; then
+    kill "$KEEPALIVED_PID" 2>/dev/null || true
+  fi
+  exit 0
+}
+
+trap term_handler INT TERM
+
+while kill -0 "$KEEPALIVED_PID" 2>/dev/null; do
+  write_netinfo || true
+  sleep "$NETINFO_REFRESH_SEC"
+done
+
+wait "$KEEPALIVED_PID"

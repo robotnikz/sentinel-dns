@@ -109,7 +109,15 @@ Not sure which Compose file to use? See [deploy/compose/README.md](deploy/compos
 > [!TIP]
 > For production, pin a version tag (instead of `latest`) so upgrades/rollbacks are explicit.
 
-**Fastest path:** use the repo’s compose file (it already includes the optional keepalived sidecar).
+**Fastest path:** use the repo’s compose file. It runs **Sentinel only** by default.
+
+- Want **Tailscale**? Uncomment the marked block under `sentinel`.
+- Want **HA/VIP failover** (keepalived)? Uncomment the `keepalived` service.
+
+The Web UI adapts automatically:
+
+- If Tailscale isn’t enabled in your deployment, the Tailscale/Remote UI is hidden.
+- If keepalived/HA isn’t deployed, the “Cluster / HA” navigation entry is hidden.
 
 ```yaml
 # deploy/compose/docker-compose.yml
@@ -143,39 +151,43 @@ services:
     volumes:
       # Persistent storage for Postgres data, settings, secrets, and the GeoIP database.
       - sentinel-data:/data
-    # Required for embedded Tailscale (VPN / exit-node mode).
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    # Required for forwarding traffic when tailscale is acting as an exit node. (full traffic via Tailscale VPN)
-    sysctls:
-      net.ipv4.ip_forward: "1"
-      net.ipv6.conf.all.forwarding: "1"
+
+    # --------------------------------------------------------------------------
+    # Optional feature: Tailscale remote access (embedded tailscaled)
+    # --------------------------------------------------------------------------
+    # Uncomment the block below to enable Tailscale.
+    # cap_add:
+    #   - NET_ADMIN
+    # devices:
+    #   - /dev/net/tun:/dev/net/tun
+    #
+    # Optional: Exit Node / subnet routes (uncomment as needed)
+    # sysctls:
+    #   net.ipv4.ip_forward: "1"
+    #   net.ipv6.conf.all.forwarding: "1"
     restart: unless-stopped
 
-  # Optional HA sidecar (VRRP/VIP via keepalived)
-  keepalived:
-    # YOU DON'T NEED TO DEPLOY keepalived IF YOU DON'T PLAN TO USE HA
-    # Included by default so a simple `docker compose up -d` deploys everything.
-    # The container stays idle until the UI enables VIP failover (writes /data/sentinel/ha/config.json).
-    # Requires Linux host networking and capabilities to add/remove the VIP on your LAN interface.
-    image: ghcr.io/robotnikz/sentinel-dns-keepalived:latest
-    container_name: sentinel-keepalived
-    network_mode: host
-    restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-      - NET_BROADCAST
-    environment:
-      - DATA_DIR=/data
-      - HA_CONFIG_FILE=/data/sentinel/ha/config.json
-      - HA_ROLE_FILE=/data/sentinel/cluster_role
-      - HA_NETINFO_FILE=/data/sentinel/ha/netinfo.json
-      - HA_READY_URL=http://127.0.0.1:8080/api/cluster/ready
-    volumes:
-      - sentinel-data:/data
+  # --------------------------------------------------------------------------
+  # Optional feature: HA / VIP failover (keepalived sidecar)
+  # --------------------------------------------------------------------------
+  # Uncomment the whole service below to enable keepalived/HA.
+  # keepalived:
+  #   image: ghcr.io/robotnikz/sentinel-dns-keepalived:latest
+  #   container_name: sentinel-keepalived
+  #   network_mode: host
+  #   restart: unless-stopped
+  #   cap_add:
+  #     - NET_ADMIN
+  #     - NET_RAW
+  #     - NET_BROADCAST
+  #   environment:
+  #     - DATA_DIR=/data
+  #     - HA_CONFIG_FILE=/data/sentinel/ha/config.json
+  #     - HA_ROLE_FILE=/data/sentinel/cluster_role
+  #     - HA_NETINFO_FILE=/data/sentinel/ha/netinfo.json
+  #     - HA_READY_URL=http://127.0.0.1:8080/api/cluster/ready
+  #   volumes:
+  #     - sentinel-data:/data
 
 volumes:
   sentinel-data:
@@ -193,7 +205,9 @@ curl.exe -fsSL -o docker-compose.yml https://raw.githubusercontent.com/robotnikz
 docker compose up -d
 ```
 
-VIP/HA failover (keepalived) is included by default in that compose file. Enable it in the UI (Cluster / HA) after startup.
+If you want HA/VIP failover, uncomment `keepalived` in your compose file and then configure it in the UI (“Cluster / HA”) after startup.
+
+If you want Tailscale remote access, uncomment the marked `cap_add`/`devices` block under `sentinel` and then configure it in the UI.
 
 The source of truth is always [deploy/compose/docker-compose.yml](deploy/compose/docker-compose.yml).
 

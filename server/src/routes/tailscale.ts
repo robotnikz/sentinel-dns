@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
 import { promisify } from 'node:util';
 
 import type { AppConfig } from '../config.js';
@@ -11,6 +12,24 @@ import 'fastify-rate-limit';
 const execFileAsync = promisify(execFile);
 
 const TS_SOCKET = '/var/run/tailscale/tailscaled.sock';
+const TUN_DEV = '/dev/net/tun';
+
+function detectTailscaleAvailable(): boolean {
+  // Compose-controlled enablement signal:
+  // - If the user did NOT deploy Tailscale support, the container typically won't have /dev/net/tun.
+  // - If tailscaled is running, the socket should exist.
+  try {
+    if (fs.existsSync(TUN_DEV)) return true;
+  } catch {
+    // ignore
+  }
+  try {
+    if (fs.existsSync(TS_SOCKET)) return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
 
 async function runTailscale(
   args: string[],
@@ -119,6 +138,21 @@ export async function registerTailscaleRoutes(app: FastifyInstance, config: AppC
       await requireAdmin(db, request);
 
     const hasAuthKey = await hasSecret(db, 'tailscale_auth_key');
+    const available = detectTailscaleAvailable();
+
+    // If Tailscale isn't enabled in this deployment (compose didn't grant /dev/net/tun / NET_ADMIN),
+    // hide Tailscale UI elements by exposing a deterministic capability flag.
+    if (!available) {
+      reply.code(200);
+      return {
+        supported: true,
+        available: false,
+        running: false,
+        error: 'TAILSCALE_DISABLED',
+        message: 'Tailscale is not enabled in this deployment. Enable /dev/net/tun and NET_ADMIN in docker-compose to use Tailscale remote access.',
+        hasAuthKey
+      };
+    }
 
     const statusRes = await runTailscale(['status', '--json']);
     if (!statusRes.ok) {
@@ -127,6 +161,7 @@ export async function registerTailscaleRoutes(app: FastifyInstance, config: AppC
       reply.code(200);
       return {
         supported: true,
+        available: true,
         running: false,
         error: 'TAILSCALE_UNAVAILABLE',
         message: 'tailscale status failed. Is tailscaled running with /dev/net/tun and NET_ADMIN? Check container logs for details.',
@@ -149,6 +184,7 @@ export async function registerTailscaleRoutes(app: FastifyInstance, config: AppC
 
       return {
         supported: true,
+        available: true,
         running: true,
         backendState,
         hasAuthKey,

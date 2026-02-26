@@ -51,6 +51,15 @@ const App: React.FC = () => {
   const [pauseBusy, setPauseBusy] = useState(false);
   const [pauseError, setPauseError] = useState('');
   const [localConfiguredRole, setLocalConfiguredRole] = useState<'standalone' | 'leader' | 'follower' | null>(null);
+  const [clusterUi, setClusterUi] = useState<{ known: boolean; available: boolean; enabled: boolean }>({
+    known: false,
+    available: false,
+    enabled: false
+  });
+  const [tailscaleUi, setTailscaleUi] = useState<{ known: boolean; available: boolean }>({
+    known: false,
+    available: false
+  });
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [authGate, setAuthGate] = useState<'loading' | 'open' | 'closed'>('loading');
   const [authUsername, setAuthUsername] = useState<string>('');
@@ -242,6 +251,10 @@ const App: React.FC = () => {
         const data = await res.json().catch(() => null);
         if (cancelled || !data || typeof data !== 'object') return;
 
+        const clusterEnabled = Boolean((data as any)?.clusterEnabled);
+        const haAvailable = Boolean((data as any)?.haAvailable);
+        setClusterUi({ known: true, enabled: clusterEnabled, available: haAvailable || clusterEnabled });
+
         const role = String((data as any)?.local?.ready?.configuredRole || 'standalone');
         if (role === 'leader' || role === 'follower' || role === 'standalone') {
           setLocalConfiguredRole(role);
@@ -260,6 +273,37 @@ const App: React.FC = () => {
       clearInterval(t);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshTailscaleUi = async () => {
+      try {
+        const res = await fetch('/api/tailscale/status', { headers: { Accept: 'application/json' } });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (cancelled || !data || typeof data !== 'object') return;
+        setTailscaleUi({ known: true, available: Boolean((data as any)?.available) });
+      } catch {
+        // ignore
+      }
+    };
+
+    refreshTailscaleUi();
+    const t = setInterval(refreshTailscaleUi, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Route guard: if HA is not available (and not already enabled), don't allow opening the Cluster page.
+    if (!clusterUi.known) return;
+    if (activePage !== 'cluster') return;
+    if (clusterUi.available) return;
+    setActivePage('dashboard');
+  }, [activePage, clusterUi.known, clusterUi.available]);
 
   useEffect(() => {
     if (!pauseMenuOpen) return;
@@ -477,7 +521,10 @@ const App: React.FC = () => {
       case 'blocking': return <Blocking />;
       case 'dns': return <DnsSettings />;
       case 'settings': return <Settings presetTab={settingsTabPreset} onPresetConsumed={() => setSettingsTabPreset(null)} />;
-      case 'cluster': return <Cluster />;
+      case 'cluster': {
+        if (clusterUi.known && !clusterUi.available) return <Dashboard />;
+        return <Cluster />;
+      }
       default: return null;
     }
   };
@@ -520,7 +567,12 @@ const App: React.FC = () => {
     { id: 'settings.notifications', label: 'Settings: Notifications', page: 'settings', settingsTabPreset: 'notifications', keywords: ['discord', 'webhook', 'alerts', 'events', 'bell'] },
     { id: 'settings.system', label: 'Settings: System Status', page: 'settings', settingsTabPreset: 'system', keywords: ['system', 'status', 'cpu', 'memory', 'disk', 'container', 'health'] },
     { id: 'settings.maintenance', label: 'Settings: Maintenance', page: 'settings', settingsTabPreset: 'maintenance', keywords: ['maintenance', 'clear logs', 'flush logs', 'query logs'] }
-  ];
+  ].filter((t) => {
+    // Hide capability-dependent items when we can conclusively determine they are unavailable.
+    if (t.id === 'cluster' && (!clusterUi.known || !clusterUi.available)) return false;
+    if (t.id === 'settings.remote' && (!tailscaleUi.known || !tailscaleUi.available)) return false;
+    return true;
+  });
 
   const filteredTargets = (() => {
     const q = searchQuery.trim().toLowerCase();

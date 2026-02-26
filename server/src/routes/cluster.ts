@@ -12,6 +12,17 @@ import type { ClusterExportSnapshot } from '../cluster/types.js';
 import { effectiveRole, readRoleOverride } from '../cluster/role.js';
 import 'fastify-rate-limit';
 
+const HA_NETINFO_FRESH_MS = 30_000;
+
+function isFreshFile(p: string, maxAgeMs: number): boolean {
+  try {
+    const st = fs.statSync(p);
+    return Date.now() - st.mtimeMs <= maxAgeMs;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<{ ok: true; data: any } | { ok: false; error: string }> {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
@@ -99,7 +110,9 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
 
     const netinfoPath = path.join(config.DATA_DIR || '/data', 'sentinel', 'ha', 'netinfo.json');
     try {
-      if (!fs.existsSync(netinfoPath)) return { ok: true, netinfo: null };
+      // keepalived refreshes this file periodically; treat stale files as "not available"
+      // so a previous HA deployment doesn't keep HA UI enabled after keepalived is removed.
+      if (!isFreshFile(netinfoPath, HA_NETINFO_FRESH_MS)) return { ok: true, netinfo: null };
       let raw = fs.readFileSync(netinfoPath, 'utf8');
 
       // Strip UTF-8 BOM if present.
@@ -289,6 +302,17 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
   app.get('/api/cluster/peer-status', async () => {
     const status = await getClusterStatus(db);
 
+    // Detect whether the HA sidecar is present. The keepalived container always writes netinfo.json
+    // (even before HA is enabled/configured in the GUI). If the sidecar isn't deployed, this file
+    // won't exist on the shared data volume.
+    const netinfoPath = path.join(config.DATA_DIR || '/data', 'sentinel', 'ha', 'netinfo.json');
+    let haAvailable = false;
+    try {
+      haAvailable = isFreshFile(netinfoPath, HA_NETINFO_FRESH_MS);
+    } catch {
+      haAvailable = false;
+    }
+
     // Mirror the readiness semantics from /api/cluster/ready.
     const clusterEnabled = Boolean(status.config.enabled);
     const configuredRole = status.config.role;
@@ -337,6 +361,7 @@ export async function registerClusterRoutes(app: FastifyInstance, config: AppCon
     return {
       ok: true,
       clusterEnabled,
+      haAvailable,
       local: {
         reachable: true,
         nodeId: status.nodeId,
