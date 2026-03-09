@@ -36,7 +36,7 @@ jobs:
           npm --prefix server audit --json > npm-audit-server.json || true
 
       - name: Upload npm audit reports
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: npm-audit
           path: |
@@ -54,7 +54,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Trivy filesystem scan (SARIF)
-        uses: aquasecurity/trivy-action@0.34.1
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type: fs
           scan-ref: .
