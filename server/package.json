@@ -29,7 +29,7 @@
     "maxmind": "^5.0.5",
     "pg": "^8.18.0",
     "tar": "^7.5.9",
-    "undici": "^7.22.0",
+    "undici": "^7.24.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
