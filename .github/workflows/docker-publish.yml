@@ -102,15 +102,15 @@ jobs:
 
       - name: Set up QEMU
         if: steps.rel.outputs.released == 'true'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         if: steps.rel.outputs.released == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log into registry ${{ env.REGISTRY }}
         if: steps.rel.outputs.released == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -119,7 +119,7 @@ jobs:
       - name: Extract Docker metadata
         id: meta
         if: steps.rel.outputs.released == 'true'
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -130,7 +130,7 @@ jobs:
       - name: Extract Docker metadata (keepalived)
         id: meta_keepalived
         if: steps.rel.outputs.released == 'true'
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-keepalived
           tags: |
@@ -140,7 +140,7 @@ jobs:
 
       - name: Build and push Docker image
         if: steps.rel.outputs.released == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/single/Dockerfile
@@ -153,7 +153,7 @@ jobs:
 
       - name: Build and push Docker image (keepalived)
         if: steps.rel.outputs.released == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/keepalived/Dockerfile
