@@ -27,14 +27,14 @@
     "fastify": "^5.8.1",
     "ipaddr.js": "^2.2.0",
     "maxmind": "^5.0.5",
-    "pg": "^8.18.0",
+    "pg": "^8.19.0",
     "tar": "^7.5.9",
     "undici": "^7.24.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^25.3.0",
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.18.0",
     "@vitest/coverage-v8": "^4.0.18",
     "vitest": "^4.0.18",
     "tsx": "^4.19.2",
