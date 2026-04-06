@@ -47,7 +47,7 @@
     "@vitest/coverage-v8": "^3.0.7",
     "autoprefixer": "^10.4.27",
     "jsdom": "^29.0.1",
-    "playwright": "^1.50.1",
+    "playwright": "^1.59.1",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.17",
     "typescript": "~5.8.2",
