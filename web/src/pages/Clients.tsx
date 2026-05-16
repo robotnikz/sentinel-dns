@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Smartphone, Laptop, Tv, Gamepad2, Tablet, Search, Shield, Globe, X, Filter, Lock, Skull, Heart, MessageCircle, Play, ShoppingCart, Ban, Grid, HelpCircle, Info, Moon, Clock, Calendar, Check, Pause, ChevronDown, ChevronUp, WifiOff, Power, Youtube, Network, Router, Sliders, Plus, Save, Fingerprint, RefreshCw, Pencil, Trash2 } from 'lucide-react';
+import { Smartphone, Laptop, Tv, Gamepad2, Tablet, Search, Shield, Globe, X, Filter, Lock, Skull, Heart, MessageCircle, Play, ShoppingCart, Ban, Grid, HelpCircle, Info, Moon, Clock, Calendar, Check, Pause, ChevronDown, ChevronUp, WifiOff, Power, Video, Network, Router, Sliders, Plus, Save, Fingerprint, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import { ClientProfile, ContentCategory, AppService, ScheduleModeType, BlocklistMode, Schedule } from '../types';
 import { AppLogo } from '../components/AppLogo';
 import { useClients } from '../contexts/ClientsContext';
@@ -1410,7 +1410,7 @@ const Clients: React.FC = () => {
                                     <div className="p-4 bg-[#18181b] border border-[#27272a] rounded flex items-center justify-between">
                                         <div className="flex items-center gap-4">
                                             <div className={`p-2 rounded-lg ${selectedClient.safeSearch ? 'bg-emerald-500/20 text-emerald-400' : 'bg-zinc-800 text-zinc-500'}`}>
-                                                <Youtube className="w-5 h-5" />
+                                                <Video className="w-5 h-5" />
                                             </div>
                                             <div>
                                                 <div className="text-sm font-bold text-zinc-200">Force SafeSearch</div>
