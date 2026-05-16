@@ -25,15 +25,15 @@
     "server:start": "npm --prefix server run start"
   },
   "dependencies": {
-    "@google/genai": "^1.44.0",
+    "@google/genai": "^1.49.0",
     "d3-geo": "^3.1.1",
     "d3-scale": "^4.0.2",
     "d3-selection": "^3.0.0",
     "d3-zoom": "^3.0.0",
-    "lucide-react": "^0.577.0",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "recharts": "^3.8.0",
+    "lucide-react": "^1.8.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "recharts": "^3.8.1",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2"
   },
